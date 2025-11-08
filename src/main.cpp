@@ -1278,9 +1278,6 @@ void saveState() {
 
     sessionState.begin("session", false); // Open namespace in read/write
     
-    // Save magic value
-    sessionState.putULong("magic", MAGIC_VALUE);
-
     // Save all dynamic state variables
     sessionState.putUChar("state", (uint8_t)currentState);
     sessionState.putULong("lockRemain", lockSecondsRemaining);
@@ -1308,6 +1305,9 @@ void saveState() {
     sessionState.putBytes("delays", channelDelaysRemaining.data(), sizeof(unsigned long) * NUMBER_OF_CHANNELS);
     sessionState.putBytes("rewards", rewardHistory, sizeof(rewardHistory));
     
+    // Save magic value
+    sessionState.putULong("magic", MAGIC_VALUE);
+
     sessionState.end(); // This commits the changes
     
     esp_task_wdt_reset(); // And feed after
