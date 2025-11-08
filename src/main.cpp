@@ -1235,11 +1235,15 @@ void loadState() {
         logMessage(logBuf);
         
         // Handle reboot logic
-        if (currentState == TESTING) {
-            logMessage("Reboot detected during test mode. Resetting to READY.");
-            currentState = READY;
-            testSecondsRemaining = 0;
-            saveState(); // Save the corrected state
+        if (currentState == LOCKED || currentState == COUNTDOWN || currentState == TESTING) {
+            // These are active states. A reboot during them is an abort.
+            logMessage("Reboot detected during active session. Aborting session...");
+            // abortSession() will handle the correct transition:
+            // LOCKED    -> ABORTED (with penalty)
+            // COUNTDOWN -> READY
+            // TESTING   -> READY (via stopTestMode)
+            // It also saves the new state, so we just return.
+            abortSession("Reboot");
             return; 
         }
         
@@ -1249,6 +1253,8 @@ void loadState() {
             return;
         }
 
+        // If we are here, state is READY or ABORTED.
+        // It's safe to resume these states (e.g., continue a penalty timer).
         startTimersForState(currentState); // Resume timers
 
     } else {
