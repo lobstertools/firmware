@@ -1,5 +1,5 @@
 # .github/workflows/build.yml
-name: "PlatformIO Build"
+name: "PlatformIO Build (Prod)"
 
 # Controls when the workflow will run
 on:
@@ -15,14 +15,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-prod:
     # The type of runner that the job will run on
     runs-on: ubuntu-latest
-
+    
     steps:
       # --- 1. Set up the environment ---
       
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      # Checks-out your repository under $GITHUB_WORKSPACE
       - name: "Checkout code"
         uses: actions/checkout@v4
         with:
@@ -40,8 +40,7 @@ jobs:
       - name: "Install PlatformIO Core"
         run: pip install -U platformio
 
-      # (Optional) Cache PlatformIO dependencies to speed up future builds
-      # This caches downloaded platforms, toolchains, and library dependencies
+      # Cache PlatformIO dependencies to speed up future builds
       - name: "Cache PlatformIO dependencies"
         uses: actions/cache@v4
         with:
@@ -52,29 +51,17 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-platformio-
 
-      # (Optional) Install project-specific library dependencies
-      # This is only needed if your project has libraries that are not
-      # managed by the PlatformIO Library Manager in `platformio.ini`
-      # - name: "Install project libraries"
-      #   run: pio lib install
-
-      # --- 3. Build the firmware ---
+      # --- 3. Build the production firmware ---
       
-      # Run the PlatformIO build command
-      # This will build for ALL environments defined in your platformio.ini
-      # If you want to build for a specific one, use: pio run -e esp32dev
-      - name: "Build PlatformIO project"
-        run: pio run
+      # Run the PlatformIO build command for the specific 'esp32_diymore_prod' env
+      - name: "Build Production Firmware (esp32_diymore_prod)"
+        run: pio run -e esp32_diymore_prod
 
-      # --- 4. (Optional) Upload firmware artifact ---
+      # --- 4. Upload production firmware artifact ---
       
-      # This step packages the compiled .bin file and uploads it as an "artifact"
-      # so you can download it from the GitHub Actions run page.
-      #
-      # IMPORTANT: You must change 'your_env_name' to the name of the 
-      # build environment in your `platformio.ini` (e.g., 'esp32dev').
+      # This step packages the compiled .bin file and uploads it
       - name: "Upload firmware artifact"
         uses: actions/upload-artifact@v4
         with:
-          name: firmware
-          path: .pio/build/your_env_name/firmware.bin
+          name: firmware-prod # Changed name for clarity
+          path: .pio/build/esp32_diymore_prod/firmware.bin
