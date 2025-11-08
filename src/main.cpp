@@ -33,7 +33,7 @@
 #include <esp_task_wdt.h>
 #include "time.h"
 #include <OneButton.h>
-#include <JLed.h>
+#include <jled.h>
 
 // --- LIBRARIES FOR STAGE 1, 2, & NVS ---
 #include <Preferences.h>  // For Wi-Fi credentials AND session state
