@@ -438,7 +438,7 @@ void setup() {
 
   #ifdef ONE_BUTTON_PIN
     char btnLog[50];
-    snprintf(btnLog, sizeof(btnLog), "[Enabled] Abort Padel (Pin %d)", ONE_BUTTON_PIN);
+    snprintf(btnLog, sizeof(btnLog), "[Enabled] Abort Pedal (Pin %d)", ONE_BUTTON_PIN);
     logMessage(btnLog);
 
     // Use configurable abort delay from NVS
@@ -447,7 +447,7 @@ void setup() {
     button.setLongPressIntervalMs(abortDelaySeconds * 1000);
     button.attachLongPressStart(handleLongPressStart);
   #else
-    logMessage("[Disabled] Abort Padel");
+    logMessage("[Disabled] Abort Pedal");
   #endif
 
   initializeRelay();
@@ -1007,7 +1007,7 @@ void setupWebServer() {
         features.add("LED_Indicator");
     #endif
     #ifdef ONE_BUTTON_PIN
-        features.add("Abort_Padel");
+        features.add("Abort_Pedal");
     #endif
     
     // Send response
