@@ -1,11 +1,11 @@
-# .github/workflows/build.yml
-name: "PlatformIO Build (Prod)"
+name: "PlatformIO Build & Release"
 
 # Controls when the workflow will run
 on:
   # Triggers the workflow on push events but only for the main/master branch
   push:
     branches: [ "main", "master" ]
+    tags: [ 'v*' ] # Also triggers on any tag starting with 'v'
     
   # Triggers the workflow on pull request events targeted at the main/master branch
   pull_request:
@@ -15,9 +15,15 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-prod:
+  build-and-release:
+    name: "Build and Maybe Release"
     # The type of runner that the job will run on
     runs-on: ubuntu-latest
+    
+    # We need 'contents: write' permission for the 'gh release create' command
+    # to be able to create a release on your behalf.
+    permissions:
+      contents: write
     
     steps:
       # --- 1. Set up the environment ---
@@ -53,15 +59,34 @@ jobs:
 
       # --- 3. Build the production firmware ---
       
-      # Run the PlatformIO build command for the specific 'esp32_diymore_prod' env
       - name: "Build Production Firmware (esp32_diymore_prod)"
         run: pio run -e esp32_diymore_prod
 
-      # --- 4. Upload production firmware artifact ---
+      # --- 4. Create Release (ONLY on tag push) ---
       
-      # This step packages the compiled .bin file and uploads it
-      - name: "Upload firmware artifact"
-        uses: actions/upload-artifact@v4
-        with:
-          name: firmware-prod # Changed name for clarity
-          path: .pio/build/esp32_diymore_prod/firmware.bin
+      - name: "Create GitHub Release"
+        if: github.ref_type == 'tag'
+        env:
+          # The GITHUB_TOKEN is automatically provided by Actions
+          # We just need to pass it to the 'gh' command
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Trigger was a tag push. Creating release for ${{ github.ref_name }}..."
+          
+          # Define the path to the compiled firmware
+          ASSET_PATH=".pio/build/esp32_diymore_prod/firmware.bin"
+          
+          # Safety check to ensure the file exists before creating a release
+          if [ ! -f "$ASSET_PATH" ]; then
+            echo "::error::Build asset not found at $ASSET_PATH"
+            exit 1
+          fi
+          
+          # Use the GitHub CLI to create a new release
+          # It will use the tag name (e.g., "v1.0.1")
+          # It will upload the firmware.bin file as a release asset
+          # It will automatically generate release notes from your PRs
+          gh release create ${{ github.ref_name }} \
+            "$ASSET_PATH" \
+            --title "Release ${{ github.ref_name }}" \
+            --generate-notes
