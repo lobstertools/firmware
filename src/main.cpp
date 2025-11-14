@@ -450,12 +450,13 @@ void setup() {
   #else
     logMessage("[Disabled] Abort Pedal");
   #endif
-
-  initializeRelay();
+ 
   snprintf(logBuf, sizeof(logBuf), "Device has %d channel(s).", NUMBER_OF_CHANNELS);
   logMessage(logBuf);
   channelDelaysRemaining.resize(NUMBER_OF_CHANNELS, 0);
   logMessage("----------------");
+
+  initializeRelay();
 
   #ifdef STATUS_LED_PIN
     setLedPattern(currentState); // Set initial LED pattern
