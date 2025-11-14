@@ -425,11 +425,12 @@ void setup() {
       startBLEProvisioning();
   }
 
+  // Start network services
   initializeTime();
+  startMDNS();
 
   // --- STAGE 2: OPERATIONAL MODE ---
   // If we are here, Wi-Fi is connected.
-
   logMessage("--- Features ---"); 
 
   // --- Load session state from NVS ---
@@ -476,8 +477,6 @@ void setup() {
     sendRelayOffAll(); // Default to off
   }
 
-  // --- START mDNS ---
-  startMDNS();
 
   // --- Start web server and timers ---
   logMessage("Attaching master 1-second ticker.");
