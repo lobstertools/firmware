@@ -462,23 +462,6 @@ void setup() {
     setLedPattern(currentState); // Set initial LED pattern
   #endif
 
-  // --- Relay state check ---
-  // Ensure relays are in the correct state after a reboot
-  if (currentState == LOCKED) {
-    sendRelayOnAll();
-  } else if (currentState == COUNTDOWN) {
-    for (int i = 0; i < NUMBER_OF_CHANNELS; i++) {
-      if (channelDelaysRemaining[i] == 0) {
-        sendRelayOn(i); // Turn on relays whose countdowns already finished
-      }
-    }
-  } else if (currentState == TESTING) {
-      sendRelayOnAll();
-  } else {
-    sendRelayOffAll(); // Default to off
-  }
-
-
   // --- Start web server and timers ---
   logMessage("Attaching master 1-second ticker.");
   oneSecondMasterTicker.attach(1, [](){ g_oneSecondTick = true; });
