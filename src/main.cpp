@@ -407,12 +407,36 @@ void setup() {
   esp_task_wdt_init(WDT_TIMEOUT_SECONDS, true);
   esp_task_wdt_add(NULL);
 
+  logMessage("--- Device Features ---"); 
+
+  initializeChannels();
+
+  snprintf(logBuf, sizeof(logBuf), "Device has %d channel(s).", NUMBER_OF_CHANNELS);
+  logMessage(logBuf);
+
   #ifdef STATUS_LED_PIN
     logMessage("[Enabled] LED Status Indicator");
     pinMode(STATUS_LED_PIN, OUTPUT);
+    setLedPattern(currentState); // Set initial LED pattern
   #else
     logMessage("[Disabled] LED Status Indicator");
   #endif
+
+  #ifdef ONE_BUTTON_PIN
+    char btnLog[50];
+    snprintf(btnLog, sizeof(btnLog), "[Enabled] Abort Pedal (Pin %d)", ONE_BUTTON_PIN);
+    logMessage(btnLog);
+
+    // Use configurable abort delay from NVS
+    snprintf(logBuf, sizeof(logBuf), "Long press (%lu sec) to abort session.", abortDelaySeconds);
+    logMessage(logBuf);
+    button.setLongPressIntervalMs(abortDelaySeconds * 1000);
+    button.attachLongPressStart(handleLongPressStart);
+  #else
+    logMessage("[Disabled] Abort Pedal");
+  #endif
+
+  logMessage("--- /Device Features ---"); 
 
   // --- Wi-Fi Connection Attempt ---
   wifiPreferences.begin("wifi-creds", true); // Open NVS (read-only)
@@ -449,8 +473,6 @@ void setup() {
   startMDNS();
 
   // --- STAGE 2: OPERATIONAL MODE ---
-  // If we are here, Wi-Fi is connected.
-  logMessage("--- Features ---"); 
 
   // --- Load session state from NVS ---
   logMessage("Initializing Session State from NVS...");  
@@ -464,31 +486,6 @@ void setup() {
       logMessage("No valid session data in NVS. Initializing fresh state.");
       resetToReady(); // This saves the new, fresh state
   }
-
-  #ifdef ONE_BUTTON_PIN
-    char btnLog[50];
-    snprintf(btnLog, sizeof(btnLog), "[Enabled] Abort Pedal (Pin %d)", ONE_BUTTON_PIN);
-    logMessage(btnLog);
-
-    // Use configurable abort delay from NVS
-    snprintf(logBuf, sizeof(logBuf), "Long press (%lu sec) to abort session.", abortDelaySeconds);
-    logMessage(logBuf);
-    button.setLongPressIntervalMs(abortDelaySeconds * 1000);
-    button.attachLongPressStart(handleLongPressStart);
-  #else
-    logMessage("[Disabled] Abort Pedal");
-  #endif
- 
-  snprintf(logBuf, sizeof(logBuf), "Device has %d channel(s).", NUMBER_OF_CHANNELS);
-  logMessage(logBuf);
-  channelDelaysRemaining.resize(NUMBER_OF_CHANNELS, 0);
-  logMessage("----------------");
-
-  initializeChannels();
-
-  #ifdef STATUS_LED_PIN
-    setLedPattern(currentState); // Set initial LED pattern
-  #endif
 
   // --- Start web server and timers ---
   logMessage("Attaching master 1-second ticker.");
@@ -526,6 +523,7 @@ void loop() {
 
 /**
  * Initializes all channel pins as outputs.
+ * This MUST be called before loadState() or resetToReady().
  */
 void initializeChannels() {
   logMessage("Channel Module: diymore MOS module");
@@ -682,7 +680,8 @@ void completeSession() {
   penaltySecondsRemaining = 0;
   testSecondsRemaining = 0;
   g_lastKeepAliveTime = 0; // Disarm watchdog
-  for (int i = 0; i < NUMBER_OF_CHANNELS; i++) { channelDelaysRemaining[i] = 0; }
+  
+  channelDelaysRemaining.assign(NUMBER_OF_CHANNELS, 0);
   
   saveState(); 
 }
@@ -706,7 +705,8 @@ void resetToReady() {
   g_lastKeepAliveTime = 0; // Disarm watchdog
   lockSecondsConfig = 0;
   hideTimer = false;
-  for (int i = 0; i < NUMBER_OF_CHANNELS; i++) { channelDelaysRemaining[i] = 0; }
+  
+  channelDelaysRemaining.assign(NUMBER_OF_CHANNELS, 0);
 
   logMessage("Generating new reward code and updating history.");
   // Shift reward history
@@ -1476,7 +1476,7 @@ void saveState() {
     sessionState.putUInt("totalLocked", totalLockedSessionSeconds);
 
     // Save arrays as binary "blobs"
-    channelDelaysRemaining.resize(NUMBER_OF_CHANNELS, 0); // Ensure size
+    channelDelaysRemaining.resize(NUMBER_OF_CHANNELS, 0); 
     sessionState.putBytes("delays", channelDelaysRemaining.data(), sizeof(unsigned long) * NUMBER_OF_CHANNELS);
     sessionState.putBytes("rewards", rewardHistory, sizeof(rewardHistory));
     
