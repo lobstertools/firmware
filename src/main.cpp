@@ -146,7 +146,6 @@ bool logBufferFull = false;
 
 void logMessage(const char* message);
 bool connectToWiFi(const char* ssid, const char* pass);
-void setupWebServer();
 const char* stateToString(SessionState state);
 void resetToReady();
 void completeSession();
@@ -173,6 +172,21 @@ void startMDNS();
 // Byte conversion helpers
 uint16_t bytesToUint16(uint8_t* data);
 uint32_t bytesToUint32(uint8_t* data);
+
+// --- Web Server Prototypes ---
+void setupWebServer();
+void handleRoot(AsyncWebServerRequest *request);
+void handleHealth(AsyncWebServerRequest *request);
+void handleKeepAlive(AsyncWebServerRequest *request);
+void handleStart(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total);
+void handleStartTest(AsyncWebServerRequest *request);
+void handleAbort(AsyncWebServerRequest *request);
+void handleReward(AsyncWebServerRequest *request);
+void handleStatus(AsyncWebServerRequest *request);
+void handleDetails(AsyncWebServerRequest *request);
+void handleLog(AsyncWebServerRequest *request);
+void handleUpdateWifi(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total);
+void handleFactoryReset(AsyncWebServerRequest *request);
 
 
 // =================================================================
@@ -722,159 +736,231 @@ void sendJsonError(AsyncWebServerRequest *request, int code, const String& messa
 
 /**
  * Sets up all API endpoints for the web server.
+ * This function is now just a clean list of routes.
  */
 void setupWebServer() {
  
   // Root endpoint, simple health check.
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(200, "text/plain", String(DEVICE_NAME));
-  });
+  server.on("/", HTTP_GET, handleRoot);
 
   // API: Lightweight health check (GET /health)
-  server.on("/health", HTTP_GET, [](AsyncWebServerRequest *request){
+  server.on("/health", HTTP_GET, handleHealth);
+  
+  // API: Keep-alive endpoint (POST /keepalive)
+  server.on("/keepalive", HTTP_POST, handleKeepAlive);
+
+  // API: Start a new lock session (POST /start)
+  server.on("/start", HTTP_POST,
+      [](AsyncWebServerRequest *request) { // onReq
+          if (request->contentType() != "application/json") {
+              sendJsonError(request, 400, "Invalid Content-Type. Expected application/json");
+              return;
+          }
+          if (currentState != READY) {
+              sendJsonError(request, 409, "Device is not ready.");
+              return;
+          }
+      },
+      NULL, // onUpload
+      handleStart // onBody
+  );
+
+  // API: Start a short test mode (POST /start-test)
+  server.on("/start-test", HTTP_POST, handleStartTest);
+
+  // API: Abort an active session (POST /abort)
+  server.on("/abort", HTTP_POST, handleAbort);
+
+  // API: Get the reward code history (GET /reward)
+  server.on("/reward", HTTP_GET, handleReward);
+  
+  // API: Get the main device status (dynamic data, polled frequently). (GET /status)
+  server.on("/status", HTTP_GET, handleStatus);
+
+  // API: Get the main device details (static data, polled once). (GET /details)
+  server.on("/details", HTTP_GET, handleDetails);
+
+  // API: Get the in-memory log buffer (GET /log)
+  server.on("/log", HTTP_GET, handleLog);
+
+  // API: Update Wi-Fi Credentials (POST /update-wifi)
+  server.on("/update-wifi", HTTP_POST,
+      [](AsyncWebServerRequest *request) { // onReq
+          if (request->contentType() != "application/json") {
+              sendJsonError(request, 400, "Invalid Content-Type. Expected application/json");
+              return;
+          }
+          if (currentState != READY) {
+              logMessage("API: /update-wifi failed. Device is not in READY state.");
+              sendJsonError(request, 409, "Device must be in READY state to update Wi-Fi.");
+              return;
+          }
+      },
+      NULL, // onUpload
+      handleUpdateWifi // onBody
+  );
+
+  // API: Factory reset (POST /factory-reset)
+  server.on("/factory-reset", HTTP_POST, handleFactoryReset);
+}
+
+// =================================================================
+// --- Web Server Handlers ---
+// =================================================================
+
+/**
+ * Handler for GET /
+ */
+void handleRoot(AsyncWebServerRequest *request) {
+    request->send(200, "text/plain", String(DEVICE_NAME));
+}
+
+/**
+ * Handler for GET /health
+ */
+void handleHealth(AsyncWebServerRequest *request) {
     JsonDocument doc;
     doc["status"] = "ok";
     doc["message"] = "Device is reachable.";
     String response;
     serializeJson(doc, response);
     request->send(200, "application/json", response);
-  });
-  
-  // API: Keep-alive endpoint (POST /keepalive)
-  server.on("/keepalive", HTTP_POST, [](AsyncWebServerRequest *request){
+}
+
+/**
+ * Handler for POST /keepalive
+ */
+void handleKeepAlive(AsyncWebServerRequest *request) {
     // Does nothing but return 200, used to keep connection alive
     request->send(200); 
-  });
+}
 
-  // API: Start a new lock session (POST /start)
-  server.on("/start", HTTP_POST,
-      [](AsyncWebServerRequest *request) {
-          // Check for correct content type
-          if (request->contentType() != "application/json") {
-              sendJsonError(request, 400, "Invalid Content-Type. Expected application/json");
-          }
-      },
-      NULL, // onUpload
-      [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-          // Handle JSON body
-          if (index + len != total) {
-              return; // Wait for more data
-          }
-          if (currentState != READY) {
-              sendJsonError(request, 409, "Device is not ready.");
-              return;
-          }
-          JsonDocument doc;
-          DeserializationError error = deserializeJson(doc, (const char*)data, len);
-          if (error) {
-              char logBuf[100];
-              snprintf(logBuf, sizeof(logBuf), "Failed to parse /start JSON: %s", error.c_str());
-              logMessage(logBuf);
-              sendJsonError(request, 400, "Invalid JSON body.");
-              return;
-          }
-          // Validate JSON body using camelCase keys
-          if (!doc["duration"].is<JsonInteger>() || !doc["penaltyDuration"].is<JsonInteger>() || !doc["delays"].is<JsonArray>()) {
-                sendJsonError(request, 400, "Missing required fields: duration, penaltyDuration, delays.");
-              return;
-          }
-          
-          // Read session-specific data from the request
-          unsigned long durationMinutes = doc["duration"];
-          int penaltyMin = doc["penaltyDuration"];
-          hideTimer = doc["hideTimer"] | false; // Default to false if not present
-          
-          // Validate ranges
-          if (durationMinutes < MIN_LOCK_MINUTES || durationMinutes > MAX_LOCK_MINUTES) {
-              sendJsonError(request, 400, "Invalid duration."); return;
-          }
-          if (penaltyMin < MIN_PENALTY_MINUTES || penaltyMin > MAX_PENALTY_MINUTES) {
-              sendJsonError(request, 400, "Invalid penaltyDuration."); return;
-          }
-          JsonArray delays = doc["delays"].as<JsonArray>();
-          if (delays.isNull()) {
-              sendJsonError(request, 400, "Invalid 'delays' field. Must be an array."); return;
-          }
-          if (delays.size() != NUMBER_OF_CHANNELS) {
-              char errBuf[100];
-              snprintf(errBuf, sizeof(errBuf), "Incorrect number of delays. Expected %d, got %d.", NUMBER_OF_CHANNELS, delays.size());
-              sendJsonError(request, 400, errBuf);
-              return;
-          }
+/**
+ * Handler for POST /start (body)
+ */
+void handleStart(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+    // Handle JSON body
+    if (index + len != total) {
+        return; // Wait for more data
+    }
+    
+    // State is already checked in onReq, but as a safeguard:
+    if (currentState != READY) {
+        sendJsonError(request, 409, "Device is not ready.");
+        return;
+    }
+    
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, (const char*)data, len);
+    if (error) {
+        char logBuf[100];
+        snprintf(logBuf, sizeof(logBuf), "Failed to parse /start JSON: %s", error.c_str());
+        logMessage(logBuf);
+        sendJsonError(request, 400, "Invalid JSON body.");
+        return;
+    }
+    // Validate JSON body using camelCase keys
+    if (!doc["duration"].is<JsonInteger>() || !doc["penaltyDuration"].is<JsonInteger>() || !doc["delays"].is<JsonArray>()) {
+          sendJsonError(request, 400, "Missing required fields: duration, penaltyDuration, delays.");
+        return;
+    }
+    
+    // Read session-specific data from the request
+    unsigned long durationMinutes = doc["duration"];
+    int penaltyMin = doc["penaltyDuration"];
+    hideTimer = doc["hideTimer"] | false; // Default to false if not present
+    
+    // Validate ranges
+    if (durationMinutes < MIN_LOCK_MINUTES || durationMinutes > MAX_LOCK_MINUTES) {
+        sendJsonError(request, 400, "Invalid duration."); return;
+    }
+    if (penaltyMin < MIN_PENALTY_MINUTES || penaltyMin > MAX_PENALTY_MINUTES) {
+        sendJsonError(request, 400, "Invalid penaltyDuration."); return;
+    }
+    JsonArray delays = doc["delays"].as<JsonArray>();
+    if (delays.isNull()) {
+        sendJsonError(request, 400, "Invalid 'delays' field. Must be an array."); return;
+    }
+    if (delays.size() != NUMBER_OF_CHANNELS) {
+        char errBuf[100];
+        snprintf(errBuf, sizeof(errBuf), "Incorrect number of delays. Expected %d, got %d.", NUMBER_OF_CHANNELS, delays.size());
+        sendJsonError(request, 400, errBuf);
+        return;
+    }
 
-          // Apply any pending payback time from previous sessions
-          // This uses the 'paybackAccumulated' value loaded from NVS
-          unsigned long paybackInSeconds = paybackAccumulated;
-          if (paybackInSeconds > 0) {
-              logMessage("Applying pending payback time to this session.");
-          }
+    // Apply any pending payback time from previous sessions
+    unsigned long paybackInSeconds = paybackAccumulated;
+    if (paybackInSeconds > 0) {
+        logMessage("Applying pending payback time to this session.");
+    }
 
-          // Save configs
-          lockSecondsConfig = (durationMinutes * 60) + paybackInSeconds;
-          penaltySecondsConfig = penaltyMin * 60;
-          unsigned long maxDelay = 0;
-          
-          // Log and set delays
-          char delayLog[MAX_CHANNELS * 7 + 3];
-          char tempNum[8];
-          strcpy(delayLog, "[");
-          int i = 0;
-          for(JsonVariant d : delays) {
-              unsigned long delay = d.as<unsigned long>();
-              channelDelaysRemaining[i] = delay;
-              if (delay > maxDelay) maxDelay = delay;
-              snprintf(tempNum, sizeof(tempNum), "%lu", delay);
-              strcat(delayLog, tempNum);
-              if (i < NUMBER_OF_CHANNELS - 1) {
-                  strcat(delayLog, ", ");
-              }
-              i++;
-          }
-          strcat(delayLog, "]");
-          
-          char logBuf[200];
-          snprintf(logBuf, sizeof(logBuf), "API: /start. Lock: %lu min (+%lu s payback). Penalty: %d min. Hide: %s",
-                  durationMinutes, paybackInSeconds, penaltyMin, (hideTimer ? "Yes" : "No"));
-          logMessage(logBuf);
-          snprintf(logBuf, sizeof(logBuf), "   -> Delays (s): %s. Max Delay: %lu s.", delayLog, maxDelay);
-          logMessage(logBuf);
-          
-          JsonDocument responseDoc;
-          String response;
-          if (maxDelay == 0) {
-              // No delays, start lock immediately
-              logMessage("   -> No delay. Locking immediately.");
-              currentState = LOCKED;
-              #ifdef STATUS_LED_PIN
-                setLedPattern(LOCKED);
-              #endif
-              lockSecondsRemaining = lockSecondsConfig;
-              sendRelayOnAll();
-              startTimersForState(LOCKED);
-              saveState();
-              responseDoc["status"] = "locked";
-              responseDoc["durationSeconds"] = lockSecondsRemaining;
-              serializeJson(responseDoc, response);
-              request->send(200, "application/json", response);
-          } else {
-              // Start countdown
-              logMessage("   -> Starting countdown...");
-              currentState = COUNTDOWN;
-              #ifdef STATUS_LED_PIN
-                setLedPattern(COUNTDOWN);
-              #endif
-              lockSecondsRemaining = 0;
-              startTimersForState(COUNTDOWN);
-              saveState();
-              responseDoc["status"] = "countdown";
-              serializeJson(responseDoc, response);
-              request->send(200, "application/json", response);
-          }
-      }
-  );
+    // Save configs
+    lockSecondsConfig = (durationMinutes * 60) + paybackInSeconds;
+    penaltySecondsConfig = penaltyMin * 60;
+    unsigned long maxDelay = 0;
+    
+    // Log and set delays
+    char delayLog[MAX_CHANNELS * 7 + 3];
+    char tempNum[8];
+    strcpy(delayLog, "[");
+    int i = 0;
+    for(JsonVariant d : delays) {
+        unsigned long delay = d.as<unsigned long>();
+        channelDelaysRemaining[i] = delay;
+        if (delay > maxDelay) maxDelay = delay;
+        snprintf(tempNum, sizeof(tempNum), "%lu", delay);
+        strcat(delayLog, tempNum);
+        if (i < NUMBER_OF_CHANNELS - 1) {
+            strcat(delayLog, ", ");
+        }
+        i++;
+    }
+    strcat(delayLog, "]");
+    
+    char logBuf[200];
+    snprintf(logBuf, sizeof(logBuf), "API: /start. Lock: %lu min (+%lu s payback). Penalty: %d min. Hide: %s",
+            durationMinutes, paybackInSeconds, penaltyMin, (hideTimer ? "Yes" : "No"));
+    logMessage(logBuf);
+    snprintf(logBuf, sizeof(logBuf), "   -> Delays (s): %s. Max Delay: %lu s.", delayLog, maxDelay);
+    logMessage(logBuf);
+    
+    JsonDocument responseDoc;
+    String response;
+    if (maxDelay == 0) {
+        // No delays, start lock immediately
+        logMessage("   -> No delay. Locking immediately.");
+        currentState = LOCKED;
+        #ifdef STATUS_LED_PIN
+          setLedPattern(LOCKED);
+        #endif
+        lockSecondsRemaining = lockSecondsConfig;
+        sendChannelOnAll();
+        startTimersForState(LOCKED);
+        saveState();
+        responseDoc["status"] = "locked";
+        responseDoc["durationSeconds"] = lockSecondsRemaining;
+        serializeJson(responseDoc, response);
+        request->send(200, "application/json", response);
+    } else {
+        // Start countdown
+        logMessage("   -> Starting countdown...");
+        currentState = COUNTDOWN;
+        #ifdef STATUS_LED_PIN
+          setLedPattern(COUNTDOWN);
+        #endif
+        lockSecondsRemaining = 0;
+        startTimersForState(COUNTDOWN);
+        saveState();
+        responseDoc["status"] = "countdown";
+        serializeJson(responseDoc, response);
+        request->send(200, "application/json", response);
+    }
+}
 
-  // API: Start a short test mode (POST /start-test)
-  server.on("/start-test", HTTP_POST, [](AsyncWebServerRequest *request){
+/**
+ * Handler for POST /start-test
+ */
+void handleStartTest(AsyncWebServerRequest *request) {
     if (currentState != READY) {
       sendJsonError(request, 409, "Device must be in READY state to run test.");
       return;
@@ -895,10 +981,12 @@ void setupWebServer() {
     String response;
     serializeJson(doc, response);
     request->send(200, "application/json", response);
-  });
+}
 
-  // API: Abort an active session (POST /abort)
-  server.on("/abort", HTTP_POST, [](AsyncWebServerRequest *request){
+/**
+ * Handler for POST /abort
+ */
+void handleAbort(AsyncWebServerRequest *request) {
     if (currentState != LOCKED && currentState != COUNTDOWN && currentState != TESTING) {
       sendJsonError(request, 409, "Device is not in an abortable state."); return;
     }
@@ -913,35 +1001,36 @@ void setupWebServer() {
     String response;
     serializeJson(doc, response);
     request->send(200, "application/json", response);
-  });
+}
 
-  // API: Get the reward code history (GET /reward)
-  server.on("/reward", HTTP_GET, [](AsyncWebServerRequest *request) {
-      if (currentState == LOCKED || currentState == ABORTED || currentState == COUNTDOWN) {
-          sendJsonError(request, 403, "Reward is not yet available.");
-      } else {
-          // Send history (READY or COMPLETED)
-          logMessage("API: /reward GET success. Releasing code history.");
-          JsonDocument doc;
-          JsonArray arr = doc.to<JsonArray>();
-          for(int i = 0; i < REWARD_HISTORY_SIZE; i++) {
-              if (strlen(rewardHistory[i].code) == SESSION_CODE_LENGTH) {
-                  JsonObject reward = arr.add<JsonObject>();
-                  reward["code"] = rewardHistory[i].code;
-                  reward["timestamp"] = rewardHistory[i].timestamp;
-              }
-          }
-          String response;
-          serializeJson(doc, response);
-          request->send(200, "application/json", response);
-      }
-  });
+/**
+ * Handler for GET /reward
+ */
+void handleReward(AsyncWebServerRequest *request) {
+    if (currentState == LOCKED || currentState == ABORTED || currentState == COUNTDOWN) {
+        sendJsonError(request, 403, "Reward is not yet available.");
+    } else {
+        // Send history (READY or COMPLETED)
+        logMessage("API: /reward GET success. Releasing code history.");
+        JsonDocument doc;
+        JsonArray arr = doc.to<JsonArray>();
+        for(int i = 0; i < REWARD_HISTORY_SIZE; i++) {
+            if (strlen(rewardHistory[i].code) == SESSION_CODE_LENGTH) {
+                JsonObject reward = arr.add<JsonObject>();
+                reward["code"] = rewardHistory[i].code;
+                reward["timestamp"] = rewardHistory[i].timestamp;
+            }
+        }
+        String response;
+        serializeJson(doc, response);
+        request->send(200, "application/json", response);
+    }
+}
 
-  
-  // API: Get the main device status (dynamic data, polled frequently). (GET /status)
-  // This endpoint matches the SessionStatusResponse interface
-  server.on("/status", HTTP_GET, [](AsyncWebServerRequest *request){
-    
+/**
+ * Handler for GET /status
+ */
+void handleStatus(AsyncWebServerRequest *request) {
     // Build the JSON status document
     JsonDocument doc;
     doc["status"] = stateToString(currentState);
@@ -969,12 +1058,12 @@ void setupWebServer() {
     String response;
     serializeJson(doc, response);
     request->send(200, "application/json", response);
-  });
+}
 
-
-  // API: Get the main device details (static data, polled once). (GET /details)
-  server.on("/details", HTTP_GET, [](AsyncWebServerRequest *request){
-    
+/**
+ * Handler for GET /details
+ */
+void handleDetails(AsyncWebServerRequest *request) {
     uint8_t mac[6];
     esp_efuse_mac_get_default(mac);
     char uniqueHostname[20];
@@ -1007,11 +1096,12 @@ void setupWebServer() {
     String response;
     serializeJson(doc, response);
     request->send(200, "application/json", response);
-  });
+}
 
-
-  // API: Get the in-memory log buffer (GET /log)
-  server.on("/log", HTTP_GET, [](AsyncWebServerRequest *request){
+/**
+ * Handler for GET /log
+ */
+void handleLog(AsyncWebServerRequest *request) {
     AsyncResponseStream *response = request->beginResponseStream("text/plain");
     int start = 0;
     int count = 0;
@@ -1030,11 +1120,65 @@ void setupWebServer() {
         response->print("\r\n");
     }
     request->send(response);
-  });
+}
 
-  // API: Factory reset (POST /factory-reset)
-  server.on("/factory-reset", HTTP_POST, [](AsyncWebServerRequest *request){
+/**
+ * Handler for POST /update-wifi (body)
+ */
+void handleUpdateWifi(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+    // Handle JSON body
+    if (index + len != total) {
+        return; // Wait for more data
+    }
     
+    // State is already checked in the on() handler, but as a safeguard:
+    if (currentState != READY) {
+        sendJsonError(request, 409, "Device must be in READY state to update Wi-Fi.");
+        return;
+    }
+
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, (const char*)data, len);
+    if (error) {
+        char logBuf[100];
+        snprintf(logBuf, sizeof(logBuf), "Failed to parse /update-wifi JSON: %s", error.c_str());
+        logMessage(logBuf);
+        sendJsonError(request, 400, "Invalid JSON body.");
+        return;
+    }
+
+    // Validate JSON body
+    if (!doc["ssid"].is<const char*>() || !doc["pass"].is<const char*>()) {
+        sendJsonError(request, 400, "Missing required fields: ssid, pass.");
+        return;
+    }
+
+    const char* ssid = doc["ssid"];
+    const char* pass = doc["pass"];
+
+    logMessage("API: /update-wifi received. Saving new credentials to NVS.");
+
+    // Save new credentials to NVS
+    wifiPreferences.begin("wifi-creds", false); // Open read/write
+    wifiPreferences.putString("ssid", ssid);
+    wifiPreferences.putString("pass", pass);
+    wifiPreferences.end(); // Commit changes
+
+    logMessage("New Wi-Fi credentials saved.");
+
+    // Send response
+    JsonDocument responseDoc;
+    String response;
+    responseDoc["status"] = "success";
+    responseDoc["message"] = "Wi-Fi credentials updated. Please reboot the device to apply.";
+    serializeJson(responseDoc, response);
+    request->send(200, "application/json", response);
+}
+
+/**
+ * Handler for POST /factory-reset
+ */
+void handleFactoryReset(AsyncWebServerRequest *request) {
     // Do not allow forgetting during an active session
     if (currentState != READY && currentState != COMPLETED) {
         logMessage("API: /factory-reset failed. Device is currently in an active session.");
@@ -1069,8 +1213,6 @@ void setupWebServer() {
     // Give the response time to send, then restart
     delay(1000);
     ESP.restart();
-  });
-
 }
 
 // =================================================================
