@@ -154,7 +154,8 @@ void stopTestMode();
 void abortSession(const char* source);
 void handleOneSecondTick();
 void saveState();
-void loadState();
+bool loadState();
+void handleRebootState();
 void startTimersForState(SessionState state);
 void generateSessionCode(char* buffer);
 void initializeTime();
@@ -435,7 +436,16 @@ void setup() {
 
   // --- Load session state from NVS ---
   logMessage("Initializing Session State from NVS...");  
-  loadState(); // This loads the previous session, configs, or calls resetToReady()
+  
+  if (loadState()) {
+      // A valid state was loaded from NVS.
+      // Decide what to do based on the state we were in when rebooted.
+      handleRebootState();
+  } else {
+      // No valid data in NVS. Initialize a fresh state.
+      logMessage("No valid session data in NVS. Initializing fresh state.");
+      resetToReady(); // This saves the new, fresh state
+  }
 
   #ifdef ONE_BUTTON_PIN
     char btnLog[50];
@@ -1171,8 +1181,9 @@ void handleOneSecondTick() {
 /**
  * Loads the entire session state and config from NVS (Preferences)
  * Uses key-value pairs for robustness and flash longevity.
+ * @return true if a valid session was loaded, false otherwise.
  */
-void loadState() {
+bool loadState() {
     
     sessionState.begin("session", true); // Read-only
     
@@ -1180,71 +1191,82 @@ void loadState() {
     // we assume the rest of the data is invalid.
     unsigned long magic = sessionState.getULong("magic", 0);
     
-    if (magic == MAGIC_VALUE) {
-        logMessage("Valid session data found in NVS.");
-        
-        // Load all values from NVS, providing a default for each
-        currentState = (SessionState)sessionState.getUChar("state", (uint8_t)READY);
-        lockSecondsRemaining = sessionState.getULong("lockRemain", 0);
-        penaltySecondsRemaining = sessionState.getULong("penaltyRemain", 0);
-        penaltySecondsConfig = sessionState.getULong("penaltyConfig", 0);
-        lockSecondsConfig = sessionState.getULong("lockConfig", 0);
-        testSecondsRemaining = sessionState.getULong("testRemain", 0);
-        hideTimer = sessionState.getBool("hideTimer", false);
+    if (magic != MAGIC_VALUE) {
+        // No valid data.
+        sessionState.end();
+        return false; // Report failure
+    }
 
-        // Load device configuration
-        abortDelaySeconds = sessionState.getUInt("abortDelay", 3);
-        countStreaks = sessionState.getBool("countStreaks", true);
-        enableTimePayback = sessionState.getBool("enablePayback", true);
-        abortPaybackMinutes = sessionState.getUShort("abortPayback", 15);
+    logMessage("Valid session data found in NVS.");
+    
+    // Load all values from NVS, providing a default for each
+    currentState = (SessionState)sessionState.getUChar("state", (uint8_t)READY);
+    lockSecondsRemaining = sessionState.getULong("lockRemain", 0);
+    penaltySecondsRemaining = sessionState.getULong("penaltyRemain", 0);
+    penaltySecondsConfig = sessionState.getULong("penaltyConfig", 0);
+    lockSecondsConfig = sessionState.getULong("lockConfig", 0);
+    testSecondsRemaining = sessionState.getULong("testRemain", 0);
+    hideTimer = sessionState.getBool("hideTimer", false);
 
-        // Load persistent session counters
-        sessionStreakCount = sessionState.getUInt("streak", 0);
-        completedSessions = sessionState.getUInt("completed", 0);
-        abortedSessions = sessionState.getUInt("aborted", 0);
-        paybackAccumulated = sessionState.getUInt("paybackAccum", 0);
-        totalLockedSessionSeconds = sessionState.getUInt("totalLocked", 0);
+    // Load device configuration
+    abortDelaySeconds = sessionState.getUInt("abortDelay", 3);
+    countStreaks = sessionState.getBool("countStreaks", true);
+    enableTimePayback = sessionState.getBool("enablePayback", true);
+    abortPaybackMinutes = sessionState.getUShort("abortPayback", 15);
 
-        // Load arrays (as binary blobs)
-        channelDelaysRemaining.resize(NUMBER_OF_CHANNELS, 0);
-        sessionState.getBytes("delays", channelDelaysRemaining.data(), sizeof(unsigned long) * NUMBER_OF_CHANNELS);
-        sessionState.getBytes("rewards", rewardHistory, sizeof(rewardHistory));
+    // Load persistent session counters
+    sessionStreakCount = sessionState.getUInt("streak", 0);
+    completedSessions = sessionState.getUInt("completed", 0);
+    abortedSessions = sessionState.getUInt("aborted", 0);
+    paybackAccumulated = sessionState.getUInt("paybackAccum", 0);
+    totalLockedSessionSeconds = sessionState.getUInt("totalLocked", 0);
 
-        sessionState.end(); // Done reading
+    // Load arrays (as binary blobs)
+    channelDelaysRemaining.resize(NUMBER_OF_CHANNELS, 0);
+    sessionState.getBytes("delays", channelDelaysRemaining.data(), sizeof(unsigned long) * NUMBER_OF_CHANNELS);
+    sessionState.getBytes("rewards", rewardHistory, sizeof(rewardHistory));
 
-        char logBuf[150];
-        snprintf(logBuf, sizeof(logBuf), "Loaded State: %s, Lock: %lu s, Streak: %lu",
-                 stateToString(currentState), lockSecondsRemaining, sessionStreakCount);
-        logMessage(logBuf);
-        
-        // Handle reboot logic
-        if (currentState == LOCKED || currentState == COUNTDOWN || currentState == TESTING) {
+    sessionState.end(); // Done reading
+
+    char logBuf[150];
+    snprintf(logBuf, sizeof(logBuf), "Loaded State: %s, Lock: %lu s, Streak: %lu",
+             stateToString(currentState), lockSecondsRemaining, sessionStreakCount);
+    logMessage(logBuf);
+    
+    return true; // Report success
+}
+
+/**
+ * Analyzes the loaded state after a reboot and performs
+ * the necessary transitions (e.g., aborting, resetting).
+ */
+void handleRebootState() {
+    // This is the logic moved from the old loadState()
+    
+    switch (currentState) {
+        case LOCKED:
+        case COUNTDOWN:
+        case TESTING:
             // These are active states. A reboot during them is an abort.
             logMessage("Reboot detected during active session. Aborting session...");
-            // abortSession() will handle the correct transition:
-            // LOCKED    -> ABORTED (with penalty)
-            // COUNTDOWN -> READY
-            // TESTING   -> READY (via stopTestMode)
-            // It also saves the new state, so we just return.
+            // abortSession() will handle the correct transition and save the new state.
             abortSession("Reboot");
-            return; 
-        }
-        
-        if (currentState == COMPLETED) {
+            break;
+
+        case COMPLETED:
+            // Session was finished. Reset to ready for a new one.
             logMessage("Loaded COMPLETED state. Resetting to READY.");
             resetToReady(); // This saves the new state
-            return;
-        }
+            break;
 
-        // If we are here, state is READY or ABORTED.
-        // It's safe to resume these states (e.g., continue a penalty timer).
-        startTimersForState(currentState); // Resume timers
-
-    } else {
-        // No valid data, initialize a fresh state
-        sessionState.end();
-        logMessage("No valid session data in NVS. Initializing fresh state.");
-        resetToReady(); // This saves the new state
+        case READY:
+        case ABORTED:
+        default:
+            // These states are safe to resume.
+            // ABORTED will resume its penalty timer.
+            logMessage("Resuming in-progress state.");
+            startTimersForState(currentState); // Resume timers
+            break;
     }
 }
 
