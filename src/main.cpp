@@ -117,6 +117,10 @@ int NUMBER_OF_CHANNELS = 0;
 bool g_time_initialized = false;
 volatile bool g_oneSecondTick = false; // Flag set by 1s ISR
 
+// --- Keep-Alive Watchdog (LOCKED state only) ---
+const unsigned long KEEP_ALIVE_TIMEOUT_MS = 120000; // 2 minutes
+unsigned long g_lastKeepAliveTime = 0; // For watchdog. 0 = disarmed.
+
 // Vector holding countdowns for each channel.
 std::vector<unsigned long> channelDelaysRemaining;
 
@@ -594,6 +598,7 @@ void stopTestMode() {
       setLedPattern(READY);
     #endif
     testSecondsRemaining = 0;
+    g_lastKeepAliveTime = 0; // Disarm watchdog
     saveState();
 }
 
@@ -628,16 +633,18 @@ void abortSession(const char* source) {
         lockSecondsRemaining = 0;
         penaltySecondsRemaining = penaltySecondsConfig; // 4. Start REWARD penalty
         startTimersForState(ABORTED);
+        
+        g_lastKeepAliveTime = 0; // Disarm watchdog
         saveState();
     
     } else if (currentState == COUNTDOWN) {
         logMessage(logBuf);
         sendChannelOffAll();
-        resetToReady(); // Cancel countdown
+        resetToReady(); // Cancel countdown (this disarms watchdog)
     } else if (currentState == TESTING) {
         snprintf(logBuf, sizeof(logBuf), "%s: Aborting test mode.", source);
         logMessage(logBuf);
-        stopTestMode(); // Cancel test
+        stopTestMode(); // Cancel test (this disarms watchdog)
     } else {
          snprintf(logBuf, sizeof(logBuf), "%s: Abort ignored, device not in abortable state.", source);
          logMessage(logBuf);
@@ -674,6 +681,7 @@ void completeSession() {
   lockSecondsRemaining = 0;
   penaltySecondsRemaining = 0;
   testSecondsRemaining = 0;
+  g_lastKeepAliveTime = 0; // Disarm watchdog
   for (int i = 0; i < NUMBER_OF_CHANNELS; i++) { channelDelaysRemaining[i] = 0; }
   
   saveState(); 
@@ -695,6 +703,7 @@ void resetToReady() {
   lockSecondsRemaining = 0;
   penaltySecondsRemaining = 0;
   testSecondsRemaining = 0;
+  g_lastKeepAliveTime = 0; // Disarm watchdog
   lockSecondsConfig = 0;
   hideTimer = false;
   for (int i = 0; i < NUMBER_OF_CHANNELS; i++) { channelDelaysRemaining[i] = 0; }
@@ -831,7 +840,10 @@ void handleHealth(AsyncWebServerRequest *request) {
  * Handler for POST /keepalive
  */
 void handleKeepAlive(AsyncWebServerRequest *request) {
-    // Does nothing but return 200, used to keep connection alive
+    // "Pet" the watchdog only if the session is in the LOCKED state
+    if (currentState == LOCKED) {
+        g_lastKeepAliveTime = millis();
+    }
     request->send(200); 
 }
 
@@ -936,6 +948,7 @@ void handleStart(AsyncWebServerRequest *request, uint8_t *data, size_t len, size
         lockSecondsRemaining = lockSecondsConfig;
         sendChannelOnAll();
         startTimersForState(LOCKED);
+        g_lastKeepAliveTime = millis(); // Arm keep-alive watchdog
         saveState();
         responseDoc["status"] = "locked";
         responseDoc["durationSeconds"] = lockSecondsRemaining;
@@ -950,6 +963,7 @@ void handleStart(AsyncWebServerRequest *request, uint8_t *data, size_t len, size
         #endif
         lockSecondsRemaining = 0;
         startTimersForState(COUNTDOWN);
+        // NOTE: Watchdog is NOT armed here, only when LOCKED
         saveState();
         responseDoc["status"] = "countdown";
         serializeJson(responseDoc, response);
@@ -973,6 +987,7 @@ void handleStartTest(AsyncWebServerRequest *request) {
     #endif
     testSecondsRemaining = TEST_MODE_DURATION_SECONDS;
     startTimersForState(TESTING);
+    // NOTE: Watchdog is NOT armed here, only when LOCKED
     saveState();
     
     JsonDocument doc;
@@ -1254,6 +1269,7 @@ void startTimersForState(SessionState state) {
  * It safely updates all timers and handles state transitions.
  */
 void handleOneSecondTick() {
+  
   switch (currentState) {
     case COUNTDOWN:
     { // Add scope for new variable
@@ -1280,11 +1296,22 @@ void handleOneSecondTick() {
             #endif
             lockSecondsRemaining = lockSecondsConfig;
             startTimersForState(LOCKED);
+            g_lastKeepAliveTime = millis(); // Arm keep-alive watchdog
             saveState(); // Save state on transition
         }
         break;
     }
     case LOCKED:
+      // --- Keep-Alive Watchdog Check (LOCKED state only) ---
+      // g_lastKeepAliveTime is "armed" (set > 0) when the lock starts.
+      if (g_lastKeepAliveTime > 0 && (millis() - g_lastKeepAliveTime > KEEP_ALIVE_TIMEOUT_MS)) {
+          logMessage("Keep-alive watchdog timeout. Aborting session.");
+          abortSession("Watchdog");
+          // IMPORTANT: Return here to avoid processing the (now old) state.
+          // abortSession() will have changed the state to ABORTED.
+          return; 
+      }
+
       // Decrement lock timer
       if (lockSecondsRemaining > 0) {
           if (--lockSecondsRemaining == 0) {
@@ -1406,6 +1433,7 @@ void handleRebootState() {
         default:
             // These states are safe to resume.
             // ABORTED will resume its penalty timer.
+            // The watchdog is NOT armed, per the "LOCKED only" rule.
             logMessage("Resuming in-progress state.");
             startTimersForState(currentState); // Resume timers
             break;
