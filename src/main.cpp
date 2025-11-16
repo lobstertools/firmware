@@ -82,7 +82,7 @@ enum SessionState : uint8_t { READY, COUNTDOWN, LOCKED, ABORTED, COMPLETED, TEST
 #define MIN_PENALTY_MINUTES 15
 #define MAX_PENALTY_MINUTES 180
 
-#define TEST_MODE_DURATION_SECONDS 60
+#define TEST_MODE_DURATION_SECONDS 480 // 8 minutes
 
 // --- NTP Configuration ---
 const char* ntpServer = "pool.ntp.org";
@@ -841,7 +841,7 @@ void handleHealth(AsyncWebServerRequest *request) {
  */
 void handleKeepAlive(AsyncWebServerRequest *request) {
     // "Pet" the watchdog only if the session is in the LOCKED state
-    if (currentState == LOCKED) {
+    if (currentState == LOCKED || currentState == TESTING) {
         g_lastKeepAliveTime = millis();
     }
     request->send(200); 
@@ -979,7 +979,7 @@ void handleStartTest(AsyncWebServerRequest *request) {
       sendJsonError(request, 409, "Device must be in READY state to run test.");
       return;
     }
-    logMessage("API: /start-test received. Engaging Channels for 60s.");
+    logMessage("API: /start-test received. Engaging Channels for 480s (8 min).");
     sendChannelOnAll();
     currentState = TESTING;
     #ifdef STATUS_LED_PIN
@@ -987,7 +987,7 @@ void handleStartTest(AsyncWebServerRequest *request) {
     #endif
     testSecondsRemaining = TEST_MODE_DURATION_SECONDS;
     startTimersForState(TESTING);
-    // NOTE: Watchdog is NOT armed here, only when LOCKED
+    g_lastKeepAliveTime = millis(); // Arm keep-alive watchdog for test mode
     saveState();
     
     JsonDocument doc;
@@ -1302,7 +1302,7 @@ void handleOneSecondTick() {
         break;
     }
     case LOCKED:
-      // --- Keep-Alive Watchdog Check (LOCKED state only) ---
+      // --- Keep-Alive Watchdog Check ---
       // g_lastKeepAliveTime is "armed" (set > 0) when the lock starts.
       if (g_lastKeepAliveTime > 0 && (millis() - g_lastKeepAliveTime > KEEP_ALIVE_TIMEOUT_MS)) {
           logMessage("Keep-alive watchdog timeout. Aborting session.");
@@ -1328,9 +1328,16 @@ void handleOneSecondTick() {
       }
       break;
     case TESTING:
+      // --- Keep-Alive Watchdog Check ---
+      if (g_lastKeepAliveTime > 0 && (millis() - g_lastKeepAliveTime > KEEP_ALIVE_TIMEOUT_MS)) {
+          logMessage("Keep-alive watchdog timeout. Aborting test session.");
+          abortSession("Watchdog"); 
+          return; // Abort handler changed state, so return
+      }
+
       // Decrement test timer
       if (testSecondsRemaining > 0 && --testSecondsRemaining == 0) {
-        logMessage("Test mode 60s timer expired.");
+        logMessage("Test mode 480s (8 min) timer expired.");
         stopTestMode(); // Timer finished
       }
       break;
