@@ -51,11 +51,11 @@ using namespace ArduinoJson;
 #define SERIAL_BAUD_RATE 115200
 #define WDT_TIMEOUT_SECONDS 60
 
-// --- Relay-Specific Configuration ---
+// --- Channel-Specific Configuration ---
 // This firmware is built specifically for the diymore 2/4-Channel MOS Switch Module.
-const int MOS_RELAY_PINS_ARRAY[] = {16, 17};
-// const int MOS_RELAY_PINS_ARRAY[] = {16, 17, 18, 19};
-std::vector<int> MOS_RELAY_PINS;
+const int MOSFET_PINS_ARRAY[] = {16, 17};
+// const int MOSFET_PINS_ARRAY[] = {16, 17, 18, 19};
+std::vector<int> MOSFET_PINS;
 
 // --- Button Configuration ---
 #ifdef ONE_BUTTON_PIN
@@ -117,7 +117,7 @@ int NUMBER_OF_CHANNELS = 0;
 bool g_time_initialized = false;
 volatile bool g_oneSecondTick = false; // Flag set by 1s ISR
 
-// Vector holding countdowns for each relay channel.
+// Vector holding countdowns for each channel.
 std::vector<unsigned long> channelDelaysRemaining;
 
 // Global Config (loaded from NVS)
@@ -160,11 +160,11 @@ void startTimersForState(SessionState state);
 void generateSessionCode(char* buffer);
 void initializeTime();
 void getCurrentTimestamp(char* buffer, size_t bufferSize);
-void initializeRelay();
-void sendRelayOn(int channel);
-void sendRelayOff(int channel);
-void sendRelayOnAll();
-void sendRelayOffAll();
+void initializeChannels();
+void sendChannelOn(int channel);
+void sendChannelOff(int channel);
+void sendChannelOnAll();
+void sendChannelOffAll();
 void setLedPattern(SessionState state);
 void sendJsonError(AsyncWebServerRequest *request, int code, const String& message);
 void handleLongPressStart();
@@ -466,7 +466,7 @@ void setup() {
   channelDelaysRemaining.resize(NUMBER_OF_CHANNELS, 0);
   logMessage("----------------");
 
-  initializeRelay();
+  initializeChannels();
 
   #ifdef STATUS_LED_PIN
     setLedPattern(currentState); // Set initial LED pattern
@@ -503,19 +503,19 @@ void loop() {
 }
 
 // =================================================================
-// --- Relay Control (Hardware Abstraction) ---
+// --- Channel Control (Hardware Abstraction) ---
 // =================================================================
 
 /**
- * Initializes all relay pins as outputs.
+ * Initializes all channel pins as outputs.
  */
-void initializeRelay() {
-  logMessage("Relay Module: diymore MOS module");
-  MOS_RELAY_PINS.assign(MOS_RELAY_PINS_ARRAY, MOS_RELAY_PINS_ARRAY + (sizeof(MOS_RELAY_PINS_ARRAY) / sizeof(MOS_RELAY_PINS_ARRAY[0])));
-  NUMBER_OF_CHANNELS = MOS_RELAY_PINS.size();
+void initializeChannels() {
+  logMessage("Channel Module: diymore MOS module");
+  MOSFET_PINS.assign(MOSFET_PINS_ARRAY, MOSFET_PINS_ARRAY + (sizeof(MOSFET_PINS_ARRAY) / sizeof(MOSFET_PINS_ARRAY[0])));
+  NUMBER_OF_CHANNELS = MOSFET_PINS.size();
 
   char logBuf[50];
-  for (int pin : MOS_RELAY_PINS) {
+  for (int pin : MOSFET_PINS) {
       pinMode(pin, OUTPUT);
       digitalWrite(pin, LOW); // Default to off
       snprintf(logBuf, sizeof(logBuf), "Initialized GPIO %d", pin);
@@ -524,45 +524,45 @@ void initializeRelay() {
 }
 
 /**
- * Turns a specific relay channel ON (closes circuit).
+ * Turns a specific Channel channel ON (closes circuit).
  */
-void sendRelayOn(int channel) {
+void sendChannelOn(int channel) {
   if (channel < 0 || channel >= NUMBER_OF_CHANNELS) return;
   char logBuf[50];
-  snprintf(logBuf, sizeof(logBuf), "RELAY_CMD: ON (Channel %d)", channel);
+  snprintf(logBuf, sizeof(logBuf), "Channel %d: ON ", channel);
   logMessage(logBuf);
   #ifndef DEBUG_MODE
-    digitalWrite(MOS_RELAY_PINS[channel], HIGH);
+    digitalWrite(MOSFET_PINS[channel], HIGH);
   #endif
 }
 
 /**
- * Turns a specific relay channel OFF (opens circuit).
+ * Turns a specific Channel channel OFF (opens circuit).
  */
-void sendRelayOff(int channel) {
+void sendChannelOff(int channel) {
   if (channel < 0 || channel >= NUMBER_OF_CHANNELS) return;
   char logBuf[50];
-  snprintf(logBuf, sizeof(logBuf), "RELAY_CMD: OFF (Channel %d)", channel);
+  snprintf(logBuf, sizeof(logBuf), "Channel %d: OFF", channel);
   logMessage(logBuf);
   #ifndef DEBUG_MODE
-    digitalWrite(MOS_RELAY_PINS[channel], LOW);
+    digitalWrite(MOSFET_PINS[channel], LOW);
   #endif
 }
 
 /**
- * Turns all relay channels ON.
+ * Turns all Channel channels ON.
  */
-void sendRelayOnAll() {
-  logMessage("RELAY_CMD: ON (All Channels)");
-  for (int i=0; i < NUMBER_OF_CHANNELS; i++) { sendRelayOn(i); }
+void sendChannelOnAll() {
+  logMessage("Channels: ON (All)");
+  for (int i=0; i < NUMBER_OF_CHANNELS; i++) { sendChannelOn(i); }
 }
 
 /**
- * Turns all relay channels OFF.
+ * Turns all Channel channels OFF.
  */
-void sendRelayOffAll() {
-  logMessage("RELAY_CMD: OFF (All Channels)");
-  for (int i=0; i < NUMBER_OF_CHANNELS; i++) { sendRelayOff(i); }
+void sendChannelOffAll() {
+  logMessage("Channels: OFF (All)");
+  for (int i=0; i < NUMBER_OF_CHANNELS; i++) { sendChannelOff(i); }
 }
 
 // =================================================================
@@ -574,7 +574,7 @@ void sendRelayOffAll() {
  */
 void stopTestMode() {
     logMessage("Stopping test mode.");
-    sendRelayOffAll();
+    sendChannelOffAll();
     currentState = READY;
     #ifdef STATUS_LED_PIN
       setLedPattern(READY);
@@ -593,7 +593,7 @@ void abortSession(const char* source) {
     
     if (currentState == LOCKED) {
         logMessage(logBuf);
-        sendRelayOffAll();
+        sendChannelOffAll();
         currentState = ABORTED;
         #ifdef STATUS_LED_PIN
           setLedPattern(ABORTED);
@@ -618,7 +618,7 @@ void abortSession(const char* source) {
     
     } else if (currentState == COUNTDOWN) {
         logMessage(logBuf);
-        sendRelayOffAll();
+        sendChannelOffAll();
         resetToReady(); // Cancel countdown
     } else if (currentState == TESTING) {
         snprintf(logBuf, sizeof(logBuf), "%s: Aborting test mode.", source);
@@ -637,7 +637,7 @@ void abortSession(const char* source) {
  */
 void completeSession() {
   logMessage("Session complete. State is now COMPLETED.");
-  sendRelayOffAll();
+  sendChannelOffAll();
   currentState = COMPLETED;
   #ifdef STATUS_LED_PIN
     setLedPattern(COMPLETED);
@@ -671,7 +671,7 @@ void completeSession() {
  */
 void resetToReady() {
   logMessage("Resetting state to READY.");
-  sendRelayOffAll();
+  sendChannelOffAll();
 
   currentState = READY;
   #ifdef STATUS_LED_PIN
@@ -879,8 +879,8 @@ void setupWebServer() {
       sendJsonError(request, 409, "Device must be in READY state to run test.");
       return;
     }
-    logMessage("API: /start-test received. Engaging relays for 60s.");
-    sendRelayOnAll();
+    logMessage("API: /start-test received. Engaging Channels for 60s.");
+    sendChannelOnAll();
     currentState = TESTING;
     #ifdef STATUS_LED_PIN
       setLedPattern(TESTING);
@@ -1121,9 +1121,9 @@ void handleOneSecondTick() {
             if (channelDelaysRemaining[i] > 0) {
                 allDelaysZero = false;
                 if (--channelDelaysRemaining[i] == 0) {
-                    sendRelayOn(i); // Turn on relay when its timer hits zero
+                    sendChannelOn(i); // Turn on Channel when its timer hits zero
                     char logBuf[100];
-                    snprintf(logBuf, sizeof(logBuf), "Channel %d delay finished. Relay closed.", i);
+                    snprintf(logBuf, sizeof(logBuf), "Channel %d delay finished. Channel closed.", i);
                     logMessage(logBuf);
                 }
             }
