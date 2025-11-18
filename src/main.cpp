@@ -82,7 +82,7 @@ enum SessionState : uint8_t { READY, COUNTDOWN, LOCKED, ABORTED, COMPLETED, TEST
 #define MIN_PENALTY_MINUTES 15
 #define MAX_PENALTY_MINUTES 180
 
-#define TEST_MODE_DURATION_SECONDS 480 // 8 minutes
+#define TEST_MODE_DURATION_SECONDS 120 // 2 minutes
 
 // --- NTP Configuration ---
 const char* ntpServer = "pool.ntp.org";
@@ -979,7 +979,7 @@ void handleStartTest(AsyncWebServerRequest *request) {
       sendJsonError(request, 409, "Device must be in READY state to run test.");
       return;
     }
-    logMessage("API: /start-test received. Engaging Channels for 480s (8 min).");
+    logMessage("API: /start-test received. Engaging Channels for 2 min.");
     sendChannelOnAll();
     currentState = TESTING;
     #ifdef STATUS_LED_PIN
@@ -1337,7 +1337,7 @@ void handleOneSecondTick() {
 
       // Decrement test timer
       if (testSecondsRemaining > 0 && --testSecondsRemaining == 0) {
-        logMessage("Test mode 480s (8 min) timer expired.");
+        logMessage("Test mode (2 min) timer expired.");
         stopTestMode(); // Timer finished
       }
       break;
