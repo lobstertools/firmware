@@ -629,9 +629,14 @@ void abortSession(const char* source) {
 
         if (enableTimePayback) { // 3. Add payback
             paybackAccumulated += (abortPaybackMinutes * 60);
+            uint32_t totalSeconds = paybackAccumulated;
+            uint32_t hours = totalSeconds / 3600;
+            uint32_t minutes = (totalSeconds % 3600) / 60;
+            uint32_t seconds = totalSeconds % 60;
+            
             char paybackLog[100];
-            snprintf(paybackLog, sizeof(paybackLog), "Payback enabled. Added %u min. Total pending: %lu s",
-                     abortPaybackMinutes, paybackAccumulated);
+            snprintf(paybackLog, sizeof(paybackLog), "Payback enabled. Added %u min. Total pending: %lu h, %lu min, %lu s",
+                     abortPaybackMinutes, hours, minutes, seconds);
             logMessage(paybackLog);
         }
 
