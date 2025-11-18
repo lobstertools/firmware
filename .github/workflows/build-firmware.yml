@@ -2,39 +2,29 @@ name: "PlatformIO Build & Release"
 
 # Controls when the workflow will run
 on:
-  # Triggers the workflow on push events but only for the main/master branch
   push:
     branches: [ "main", "master" ]
-    tags: [ 'v*' ] # Also triggers on any tag starting with 'v'
-    
-  # Triggers the workflow on pull request events targeted at the main/master branch
+    tags: [ 'v*' ] # Triggers on tags like v1.0.0
   pull_request:
     branches: [ "main", "master" ]
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
 jobs:
   build-and-release:
     name: "Build and Maybe Release"
-    # The type of runner that the job will run on
     runs-on: ubuntu-latest
     
-    # We need 'contents: write' permission for the 'gh release create' command
-    # to be able to create a release on your behalf.
     permissions:
       contents: write
     
     steps:
       # --- 1. Set up the environment ---
       
-      # Checks-out your repository under $GITHUB_WORKSPACE
       - name: "Checkout code"
         uses: actions/checkout@v4
         with:
-          submodules: true # Checkout submodules if you use them
+          submodules: true
 
-      # Sets up a specific version of Python
       - name: "Set up Python 3.11"
         uses: actions/setup-python@v5
         with:
@@ -42,11 +32,9 @@ jobs:
 
       # --- 2. Install PlatformIO and dependencies ---
 
-      # Install PlatformIO Core
       - name: "Install PlatformIO Core"
         run: pip install -U platformio
 
-      # Cache PlatformIO dependencies to speed up future builds
       - name: "Cache PlatformIO dependencies"
         uses: actions/cache@v4
         with:
@@ -59,44 +47,42 @@ jobs:
 
       # --- 3. Set Version & Build Firmware ---
       
-      # Sets the firmware version based on the Git ref
-      - name: "Set Firmware Version Environment Variable"
-        id: set_version
+      - name: "Calculate Version Strings"
+        id: versioning
         run: |
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            # Set DEVICE_VERSION to '"v0.7.1"' (a string containing quotes)
-            echo "DEVICE_VERSION=\"${{ github.ref_name }}\"" >> $GITHUB_ENV
-            echo "RELEASE_VERSION=${{ github.ref_name }}" >> $GITHUB_ENV
+            # Clean tag: "v0.7.1"
+            echo "BUILD_VERSION=${{ github.ref_name }}" >> $GITHUB_ENV
+            echo "RELEASE_TAG=${{ github.ref_name }}" >> $GITHUB_ENV
           else
-            # This is a push to main or a PR
+            # Dev build: "main-a1b2c3"
             COMMIT_SHA_SHORT=$(git rev-parse --short HEAD)
-            # Create a version like '"main-a1b2c3d"'
-            VERSION_STRING="\"${{ github.ref_name }}-${COMMIT_SHA_SHORT}\""
-            echo "DEVICE_VERSION=${VERSION_STRING}" >> $GITHUB_ENV
-            echo "RELEASE_VERSION=prerelease" >> $GITHUB_ENV
+            echo "BUILD_VERSION=${{ github.ref_name }}-${COMMIT_SHA_SHORT}" >> $GITHUB_ENV
+            echo "RELEASE_TAG=prerelease" >> $GITHUB_ENV
           fi
 
-      - name: "Build Production Firmware (esp32_diymore_prod)"
-        # The 'DEVICE_VERSION' env var is now set
-        # and will be picked up by platformio.ini's sysenv
-        run: pio run -e esp32_diymore_prod
+      - name: "Build Production Firmware (esp32_diymore_release)"
+        env:
+          # INJECTION MAGIC:
+          # We use PLATFORMIO_BUILD_FLAGS to inject the -D flag.
+          # The quoting here is specific: -D KEY='"value"' ensures C++ sees a string literal.
+          PLATFORMIO_BUILD_FLAGS: "-D DEVICE_VERSION='\"${{ env.BUILD_VERSION }}\"'"
+        run: pio run -e esp32_diymore_release
 
       # --- 4. Create Release (ONLY on tag push) ---
       
       - name: "Create GitHub Release"
         if: github.ref_type == 'tag'
         env:
-          # The GITHUB_TOKEN is automatically provided by Actions
-          # We just need to pass it to the 'gh' command
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Trigger was a tag push. Creating release for ${{ env.RELEASE_VERSION }}..."
+          echo "Trigger was a tag push. Creating release for ${{ env.RELEASE_TAG }}..."
           
           # 1. Define paths
-          ORIGINAL_ASSET_PATH=".pio/build/esp32_diymore_prod/firmware.bin"
+          ORIGINAL_ASSET_PATH=".pio/build/esp32_diymore_release/firmware.bin"
           
           # 2. Create the new versioned asset name, e.g., "lobster-lock-v0.7.1.bin"
-          NEW_ASSET_NAME="lobster-lock-${{ env.RELEASE_VERSION }}.bin"
+          NEW_ASSET_NAME="lobster-lock-${{ env.RELEASE_TAG }}.bin"
           NEW_ASSET_PATH="/tmp/${NEW_ASSET_NAME}"
 
           # 3. Safety check to ensure the file exists
@@ -109,8 +95,7 @@ jobs:
           cp "$ORIGINAL_ASSET_PATH" "$NEW_ASSET_PATH"
           
           # 4. Use the GitHub CLI to create a new release
-          # It will upload the RENAMED firmware file
-          gh release create ${{ env.RELEASE_VERSION }} \
+          gh release create ${{ env.RELEASE_TAG }} \
             "$NEW_ASSET_PATH" \
-            --title "Release ${{ env.RELEASE_VERSION }}" \
+            --title "Release ${{ env.RELEASE_TAG }}" \
             --generate-notes
