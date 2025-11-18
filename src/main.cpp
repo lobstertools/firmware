@@ -117,9 +117,13 @@ int NUMBER_OF_CHANNELS = 0;
 bool g_time_initialized = false;
 volatile bool g_oneSecondTick = false; // Flag set by 1s ISR
 
-// --- Keep-Alive Watchdog (LOCKED state only) ---
-const unsigned long KEEP_ALIVE_TIMEOUT_MS = 120000; // 2 minutes
+// --- Keep-Alive Watchdog (LOCKED/TESTING state only) ---
+// IMPLEMENTATION: 3-Strike System
+const unsigned long KEEP_ALIVE_EXPECTED_INTERVAL_MS = 10000; // Expect call every 10s
+const int KEEP_ALIVE_MAX_STRIKES = 3; // Abort after 3 missed calls (30s)
+
 unsigned long g_lastKeepAliveTime = 0; // For watchdog. 0 = disarmed.
+int g_currentKeepAliveStrikes = 0;     // Counter for missed calls
 
 // Vector holding countdowns for each channel.
 std::vector<unsigned long> channelDelaysRemaining;
@@ -176,6 +180,8 @@ void startMDNS();
 // Byte conversion helpers
 uint16_t bytesToUint16(uint8_t* data);
 uint32_t bytesToUint32(uint8_t* data);
+// Watchdog helper
+bool checkKeepAliveWatchdog();
 
 // --- Web Server Prototypes ---
 void setupWebServer();
@@ -597,6 +603,7 @@ void stopTestMode() {
     #endif
     testSecondsRemaining = 0;
     g_lastKeepAliveTime = 0; // Disarm watchdog
+    g_currentKeepAliveStrikes = 0; // Reset strikes
     saveState();
 }
 
@@ -633,6 +640,7 @@ void abortSession(const char* source) {
         startTimersForState(ABORTED);
         
         g_lastKeepAliveTime = 0; // Disarm watchdog
+        g_currentKeepAliveStrikes = 0; // Reset strikes
         saveState();
     
     } else if (currentState == COUNTDOWN) {
@@ -680,6 +688,7 @@ void completeSession() {
   penaltySecondsRemaining = 0;
   testSecondsRemaining = 0;
   g_lastKeepAliveTime = 0; // Disarm watchdog
+  g_currentKeepAliveStrikes = 0; // Reset strikes
   
   channelDelaysRemaining.assign(NUMBER_OF_CHANNELS, 0);
   
@@ -703,6 +712,7 @@ void resetToReady() {
   penaltySecondsRemaining = 0;
   testSecondsRemaining = 0;
   g_lastKeepAliveTime = 0; // Disarm watchdog
+  g_currentKeepAliveStrikes = 0; // Reset strikes
   lockSecondsConfig = 0;
   hideTimer = false;
   
@@ -843,6 +853,7 @@ void handleKeepAlive(AsyncWebServerRequest *request) {
     // "Pet" the watchdog only if the session is in the LOCKED state
     if (currentState == LOCKED || currentState == TESTING) {
         g_lastKeepAliveTime = millis();
+        g_currentKeepAliveStrikes = 0; // Reset strike counter
     }
     request->send(200); 
 }
@@ -949,6 +960,7 @@ void handleStart(AsyncWebServerRequest *request, uint8_t *data, size_t len, size
         sendChannelOnAll();
         startTimersForState(LOCKED);
         g_lastKeepAliveTime = millis(); // Arm keep-alive watchdog
+        g_currentKeepAliveStrikes = 0;  // Reset strikes
         saveState();
         responseDoc["status"] = "locked";
         responseDoc["durationSeconds"] = lockSecondsRemaining;
@@ -988,6 +1000,7 @@ void handleStartTest(AsyncWebServerRequest *request) {
     testSecondsRemaining = TEST_MODE_DURATION_SECONDS;
     startTimersForState(TESTING);
     g_lastKeepAliveTime = millis(); // Arm keep-alive watchdog for test mode
+    g_currentKeepAliveStrikes = 0;  // Reset strikes
     saveState();
     
     JsonDocument doc;
@@ -1262,6 +1275,38 @@ void startTimersForState(SessionState state) {
     } else if (state == TESTING) {
         logMessage("Starting test logic.");
     }
+    g_currentKeepAliveStrikes = 0; // Reset strikes on state change
+}
+
+/**
+ * Helper to check the Keep-Alive Watchdog.
+ * Returns true if the session was aborted.
+ */
+bool checkKeepAliveWatchdog() {
+    // Check if watchdog is armed
+    if (g_lastKeepAliveTime == 0) return false; 
+
+    unsigned long elapsed = millis() - g_lastKeepAliveTime;
+    
+    // Integer division finds how many 10s intervals have passed
+    int calculatedStrikes = elapsed / KEEP_ALIVE_EXPECTED_INTERVAL_MS;
+
+    // Only log/act if the strike count has increased
+    if (calculatedStrikes > g_currentKeepAliveStrikes) {
+        g_currentKeepAliveStrikes = calculatedStrikes;
+        char logBuf[100];
+        
+        if (g_currentKeepAliveStrikes >= KEEP_ALIVE_MAX_STRIKES) {
+            snprintf(logBuf, sizeof(logBuf), "Keep-Alive Watchdog: Strike %d/%d! ABORTING.", g_currentKeepAliveStrikes, KEEP_ALIVE_MAX_STRIKES);
+            logMessage(logBuf);
+            abortSession("Watchdog Strikeout");
+            return true; // Signal that we aborted
+        } else {
+            snprintf(logBuf, sizeof(logBuf), "Keep-Alive Watchdog: Missed check. Strike %d/%d", g_currentKeepAliveStrikes, KEEP_ALIVE_MAX_STRIKES);
+            logMessage(logBuf);
+        }
+    }
+    return false;
 }
 
 /**
@@ -1297,19 +1342,15 @@ void handleOneSecondTick() {
             lockSecondsRemaining = lockSecondsConfig;
             startTimersForState(LOCKED);
             g_lastKeepAliveTime = millis(); // Arm keep-alive watchdog
+            g_currentKeepAliveStrikes = 0;  // Reset strikes
             saveState(); // Save state on transition
         }
         break;
     }
     case LOCKED:
-      // --- Keep-Alive Watchdog Check ---
-      // g_lastKeepAliveTime is "armed" (set > 0) when the lock starts.
-      if (g_lastKeepAliveTime > 0 && (millis() - g_lastKeepAliveTime > KEEP_ALIVE_TIMEOUT_MS)) {
-          logMessage("Keep-alive watchdog timeout. Aborting session.");
-          abortSession("Watchdog");
-          // IMPORTANT: Return here to avoid processing the (now old) state.
-          // abortSession() will have changed the state to ABORTED.
-          return; 
+      // --- Keep-Alive Watchdog Check (3-Strike) ---
+      if (checkKeepAliveWatchdog()) {
+          return; // Aborted inside helper
       }
 
       // Decrement lock timer
@@ -1328,11 +1369,9 @@ void handleOneSecondTick() {
       }
       break;
     case TESTING:
-      // --- Keep-Alive Watchdog Check ---
-      if (g_lastKeepAliveTime > 0 && (millis() - g_lastKeepAliveTime > KEEP_ALIVE_TIMEOUT_MS)) {
-          logMessage("Keep-alive watchdog timeout. Aborting test session.");
-          abortSession("Watchdog"); 
-          return; // Abort handler changed state, so return
+      // --- Keep-Alive Watchdog Check (3-Strike) ---
+      if (checkKeepAliveWatchdog()) {
+          return; // Aborted inside helper
       }
 
       // Decrement test timer
