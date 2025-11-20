@@ -828,8 +828,11 @@ void checkBootLoop() {
     // Use provisioned threshold
     if (crashes >= g_systemConfig.bootLoopThreshold) {
         Serial.println("CRITICAL: Boot Loop Detected! Entering Safe Mode.");
+
         // Safe Mode: Delay startup, disarm everything.
         // This gives the power rail time to stabilize or user time to factory reset.
+        initializeChannels();
+
         delay(5000);
         #ifdef STATUS_LED_PIN
             pinMode(STATUS_LED_PIN, OUTPUT);
