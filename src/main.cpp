@@ -491,7 +491,11 @@ void connectToWiFi() {
 void WiFiEvent(WiFiEvent_t event) {
     switch(event) {
         case ARDUINO_EVENT_WIFI_STA_GOT_IP:
-            logMessage("WiFi: Connected & IP Assigned.");
+            
+            char logBuf[64];
+            snprintf(logBuf, sizeof(logBuf), "WiFi: Connected. IP: %s", WiFi.localIP().toString().c_str());
+            logMessage(logBuf);
+
             g_wifiRetries = 0; // Reset counter on success
             xTimerStop(wifiReconnectTimer, 0);
             break;
