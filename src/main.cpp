@@ -153,14 +153,12 @@ unsigned long g_lastHealthCheck = 0;
 unsigned long g_bootStartTime = 0;
 bool g_bootMarkedStable = false;
 
-// Vector holding countdowns for each channel.
-std::vector<unsigned long> channelDelaysRemaining;
+// --- Device and Sessing Configuration ---
 
 // Global Config (loaded from NVS)
-uint32_t abortDelaySeconds = 3;     // Default to 3s
-bool countStreaks = true;           // Default to true
-bool enableTimePayback = true;      // Default to true
-uint16_t abortPaybackMinutes = 15;  // Default to 15min
+bool enableStreaks = true;          // Default to true
+bool enablePaybackTime = true;      // Default to true
+uint16_t paybackTimeMinutes = 15;   // Default to 15min
 
 // Persistent Session Counters (loaded from NVS)
 uint32_t sessionStreakCount = 0;
@@ -169,7 +167,10 @@ uint32_t abortedSessions = 0;
 uint32_t paybackAccumulated = 0; // In seconds
 uint32_t totalLockedSessionSeconds = 0; // Total accumulated lock time
 
-// --- Logging System (Refactored for No-Allocation Safety) ---
+// Vector holding countdowns for each channel.
+std::vector<unsigned long> channelDelaysRemaining;
+
+// --- Logging System ---
 // Ring buffer for storing logs in memory.
 const int LOG_BUFFER_SIZE = 50;
 const int MAX_LOG_ENTRY_LENGTH = 150;
@@ -190,7 +191,6 @@ esp_timer_handle_t failsafeTimer = NULL;
 TimerHandle_t wifiReconnectTimer;
 bool g_wifiCredentialsExist = false;
 
-// Replace String with char arrays to prevent heap fragmentation
 char g_wifiSSID[33] = {0};
 char g_wifiPass[65] = {0};
 
@@ -263,13 +263,12 @@ void handleFactoryReset(AsyncWebServerRequest *request);
 // =================================================================
 
 // Base UUID: 5a160000-8334-469b-a316-c340cf29188f
-#define PROV_SERVICE_UUID           "5a160000-8334-469b-a316-c340cf29188f"
-#define PROV_SSID_CHAR_UUID         "5a160001-8334-469b-a316-c340cf29188f"
-#define PROV_PASS_CHAR_UUID         "5a160002-8334-469b-a316-c340cf29188f"
-#define PROV_ABORT_DELAY_CHAR_UUID  "5a160003-8334-469b-a316-c340cf29188f"
-#define PROV_COUNT_STREAKS_CHAR_UUID "5a160004-8334-469b-a316-c340cf29188f"
-#define PROV_ENABLE_PAYBACK_CHAR_UUID "5a160005-8334-469b-a316-c340cf29188f"
-#define PROV_ABORT_PAYBACK_CHAR_UUID "5a160006-8334-469b-a316-c340cf29188f"
+#define PROV_SERVICE_UUID                   "5a160000-8334-469b-a316-c340cf29188f"
+#define PROV_SSID_CHAR_UUID                 "5a160001-8334-469b-a316-c340cf29188f"
+#define PROV_PASS_CHAR_UUID                 "5a160002-8334-469b-a316-c340cf29188f"
+#define PROV_ENABLE_STREAKS_CHAR_UUID       "5a160004-8334-469b-a316-c340cf29188f"
+#define PROV_ENABLE_PAYBACK_TIME_CHAR_UUID  "5a160005-8334-469b-a316-c340cf29188f"
+#define PROV_PAYBACK_TIME_CHAR_UUID         "5a160006-8334-469b-a316-c340cf29188f"
 
 volatile bool g_credentialsReceived = false;
 
@@ -303,28 +302,25 @@ class ProvisioningCallbacks: public BLECharacteristicCallbacks {
             logMessage("BLE: Received Password");
             g_credentialsReceived = true; // Flag to restart
         } 
-        // Handle Configuration Data (written to "session" NVS)
-        else {
+        // Handle Global Config (session namespace)
+        else if (uuid == PROV_ENABLE_STREAKS_CHAR_UUID) {
             sessionState.begin("session", false);
-
-            if (uuid == PROV_ABORT_DELAY_CHAR_UUID) {
-                uint32_t val = bytesToUint32(data);
-                sessionState.putUInt("abortDelay", val);
-                logMessage("BLE: Received Abort Delay");
-            } else if (uuid == PROV_COUNT_STREAKS_CHAR_UUID) {
-                bool val = (bool)data[0];
-                sessionState.putBool("countStreaks", val);
-                logMessage("BLE: Received Count Streaks");
-            } else if (uuid == PROV_ENABLE_PAYBACK_CHAR_UUID) {
-                bool val = (bool)data[0];
-                sessionState.putBool("enablePayback", val);
-                logMessage("BLE: Received Enable Payback");
-            } else if (uuid == PROV_ABORT_PAYBACK_CHAR_UUID) {
-                uint16_t val = bytesToUint16(data);
-                sessionState.putUShort("abortPayback", val);
-                logMessage("BLE: Received Abort Payback");
-            }
+            bool val = (bool)data[0];
+            sessionState.putBool("enableStreaks", val);
             sessionState.end();
+            logMessage("BLE: Received Enable Streaks");
+        } else if (uuid == PROV_ENABLE_PAYBACK_TIME_CHAR_UUID) {
+            sessionState.begin("session", false);
+            bool val = (bool)data[0];
+            sessionState.putBool("enablePayback", val);
+            sessionState.end();
+            logMessage("BLE: Received Enable Payback Time");
+        } else if (uuid == PROV_PAYBACK_TIME_CHAR_UUID) {
+            sessionState.begin("session", false);
+            uint16_t val = bytesToUint16(data);
+            sessionState.putUShort("paybackTime", val);
+            sessionState.end();
+            logMessage("BLE: Received Payback Time");
         }
     }
 };
@@ -936,8 +932,8 @@ void abortSession(const char* source) {
         sessionStreakCount = 0; // 1. Reset streak
         abortedSessions++;      // 2. Increment counter
 
-        if (enableTimePayback) { // 3. Add payback
-            paybackAccumulated += (abortPaybackMinutes * 60);
+        if (enablePaybackTime) { // 3. Add payback
+            paybackAccumulated += (paybackTimeMinutes * 60);
             
             // Use helper to format payback time
             char timeStr[64];
@@ -945,7 +941,7 @@ void abortSession(const char* source) {
             
             char paybackLog[150];
             snprintf(paybackLog, sizeof(paybackLog), "Payback enabled. Added %u min. Total pending: %s",
-                     abortPaybackMinutes, timeStr);
+                     paybackTimeMinutes, timeStr);
             logMessage(paybackLog);
         }
 
@@ -996,7 +992,7 @@ void completeSession() {
 
   // Update session counters
   completedSessions++;
-  if (countStreaks) {
+  if (enableStreaks) {
       sessionStreakCount++;
   }
   
@@ -1531,10 +1527,10 @@ void handleDetails(AsyncWebServerRequest *request) {
         
         // Device Configuration
         JsonObject config = (*doc)["config"].to<JsonObject>();
-        config["abortDelaySeconds"] = abortDelaySeconds;
-        config["countStreaks"] = countStreaks;
-        config["enableTimePayback"] = enableTimePayback;
-        config["abortPaybackMinutes"] = abortPaybackMinutes;
+        config["abortDelaySeconds"] = g_systemConfig.abortDelaySeconds;
+        config["enableStreaks"] = enableStreaks;
+        config["enablePaybackTime"] = enablePaybackTime;
+        config["paybackTimeMinutes"] = paybackTimeMinutes;
         
         // Add features array
         JsonArray features = (*doc)["features"].to<JsonArray>();
@@ -1698,7 +1694,7 @@ void handleFactoryReset(AsyncWebServerRequest *request) {
         sessionState.clear();
         sessionState.end();
         logMessage("Session state and config erased.");
-        
+       
         // Clear boot loop stats
         bootPrefs.begin("boot", false);
         bootPrefs.clear();
@@ -1867,7 +1863,7 @@ void handleOneSecondTick() {
       }
       // Decrement test timer
       if (testSecondsRemaining > 0 && --testSecondsRemaining == 0) {
-        logMessage("Test mode (2 min) timer expired.");
+        logMessage("Test mode timer expired.");
         stopTestMode(); // Timer finished
       }
       break;
@@ -1911,11 +1907,10 @@ bool loadState() {
     testSecondsRemaining = sessionState.getULong("testRemain", 0);
     hideTimer = sessionState.getBool("hideTimer", false);
 
-    // Load device configuration
-    abortDelaySeconds = sessionState.getUInt("abortDelay", 3);
-    countStreaks = sessionState.getBool("countStreaks", true);
-    enableTimePayback = sessionState.getBool("enablePayback", true);
-    abortPaybackMinutes = sessionState.getUShort("abortPayback", 15);
+    // Load device configuration (Session Specific) - RENAMED KEYS
+    enableStreaks = sessionState.getBool("enableStreaks", true);
+    enablePaybackTime = sessionState.getBool("enablePayback", true);
+    paybackTimeMinutes = sessionState.getUShort("paybackTime", 15);
 
     // Load persistent session counters
     sessionStreakCount = sessionState.getUInt("streak", 0);
@@ -2007,10 +2002,9 @@ void saveState(bool force) {
     
     // Save device configuration
     sessionState.putBool("hideTimer", hideTimer);
-    sessionState.putUInt("abortDelay", abortDelaySeconds);
-    sessionState.putBool("countStreaks", countStreaks);
-    sessionState.putBool("enablePayback", enableTimePayback);
-    sessionState.putUShort("abortPayback", abortPaybackMinutes);
+    sessionState.putBool("enableStreaks", enableStreaks);
+    sessionState.putBool("enablePayback", enablePaybackTime);
+    sessionState.putUShort("paybackTime", paybackTimeMinutes);
 
     // Save persistent counters
     sessionState.putUInt("streak", sessionStreakCount);
