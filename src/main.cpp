@@ -541,9 +541,6 @@ void setup() {
 
   initializeChannels();
 
-  snprintf(logBuf, sizeof(logBuf), "Device has %d channel(s).", (int)MOSFET_PINS.size());
-  logMessage(logBuf);
-
   #ifdef STATUS_LED_PIN
     logMessage("[Enabled] LED Status Indicator");
     pinMode(STATUS_LED_PIN, OUTPUT);
@@ -835,17 +832,20 @@ void updateWatchdogTimeout(uint32_t seconds) {
  */
 void initializeChannels() {
   logMessage("Channel Module: diymore MOS module");
- 
+
   MOSFET_PINS.reserve(MAX_CHANNELS);
   MOSFET_PINS.assign(MOSFET_PINS_ARRAY, MOSFET_PINS_ARRAY + (sizeof(MOSFET_PINS_ARRAY) / sizeof(MOSFET_PINS_ARRAY[0])));
   
   channelDelaysRemaining.reserve(MAX_CHANNELS);
 
   char logBuf[50];
+  snprintf(logBuf, sizeof(logBuf), "Device has %d channel(s).", (int)MOSFET_PINS.size());
+  logMessage(logBuf);
+
   for (int pin : MOSFET_PINS) {
       pinMode(pin, OUTPUT);
       digitalWrite(pin, LOW); // Default to off
-      snprintf(logBuf, sizeof(logBuf), "Initialized GPIO %d", pin);
+      snprintf(logBuf, sizeof(logBuf), "Initialized GPIO %d (OFF)", pin);
       logMessage(logBuf);
   }
 }
