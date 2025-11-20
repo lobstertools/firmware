@@ -78,22 +78,39 @@ struct Reward {
 // Main state machine enum.
 enum SessionState : uint8_t { READY, COUNTDOWN, LOCKED, ABORTED, COMPLETED, TESTING };
 
-#define MIN_LOCK_MINUTES 15
-#define MAX_LOCK_MINUTES 180
-#define MIN_PENALTY_MINUTES 15
-#define MAX_PENALTY_MINUTES 180
+// --- SYTEM PREFERENCES ---
+struct SystemConfig {
+    uint32_t abortDelaySeconds;
+    uint32_t minLockMinutes;
+    uint32_t maxLockMinutes;
+    uint32_t minPenaltyMinutes;
+    uint32_t maxPenaltyMinutes;
+    uint32_t testModeDurationSeconds;
+    uint32_t failsafeMaxLockSeconds;
+    uint32_t keepAliveIntervalMs;
+    uint32_t keepAliveMaxStrikes;
+    uint32_t bootLoopThreshold;
+    uint32_t stableBootTimeMs;
+    uint32_t wifiMaxRetries;
+};
 
-#define TEST_MODE_DURATION_SECONDS 120 // 2 minutes
+// Default values (used if NVS is empty)
+const SystemConfig DEFAULT_SETTINGS = {
+    3,      // abortDelaySeconds
+    15,     // minLockMinutes
+    180,    // maxLockMinutes
+    15,     // minPenaltyMinutes
+    180,    // maxPenaltyMinutes
+    120,    // testModeDurationSeconds
+    14400,  // failsafeMaxLockSeconds (4 hours)
+    10000,  // keepAliveIntervalMs
+    3,      // keepAliveMaxStrikes
+    5,      // bootLoopThreshold (Default)
+    120000, // stableBootTimeMs (Default 2 Minutes)
+    5       // wifiMaxRetries (Default)
+};
 
-// --- FAILSAFE CONFIGURATION ("Death Grip") ---
-// Absolute maximum time the device can remain in LOCKED state before
-// hardware override kicks in. set to 4 hours (14400 sec).
-#define FAILSAFE_MAX_LOCK_SECONDS 14400 
-
-// --- Boot Loop Protection ---
-#define BOOT_LOOP_THRESHOLD 5
-#define STABLE_BOOT_TIME_MS 120000 // 2 Minutes to consider boot "Stable"
-#define MAGIC_VALUE 0xCAFEBABE     // Magic value to validate NVS integrity
+SystemConfig g_systemConfig = DEFAULT_SETTINGS;
 
 // --- NTP Configuration ---
 const char* ntpServer = "pool.ntp.org";
@@ -137,14 +154,14 @@ bool g_time_initialized = false;
 unsigned long g_lastNtpRetry = 0;
 const unsigned long NTP_RETRY_INTERVAL_MS = 60000; // Retry every 1 minute
 
+// --- WiFi Retry Logic ---
+int g_wifiRetries = 0;
+volatile bool g_triggerProvisioning = false; // Flag to trigger blocking mode from loop
+
 // Use a counter to track missed ticks (ISR Safe)
 volatile uint32_t g_tickCounter = 0; 
 
-// --- Keep-Alive Watchdog (LOCKED/TESTING state only) ---
-// IMPLEMENTATION: 3-Strike System
-const unsigned long KEEP_ALIVE_EXPECTED_INTERVAL_MS = 10000; // Expect call every 10s
-const int KEEP_ALIVE_MAX_STRIKES = 3; // Abort after 3 missed calls (30s)
-
+// --- Keep-Alive Watchdog (LOCKED/TESTING) ---
 unsigned long g_lastKeepAliveTime = 0; // For watchdog. 0 = disarmed.
 int g_currentKeepAliveStrikes = 0;     // Counter for missed calls
 
@@ -341,26 +358,20 @@ void startBLEProvisioning() {
     BLEServer *pServer = BLEDevice::createServer();
     BLEService *pService = pServer->createService(PROV_SERVICE_UUID);
     
-    // Create all characteristics for the provisioning service
     ProvisioningCallbacks* callbacks = new ProvisioningCallbacks();
 
-    BLECharacteristic *pSsidChar = pService->createCharacteristic(PROV_SSID_CHAR_UUID, BLECharacteristic::PROPERTY_WRITE);
-    pSsidChar->setCallbacks(callbacks);
+    // Helper to create char
+    auto createChar = [&](const char* uuid) {
+        BLECharacteristic* p = pService->createCharacteristic(uuid, BLECharacteristic::PROPERTY_WRITE);
+        p->setCallbacks(callbacks);
+        return p;
+    };
 
-    BLECharacteristic *pPassChar = pService->createCharacteristic(PROV_PASS_CHAR_UUID, BLECharacteristic::PROPERTY_WRITE);
-    pPassChar->setCallbacks(callbacks);
-
-    BLECharacteristic *pAbortDelayChar = pService->createCharacteristic(PROV_ABORT_DELAY_CHAR_UUID, BLECharacteristic::PROPERTY_WRITE);
-    pAbortDelayChar->setCallbacks(callbacks);
-
-    BLECharacteristic *pCountStreaksChar = pService->createCharacteristic(PROV_COUNT_STREAKS_CHAR_UUID, BLECharacteristic::PROPERTY_WRITE);
-    pCountStreaksChar->setCallbacks(callbacks);
-
-    BLECharacteristic *pEnablePaybackChar = pService->createCharacteristic(PROV_ENABLE_PAYBACK_CHAR_UUID, BLECharacteristic::PROPERTY_WRITE);
-    pEnablePaybackChar->setCallbacks(callbacks);
-
-    BLECharacteristic *pAbortPaybackChar = pService->createCharacteristic(PROV_ABORT_PAYBACK_CHAR_UUID, BLECharacteristic::PROPERTY_WRITE);
-    pAbortPaybackChar->setCallbacks(callbacks);
+    createChar(PROV_SSID_CHAR_UUID);
+    createChar(PROV_PASS_CHAR_UUID);
+    createChar(PROV_ENABLE_STREAKS_CHAR_UUID);
+    createChar(PROV_ENABLE_PAYBACK_TIME_CHAR_UUID);
+    createChar(PROV_PAYBACK_TIME_CHAR_UUID);
 
     pService->start();
     
@@ -371,6 +382,9 @@ void startBLEProvisioning() {
 
     // --- Wait here forever until credentials are set ---
     while (1) {
+
+        processLogQueue();
+
         if (g_credentialsReceived) {
             logMessage("Credentials received. Restarting to connect...");
             delay(1000);
@@ -438,11 +452,11 @@ void armFailsafeTimer() {
     
     // Start one-shot timer. FAILSAFE_MAX_LOCK_SECONDS converted to microseconds.
     // This is completely independent of the main FreeRTOS tasks.
-    uint64_t timeout_us = (uint64_t)FAILSAFE_MAX_LOCK_SECONDS * 1000000ULL;
+    uint64_t timeout_us = (uint64_t)g_systemConfig.failsafeMaxLockSeconds * 1000000ULL;
     esp_timer_start_once(failsafeTimer, timeout_us);
     
     char logBuf[100];
-    snprintf(logBuf, sizeof(logBuf), "Death Grip Timer ARMED: %u seconds", FAILSAFE_MAX_LOCK_SECONDS);
+    snprintf(logBuf, sizeof(logBuf), "Death Grip Timer ARMED: %u seconds", g_systemConfig.failsafeMaxLockSeconds);
     logMessage(logBuf);
 }
 
@@ -464,6 +478,8 @@ void disarmFailsafeTimer() {
  */
 void connectToWiFi() {
     if (!g_wifiCredentialsExist) return;
+    if (WiFi.status() == WL_CONNECTED) return;
+
     logMessage("WiFi: Connecting...");
     WiFi.mode(WIFI_STA);
     WiFi.begin(g_wifiSSID, g_wifiPass);
@@ -476,13 +492,27 @@ void WiFiEvent(WiFiEvent_t event) {
     switch(event) {
         case ARDUINO_EVENT_WIFI_STA_GOT_IP:
             logMessage("WiFi: Connected & IP Assigned.");
-            // NTP Sync removed from here to prevent ISR/Callback blocking.
-            // Handled in setup() and loop() instead.
+            g_wifiRetries = 0; // Reset counter on success
+            xTimerStop(wifiReconnectTimer, 0);
             break;
         case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
-            logMessage("WiFi: Disconnected. Scheduling reconnect...");
-            // Non-blocking backoff: Wait 2 seconds before retrying
-            xTimerStart(wifiReconnectTimer, 0); 
+            // Check if we have exceeded max retries
+            if (g_wifiRetries >= g_systemConfig.wifiMaxRetries) {
+                logMessage("WiFi: Max retries exceeded. Falling back to BLE Provisioning...");
+                // Stop any pending reconnect timers
+                xTimerStop(wifiReconnectTimer, 0); 
+                // Set flag for the main loop to handle (safest way to switch contexts)
+                g_triggerProvisioning = true;
+            } else {
+                char logBuf[64];
+                snprintf(logBuf, sizeof(logBuf), "WiFi: Disconnected (Attempt %d/%d). Retrying...", 
+                         g_wifiRetries + 1, g_systemConfig.wifiMaxRetries);
+                logMessage(logBuf);
+                
+                g_wifiRetries++;
+                // Wait 2 seconds before retrying
+                xTimerStart(wifiReconnectTimer, 0); 
+            }
             break;
         default:
             break;
@@ -533,6 +563,23 @@ void setup() {
   esp_task_wdt_init(DEFAULT_WDT_TIMEOUT, true);
   esp_task_wdt_add(NULL);
 
+  logMessage("--- System Configuration ---");
+  snprintf(logBuf, sizeof(logBuf), "Abort Delay: %lu s", g_systemConfig.abortDelaySeconds);
+  logMessage(logBuf);
+  snprintf(logBuf, sizeof(logBuf), "Lock Range: %lu-%lu min", g_systemConfig.minLockMinutes, g_systemConfig.maxLockMinutes);
+  logMessage(logBuf);
+  snprintf(logBuf, sizeof(logBuf), "Penalty Range: %lu-%lu min", g_systemConfig.minPenaltyMinutes, g_systemConfig.maxPenaltyMinutes);
+  logMessage(logBuf);
+  snprintf(logBuf, sizeof(logBuf), "Test Mode: %lu s", g_systemConfig.testModeDurationSeconds);
+  logMessage(logBuf);
+  snprintf(logBuf, sizeof(logBuf), "Failsafe: %lu s", g_systemConfig.failsafeMaxLockSeconds);
+  logMessage(logBuf);
+  snprintf(logBuf, sizeof(logBuf), "KeepAlive: %lu ms (Max Strikes: %lu)", g_systemConfig.keepAliveIntervalMs, g_systemConfig.keepAliveMaxStrikes);
+  logMessage(logBuf);
+  snprintf(logBuf, sizeof(logBuf), "Boot Loop: %lu (Stable: %lu ms)", g_systemConfig.bootLoopThreshold, g_systemConfig.stableBootTimeMs);
+  logMessage(logBuf);
+  logMessage("--- /System Configuration ---"  );
+
   logMessage("--- Device Features ---"); 
 
   initializeChannels();
@@ -550,10 +597,10 @@ void setup() {
     snprintf(btnLog, sizeof(btnLog), "[Enabled] Abort Pedal (Pin %d)", ONE_BUTTON_PIN);
     logMessage(btnLog);
 
-    // Use configurable abort delay from NVS
-    snprintf(logBuf, sizeof(logBuf), "Long press (%lu sec) to abort session.", abortDelaySeconds);
+    // Use configurable abort delay from NVS (g_systemConfig)
+    snprintf(logBuf, sizeof(logBuf), "Long press (%lu sec) to abort session.", g_systemConfig.abortDelaySeconds);
     logMessage(logBuf);
-    button.setLongPressIntervalMs(abortDelaySeconds * 1000);
+    button.setLongPressIntervalMs(g_systemConfig.abortDelaySeconds * 1000);
     button.attachLongPressStart(handleLongPressStart);
   #else
     logMessage("[Disabled] Abort Pedal");
@@ -583,6 +630,7 @@ void setup() {
       logMessage("Found Wi-Fi credentials. Registering events.");
       g_wifiCredentialsExist = true;
       WiFi.onEvent(WiFiEvent);
+
       connectToWiFi();
   } else {
       // --- STAGE 1: PROVISIONING ---
@@ -603,13 +651,20 @@ void setup() {
       // Wait up to 15 seconds for time
       // NOTE: We must feed WDT in this loop or it might trigger (20s timeout)
       while ((millis() - waitStart < 15000)) {
-          struct tm timeinfo;
-          // Check time manually here (configTime is async in background)
-          if (getLocalTime(&timeinfo, 0)) {
-              g_time_initialized = true;
-              timeSynced = true;
-              break;
+          
+          processLogQueue(); // Flush logs so we see "Connected"
+
+          // Only check NTP if we actually have a connection
+          if (WiFi.status() == WL_CONNECTED) {
+              struct tm timeinfo;
+              // Check time manually here (configTime is async in background)
+              if (getLocalTime(&timeinfo, 0)) {
+                  g_time_initialized = true;
+                  timeSynced = true;
+                  break;
+              }
           }
+          
           esp_task_wdt_reset(); // Feed watchdog
           delay(100); // Yield to allow WiFi stack to run
       }
@@ -638,7 +693,7 @@ void setup() {
   } else {
       // No valid data in NVS. Initialize a fresh state.
       logMessage("No valid session data in NVS. Initializing fresh state.");
-      resetToReady(true); // This saves the new, fresh state
+      resetToReady(true); // This saves the new, fresh state (w/ correct time if synced)
   }
 
   // --- Start web server and timers ---
@@ -661,10 +716,26 @@ void setup() {
  * Handles periodic tasks (NTP retry, LED updates, Button polling).
  */
 void loop() {
+  // 0. Check for WiFi Failure Fallback
+  if (g_triggerProvisioning) {
+      g_triggerProvisioning = false; // Clear flag
+      
+      // Shut down WiFi to save power/conflicts
+      WiFi.disconnect(true); 
+      WiFi.mode(WIFI_OFF);
+      
+      logMessage("!!! Connection Failed. Entering BLE Provisioning Mode !!!");
+      
+      // Enter blocking provisioning mode
+      // Note: This function ends with ESP.restart(), so we never return here.
+      startBLEProvisioning(); 
+  }
+
   esp_task_wdt_reset(); // Feed the watchdog
 
   // Check if we have been running long enough to be considered "Stable"
-  if (!g_bootMarkedStable && (millis() - g_bootStartTime > STABLE_BOOT_TIME_MS)) {
+  // Uses g_systemConfig.stableBootTimeMs
+  if (!g_bootMarkedStable && (millis() - g_bootStartTime > g_systemConfig.stableBootTimeMs)) {
       g_bootMarkedStable = true;
       bootPrefs.begin("boot", false);
       bootPrefs.putInt("crashes", 0);
@@ -754,7 +825,8 @@ void checkBootLoop() {
     bootPrefs.begin("boot", false);
     int crashes = bootPrefs.getInt("crashes", 0);
     
-    if (crashes >= BOOT_LOOP_THRESHOLD) {
+    // Use provisioned threshold
+    if (crashes >= g_systemConfig.bootLoopThreshold) {
         Serial.println("CRITICAL: Boot Loop Detected! Entering Safe Mode.");
         // Safe Mode: Delay startup, disarm everything.
         // This gives the power rail time to stabilize or user time to factory reset.
@@ -1227,11 +1299,11 @@ void handleStart(AsyncWebServerRequest *request, uint8_t *data, size_t len, size
     bool newHideTimer = (*doc)["hideTimer"] | false; // Default to false if not present
     JsonArray delays = (*doc)["delays"].as<JsonArray>();
 
-    // Validate ranges
-    if (durationMinutes < MIN_LOCK_MINUTES || durationMinutes > MAX_LOCK_MINUTES) {
+    // Validate ranges using Provisioned Settings
+    if (durationMinutes < g_systemConfig.minLockMinutes || durationMinutes > g_systemConfig.maxLockMinutes) {
         sendJsonError(request, 400, "Invalid duration."); return;
     }
-    if (penaltyMin < MIN_PENALTY_MINUTES || penaltyMin > MAX_PENALTY_MINUTES) {
+    if (penaltyMin < g_systemConfig.minPenaltyMinutes || penaltyMin > g_systemConfig.maxPenaltyMinutes) {
         sendJsonError(request, 400, "Invalid penaltyDuration."); return;
     }
     if (delays.isNull()) {
@@ -1357,7 +1429,7 @@ void handleStartTest(AsyncWebServerRequest *request) {
         #ifdef STATUS_LED_PIN
           setLedPattern(TESTING);
         #endif
-        testSecondsRemaining = TEST_MODE_DURATION_SECONDS;
+        testSecondsRemaining = g_systemConfig.testModeDurationSeconds;
         startTimersForState(TESTING);
         g_lastKeepAliveTime = millis(); // Arm keep-alive watchdog for test mode
         g_currentKeepAliveStrikes = 0;  // Reset strikes
@@ -1775,20 +1847,22 @@ bool checkKeepAliveWatchdog() {
     unsigned long elapsed = millis() - g_lastKeepAliveTime;
     
     // Integer division finds how many 10s intervals have passed
-    int calculatedStrikes = elapsed / KEEP_ALIVE_EXPECTED_INTERVAL_MS;
+    // Uses Configured Interval
+    int calculatedStrikes = elapsed / g_systemConfig.keepAliveIntervalMs;
 
     // Only log/act if the strike count has increased
     if (calculatedStrikes > g_currentKeepAliveStrikes) {
         g_currentKeepAliveStrikes = calculatedStrikes;
         char logBuf[100];
         
-        if (g_currentKeepAliveStrikes >= KEEP_ALIVE_MAX_STRIKES) {
-            snprintf(logBuf, sizeof(logBuf), "Keep-Alive Watchdog: Strike %d/%d! ABORTING.", g_currentKeepAliveStrikes, KEEP_ALIVE_MAX_STRIKES);
+        // Uses Configured Strike Count
+        if (g_currentKeepAliveStrikes >= g_systemConfig.keepAliveMaxStrikes) {
+            snprintf(logBuf, sizeof(logBuf), "Keep-Alive Watchdog: Strike %d/%d! ABORTING.", g_currentKeepAliveStrikes, g_systemConfig.keepAliveMaxStrikes);
             logMessage(logBuf);
             abortSession("Watchdog Strikeout");
             return true; // Signal that we aborted
         } else {
-            snprintf(logBuf, sizeof(logBuf), "Keep-Alive Watchdog: Missed check. Strike %d/%d", g_currentKeepAliveStrikes, KEEP_ALIVE_MAX_STRIKES);
+            snprintf(logBuf, sizeof(logBuf), "Keep-Alive Watchdog: Missed check. Strike %d/%d", g_currentKeepAliveStrikes, g_systemConfig.keepAliveMaxStrikes);
             logMessage(logBuf);
         }
     }
