@@ -655,9 +655,9 @@ void setup() {
       unsigned long waitStart = millis();
       bool timeSynced = false;
 
-      // Wait up to 15 seconds for time
+      // Wait up to 30 seconds for time
       // NOTE: We must feed WDT in this loop or it might trigger (20s timeout)
-      while ((millis() - waitStart < 15000)) {
+      while ((millis() - waitStart < 30000)) {
           
           processLogQueue(); // Flush logs so we see "Connected"
 
