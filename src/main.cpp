@@ -593,7 +593,6 @@ void setup() {
 
   #ifdef STATUS_LED_PIN
     logMessage("LED Status Indicator enabled");
-    pinMode(STATUS_LED_PIN, OUTPUT);
     setLedPattern(currentState); // Set initial LED pattern
   #else
     logMessage("LED Status Indicator disabled");
