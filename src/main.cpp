@@ -2330,13 +2330,13 @@ void generateSessionCode(char* buffer) {
  */
 const char* stateToString(SessionState s) {
     switch (s) {
-        case READY: return "ready";
-        case COUNTDOWN: return "countdown";
-        case LOCKED: return "locked";
-        case ABORTED: return "aborted";
-        case COMPLETED: return "completed";
-        case TESTING: return "testing";
-        default: return "unknown";
+        case READY: return "READY";
+        case COUNTDOWN: return "COUNTDOWN";
+        case LOCKED: return "LOCKED";
+        case ABORTED: return "ABORTED";
+        case COMPLETED: return "COMPLETED";
+        case TESTING: return "TESTING";
+        default: return "UNKNOWN";
     }
 }
 
