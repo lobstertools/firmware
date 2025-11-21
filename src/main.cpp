@@ -196,7 +196,7 @@ int logBufferIndex = 0;
 bool logBufferFull = false;
 
 // Serial Log Queue (To prevent Serial blocks inside Mutex)
-const int SERIAL_QUEUE_SIZE = 25;
+const int SERIAL_QUEUE_SIZE = 50;
 char serialLogQueue[SERIAL_QUEUE_SIZE][MAX_LOG_ENTRY_LENGTH];
 volatile int serialQueueHead = 0;
 volatile int serialQueueTail = 0;
@@ -2215,26 +2215,42 @@ void logMessage(const char* message) {
 /**
  * Called in main loop to drain log queue safely to Serial port.
  * Allows printing without blocking critical sections.
+ * Drains up to 10 messages per call to prevent lag/dropped logs.
  */
 void processLogQueue() {
+    // Process up to 10 lines at once so we don't fall behind
+    int maxLinesToProcess = 10; 
 
-    // Only take lock if available immediately or very quickly
-    if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(5)) == pdTRUE) {
-        if (serialQueueHead != serialQueueTail) {
-            // Copy message out while holding lock
-            char msgCopy[MAX_LOG_ENTRY_LENGTH];
-            strncpy(msgCopy, serialLogQueue[serialQueueTail], MAX_LOG_ENTRY_LENGTH);
-            msgCopy[MAX_LOG_ENTRY_LENGTH-1] = '\0'; // safety null
-            
-            // Advance tail
-            serialQueueTail = (serialQueueTail + 1) % SERIAL_QUEUE_SIZE;
-            
-            // RELEASE LOCK BEFORE PRINTING TO SERIAL
+    while (maxLinesToProcess > 0) {
+        char msgCopy[MAX_LOG_ENTRY_LENGTH];
+        bool hasMessage = false;
+
+        // 1. Quick lock to check/pop a message
+        // We use a short timeout; if we can't get the lock, we skip printing this cycle
+        if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(5)) == pdTRUE) {
+            if (serialQueueHead != serialQueueTail) {
+                // Copy message out
+                strncpy(msgCopy, serialLogQueue[serialQueueTail], MAX_LOG_ENTRY_LENGTH);
+                msgCopy[MAX_LOG_ENTRY_LENGTH-1] = '\0'; // safety null
+                
+                // Advance tail
+                serialQueueTail = (serialQueueTail + 1) % SERIAL_QUEUE_SIZE;
+                hasMessage = true;
+            }
+            // RELEASE LOCK IMMEDIATELY
             xSemaphoreGiveRecursive(stateMutex);
-            
-            Serial.println(msgCopy);
         } else {
-            xSemaphoreGiveRecursive(stateMutex);
+            // If we couldn't get the lock, stop trying for this cycle
+            break; 
+        }
+
+        // 2. Print OUTSIDE the lock (Serial is slow!)
+        if (hasMessage) {
+            Serial.println(msgCopy);
+            maxLinesToProcess--;
+        } else {
+            // Queue is empty, we are done
+            break;
         }
     }
 }
