@@ -455,8 +455,11 @@ void armFailsafeTimer() {
     uint64_t timeout_us = (uint64_t)g_systemConfig.failsafeMaxLockSeconds * 1000000ULL;
     esp_timer_start_once(failsafeTimer, timeout_us);
     
+    char timeStr[64];
+    formatSeconds(g_systemConfig.failsafeMaxLockSeconds, timeStr, sizeof(timeStr));
+
     char logBuf[100];
-    snprintf(logBuf, sizeof(logBuf), "Death Grip Timer ARMED: %u seconds", g_systemConfig.failsafeMaxLockSeconds);
+    snprintf(logBuf, sizeof(logBuf), "Death Grip Timer ARMED: %s", timeStr);
     logMessage(logBuf);
 }
 
