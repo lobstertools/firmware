@@ -588,7 +588,7 @@ void setup() {
   logMessage("--- /System Configuration ---"  );
 
   logMessage("--- Device Features ---"); 
-
+  
   initializeChannels();
 
   #ifdef STATUS_LED_PIN
@@ -733,6 +733,46 @@ void setup() {
       snprintf(finalBuf, sizeof(finalBuf), "Final Boot State: %s", stateToString(currentState));
       logMessage(finalBuf);
   }
+
+    // Helper buffers for string formatting
+    char tBuf1[50];
+    char tBuf2[50];
+
+    logMessage("--- Session State ---");
+
+    snprintf(logBuf, sizeof(logBuf), "State: %s (Hide Timer: %s)", 
+             stateToString(currentState), hideTimer ? "Yes" : "No");
+    logMessage(logBuf);
+
+    // Format Lock Timer: "Remaining (Configured)"
+    formatSeconds(lockSecondsRemaining, tBuf1, sizeof(tBuf1));
+    formatSeconds(lockSecondsConfig, tBuf2, sizeof(tBuf2));
+    snprintf(logBuf, sizeof(logBuf), "Lock Timer: %s (Cfg: %s)", tBuf1, tBuf2);
+    logMessage(logBuf);
+
+    // Format Penalty Timer
+    formatSeconds(penaltySecondsRemaining, tBuf1, sizeof(tBuf1));
+    formatSeconds(penaltySecondsConfig, tBuf2, sizeof(tBuf2));
+    snprintf(logBuf, sizeof(logBuf), "Penalty Timer: %s (Cfg: %s)", tBuf1, tBuf2);
+    logMessage(logBuf);
+
+    // Payback Debt
+    formatSeconds(paybackAccumulated, tBuf1, sizeof(tBuf1));
+    snprintf(logBuf, sizeof(logBuf), "Payback: %s (Debt: %s)", 
+             enablePaybackTime ? "Enabled" : "Disabled", tBuf1);
+    logMessage(logBuf);
+
+    // Statistics
+    snprintf(logBuf, sizeof(logBuf), "Stats: Streak %u | Complete %u | Aborted %u", 
+             sessionStreakCount, completedSessions, abortedSessions);
+    logMessage(logBuf);
+
+    // Lifetime
+    formatSeconds(totalLockedSessionSeconds, tBuf1, sizeof(tBuf1));
+    snprintf(logBuf, sizeof(logBuf), "Lifetime Locked: %s", tBuf1);
+    logMessage(logBuf);
+
+    logMessage("--- /Session State ---");  
 
   // --- Start web server and timers ---
   logMessage("Attaching master 1-second ticker.");
@@ -2049,14 +2089,6 @@ bool loadState() {
     sessionState.getBytes("rewards", rewardHistory, sizeof(rewardHistory));
 
     sessionState.end(); // Done reading
-
-    char timeBuf[50];
-    formatSeconds(lockSecondsRemaining, timeBuf, sizeof(timeBuf));
-
-    char logBuf[150];
-    snprintf(logBuf, sizeof(logBuf), "Loaded State: %s, Lock: %s, Streak: %lu",
-             stateToString(currentState), timeBuf, sessionStreakCount);
-    logMessage(logBuf);
     
     return true; // Report success
 }
