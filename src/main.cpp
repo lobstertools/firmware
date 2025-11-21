@@ -2333,13 +2333,13 @@ void generateSessionCode(char* buffer) {
  */
 const char* stateToString(SessionState s) {
     switch (s) {
-        case READY: return "READY";
-        case COUNTDOWN: return "COUNTDOWN";
-        case LOCKED: return "LOCKED";
-        case ABORTED: return "ABORTED";
-        case COMPLETED: return "COMPLETED";
-        case TESTING: return "TESTING";
-        default: return "UNKNOWN";
+        case READY: return "ready";
+        case COUNTDOWN: return "countdown";
+        case LOCKED: return "locked";
+        case ABORTED: return "aborted";
+        case COMPLETED: return "completed";
+        case TESTING: return "testing";
+        default: return "unknown";
     }
 }
 
@@ -2350,7 +2350,7 @@ const char* stateToString(SessionState s) {
  */
 void setLedPattern(SessionState state) {
     char logBuf[50];
-    snprintf(logBuf, sizeof(logBuf), "Setting LED pattern for %s", stateToString(state));
+    snprintf(logBuf, sizeof(logBuf), "Setting LED pattern for: %s", stateToString(state));
     logMessage(logBuf);
 
     switch (state) {
@@ -2359,7 +2359,7 @@ void setLedPattern(SessionState state) {
             statusLed.FadeOn(2000).FadeOff(2000).Forever();
             break;
         case COUNTDOWN:
-            // Fast Blink
+            // Fast Blink (2Hz) - Urgent
             statusLed.Blink(250, 250).Forever();
             break;
         case LOCKED:
@@ -2367,8 +2367,8 @@ void setLedPattern(SessionState state) {
             statusLed.On().Forever();
             break;
         case ABORTED:
-            // SOS Signal
-            statusLed.Blink(150, 150).Repeat(3).DelayAfter(1000).Forever();
+            // Standard Blink (1Hz) - Steady "Penalty Wait" pacing
+            statusLed.Blink(500, 500).Forever();
             break;
         case COMPLETED:
             // Slow Double-Blink notification
