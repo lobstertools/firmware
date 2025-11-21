@@ -707,17 +707,31 @@ void setup() {
 
   // --- STAGE 3: OPERATIONAL MODE ---
 
-  // --- Load session state from NVS ---
   logMessage("Initializing Session State from NVS...");  
   
   if (loadState()) {
-      // A valid state was loaded from NVS.
-      // Decide what to do based on the state we were in when rebooted.
+      // 1. Log the raw state we just recovered from flash
+      char rawBuf[64];
+      snprintf(rawBuf, sizeof(rawBuf), "Raw NVS State: %s", stateToString(currentState));
+      logMessage(rawBuf);
+
+      // 2. Decide what to do (e.g., abort if we rebooted during COUNTDOWN)
       handleRebootState();
+      
+      // 3. Log the final state after decision logic
+      char finalBuf[64];
+      snprintf(finalBuf, sizeof(finalBuf), "Final Boot State: %s", stateToString(currentState));
+      logMessage(finalBuf);
+
   } else {
       // No valid data in NVS. Initialize a fresh state.
       logMessage("No valid session data in NVS. Initializing fresh state.");
-      resetToReady(true); // This saves the new, fresh state (w/ correct time if synced)
+      resetToReady(true); // This saves the new, fresh state
+      
+      // Log the final state (always ready)
+      char finalBuf[64];
+      snprintf(finalBuf, sizeof(finalBuf), "Final Boot State: %s", stateToString(currentState));
+      logMessage(finalBuf);
   }
 
   // --- Start web server and timers ---
@@ -2052,19 +2066,13 @@ bool loadState() {
  * the necessary transitions (e.g., aborting, resetting).
  */
 void handleRebootState() {
-    // This is the logic moved from the old loadState()
+
     switch (currentState) {
         case LOCKED:
-            // Resume lock logic
-            logMessage("Reboot detected during active session. Resume lock.");
-            armFailsafeTimer(); // Resume fail-safe
-            startTimersForState(LOCKED); // Resume timers
-            break;
         case COUNTDOWN:
         case TESTING:
             // These are active states. A reboot during them is an abort.
-            logMessage("Reboot detected during unstable session. Aborting session...");
-            // abortSession() will handle the correct transition and save the new state.
+            logMessage("Reboot detected during session. Aborting session...");
             abortSession("Reboot");
             break;
 
