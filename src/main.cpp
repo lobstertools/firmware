@@ -348,6 +348,7 @@ class ProvisioningCallbacks: public BLECharacteristicCallbacks {
  */
 void startBLEProvisioning() {
     logMessage("Starting BLE Provisioning Mode...");
+    
     #ifdef STATUS_LED_PIN
       // Set a "pairing" pulse pattern
       statusLed.FadeOn(500).FadeOff(500).Forever();
@@ -593,7 +594,6 @@ void setup() {
 
   #ifdef STATUS_LED_PIN
     logMessage("LED Status Indicator enabled");
-    setLedPattern(currentState); // Set initial LED pattern
   #else
     logMessage("LED Status Indicator disabled");
   #endif
@@ -785,6 +785,9 @@ void setup() {
       g_tickCounter++; 
       portEXIT_CRITICAL_ISR(&timerMux);
   });
+
+  // Status led
+  setLedPattern(currentState); // Set initial LED pattern
 
   setupWebServer();
   server.begin();  
