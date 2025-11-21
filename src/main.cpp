@@ -647,10 +647,27 @@ void setup() {
   
   startMDNS();
 
-  // --- STAGE 2: WAIT FOR TIME SYNC (BLOCKING BOOT) ---
-  // We block here because the device is useless without correct time,
-  // and generating a reward code with a 1970 timestamp corrupts history.
   if (g_wifiCredentialsExist) {
+      logMessage("Boot: Waiting for IP address...");
+      unsigned long wifiWaitStart = millis();
+
+      // Wait up to 30 seconds specifically for the IP
+      while (WiFi.status() != WL_CONNECTED && (millis() - wifiWaitStart < 30000)) {
+          processLogQueue();    // Keep flushing logs so "Connected" appears instantly
+          esp_task_wdt_reset(); // Feed the watchdog so we don't crash
+          delay(100);
+      }
+      
+      if (WiFi.status() != WL_CONNECTED) {
+          logMessage("Boot: WiFi connection timed out. Skipping NTP.");
+      }
+  }
+
+  // --- STAGE 2b: WAIT FOR TIME SYNC (BLOCKING BOOT) ---
+  // We block here because the device is useless without correct time.
+  // We only enter this if WiFi is actually connected.
+  if (g_wifiCredentialsExist && WiFi.status() == WL_CONNECTED) {
+
       logMessage("Boot: Waiting for NTP time sync...");
       unsigned long waitStart = millis();
       bool timeSynced = false;
@@ -681,10 +698,10 @@ void setup() {
           getLocalTime(&timeinfo);
           char timeBuf[64];
           strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d %H:%M:%S", &timeinfo);
-          snprintf(logBuf, sizeof(logBuf), "Boot: NTP Sync Success: %s", timeBuf);
+          snprintf(logBuf, sizeof(logBuf), "NTP Sync Success: %s", timeBuf);
           logMessage(logBuf);
       } else {
-          logMessage("Boot: Time sync timed out. Proceeding with 1970 timestamp.");
+          logMessage("NTP sync timed out. Proceeding with 1970 timestamp.");
       }
   }
 
