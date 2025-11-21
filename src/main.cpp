@@ -189,7 +189,7 @@ std::vector<unsigned long> channelDelaysRemaining;
 
 // --- Logging System ---
 // Ring buffer for storing logs in memory.
-const int LOG_BUFFER_SIZE = 50;
+const int LOG_BUFFER_SIZE = 150;
 const int MAX_LOG_ENTRY_LENGTH = 150;
 char logBuffer[LOG_BUFFER_SIZE][MAX_LOG_ENTRY_LENGTH]; // For WebUI
 int logBufferIndex = 0;
