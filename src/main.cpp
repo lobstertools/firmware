@@ -1262,6 +1262,14 @@ void handleKeepAlive(AsyncWebServerRequest *request) {
         // "Pet" the watchdog only if the session is in the LOCKED state
         if (currentState == LOCKED || currentState == TESTING) {
             g_lastKeepAliveTime = millis();
+
+            // Log if we are recovering from missed checks
+            if (g_currentKeepAliveStrikes > 0) {
+                char logBuf[100];
+                snprintf(logBuf, sizeof(logBuf), "Keep-Alive Watchdog: Signal received. Resetting %d strikes.", g_currentKeepAliveStrikes);
+                logMessage(logBuf);
+            }
+
             g_currentKeepAliveStrikes = 0; // Reset strike counter
         }
         xSemaphoreGiveRecursive(stateMutex);
