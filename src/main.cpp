@@ -615,15 +615,18 @@ void setup() {
 
   logMessage("--- /Device Features ---"); 
 
-  // --- Wi-Fi Connection Attempt ---
   // Read credentials from NVS
-  wifiPreferences.begin("wifi-creds", true); // Open NVS (read-only)
-
+  if (!wifiPreferences.begin("wifi-creds", true)) {
+      logMessage("NVS Warning: 'wifi-creds' namespace not found (First boot?)");
+  } else {
+      logMessage("NVS: 'wifi-creds' loaded successfully.");
+  }
   String ssidTemp = wifiPreferences.getString("ssid", "");
   String passTemp = wifiPreferences.getString("pass", "");
+  wifiPreferences.end();
+
   strncpy(g_wifiSSID, ssidTemp.c_str(), sizeof(g_wifiSSID));
   strncpy(g_wifiPass, passTemp.c_str(), sizeof(g_wifiPass));
-  wifiPreferences.end();
 
   // Create software timer for reconnect logic
   wifiReconnectTimer = xTimerCreate("wifiTimer", pdMS_TO_TICKS(2000), pdFALSE, (void*)0, 
