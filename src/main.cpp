@@ -104,7 +104,7 @@ const SystemConfig DEFAULT_SETTINGS = {
     120,    // testModeDurationSeconds
     14400,  // failsafeMaxLockSeconds (4 hours)
     10000,  // keepAliveIntervalMs
-    3,      // keepAliveMaxStrikes
+    4,      // keepAliveMaxStrikes
     5,      // bootLoopThreshold (Default)
     120000, // stableBootTimeMs (Default 2 Minutes)
     5       // wifiMaxRetries (Default)
