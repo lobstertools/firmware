@@ -1127,12 +1127,15 @@ void abortSession(const char* source) {
 }
 
 /**
- * Called when a session completes successfully (lock/penalty timer ends).
- * Increments counters, updates streak, and clears payback debt.
+ * Called when a session completes (either Lock timer OR Penalty timer ends).
+ * If coming from LOCKED: Increments success stats, clears payback.
+ * If coming from ABORTED: Transitions to COMPLETED but retains debt/stats.
  */
 void completeSession() {
-  logMessage("Session complete. State is now COMPLETED.");
-  if (currentState == LOCKED) disarmFailsafeTimer();
+  SessionState previousState = currentState;
+
+  logMessage("Timer finished. State is now COMPLETED.");
+  if (previousState == LOCKED) disarmFailsafeTimer();
   
   sendChannelOffAll();
   currentState = COMPLETED;
@@ -1141,28 +1144,52 @@ void completeSession() {
     setLedPattern(COMPLETED);
   #endif
 
-  // --- THIS IS THE "COMMIT" STEP ---
-  // On successful completion, clear any payback that was "paid"
-  if (paybackAccumulated > 0) {
-      logMessage("Session complete. Clearing accumulated payback debt.");
-      paybackAccumulated = 0;
+  if (previousState == LOCKED) {
+      // --- SUCCESS PATH ---
+      // On successful completion of a LOCK, we clear debt and reward streaks.
+      if (paybackAccumulated > 0) {
+          logMessage("Valid session complete. Clearing accumulated payback debt.");
+          paybackAccumulated = 0;
+      }
+
+      completedSessions++;
+      if (enableStreaks) {
+          sessionStreakCount++;
+      }
+
+      // Log the new winning stats
+      char statBuf[100];
+      snprintf(statBuf, sizeof(statBuf), "Stats updated: Streak %u | Completed %u", 
+               sessionStreakCount, completedSessions);
+      logMessage(statBuf);
+  } 
+  else if (previousState == ABORTED) {
+      // --- PENALTY SERVED PATH ---
+      // The user finished the penalty box. 
+      
+      if (enablePaybackTime) {
+          logMessage("Penalty time served. Payback debt retained.");
+      } else {
+          logMessage("Penalty time served.");
+      }
   }
 
-  // Update session counters
-  completedSessions++;
-  if (enableStreaks) {
-      sessionStreakCount++;
-  }
-  
   // Clear all timers
   lockSecondsRemaining = 0;
   penaltySecondsRemaining = 0;
   testSecondsRemaining = 0;
-  g_lastKeepAliveTime = 0; // Disarm watchdog
-  g_currentKeepAliveStrikes = 0; // Reset strikes
+  g_lastKeepAliveTime = 0; 
+  g_currentKeepAliveStrikes = 0; 
   
   channelDelaysRemaining.assign(MOSFET_PINS.size(), 0);
   
+  // Log Lifetime Total
+  char timeBuf[64];
+  formatSeconds(totalLockedSessionSeconds, timeBuf, sizeof(timeBuf));
+  char totalLog[100];
+  snprintf(totalLog, sizeof(totalLog), "Lifetime Locked: %s", timeBuf);
+  logMessage(totalLog);
+
   saveState(true); // Force save
 }
 
