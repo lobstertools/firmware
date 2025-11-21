@@ -592,16 +592,16 @@ void setup() {
   initializeChannels();
 
   #ifdef STATUS_LED_PIN
-    logMessage("[Enabled] LED Status Indicator");
+    logMessage("LED Status Indicator enabled");
     pinMode(STATUS_LED_PIN, OUTPUT);
     setLedPattern(currentState); // Set initial LED pattern
   #else
-    logMessage("[Disabled] LED Status Indicator");
+    logMessage("LED Status Indicator disabled");
   #endif
 
   #ifdef ONE_BUTTON_PIN
     char btnLog[50];
-    snprintf(btnLog, sizeof(btnLog), "[Enabled] Abort Pedal (Pin %d)", ONE_BUTTON_PIN);
+    snprintf(btnLog, sizeof(btnLog), "Abort Pedal (Pin %d) enabled", ONE_BUTTON_PIN);
     logMessage(btnLog);
 
     // Use configurable abort delay from NVS (g_systemConfig)
@@ -610,7 +610,7 @@ void setup() {
     button.setLongPressIntervalMs(g_systemConfig.abortDelaySeconds * 1000);
     button.attachLongPressStart(handleLongPressStart);
   #else
-    logMessage("[Disabled] Abort Pedal");
+    logMessage("Abort Pedal disabled");
   #endif
 
   logMessage("--- /Device Features ---"); 
