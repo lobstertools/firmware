@@ -2005,7 +2005,7 @@ void handleOneSecondTick() {
         break;
     }
     case LOCKED:
-      // --- Keep-Alive Watchdog Check (3-Strike) ---
+      // --- Keep-Alive Watchdog Check ---
       if (checkKeepAliveWatchdog()) {
           return; // Aborted inside helper
       }
@@ -2025,7 +2025,7 @@ void handleOneSecondTick() {
       }
       break;
     case TESTING:
-      // --- Keep-Alive Watchdog Check (3-Strike) ---
+      // --- Keep-Alive Watchdog Check ---
       if (checkKeepAliveWatchdog()) {
           return; // Aborted inside helper
       }
@@ -2075,7 +2075,7 @@ bool loadState() {
     testSecondsRemaining = sessionState.getULong("testRemain", 0);
     hideTimer = sessionState.getBool("hideTimer", false);
 
-    // Load device configuration (Session Specific) - RENAMED KEYS
+    // Load device configuration (Session Specific)
     enableStreaks = sessionState.getBool("enableStreaks", true);
     enablePaybackTime = sessionState.getBool("enablePayback", true);
     paybackTimeMinutes = sessionState.getUShort("paybackTime", 15);
