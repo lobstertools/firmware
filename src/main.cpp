@@ -65,14 +65,14 @@ std::vector<int> MOSFET_PINS;
 
 // --- Session Constants & NVS ---
 #define REWARD_HISTORY_SIZE 10
-#define SESSION_CODE_LENGTH 32
-#define SESSION_TIMESTAMP_LENGTH 32
+#define REWARD_CODE_LENGTH 32
+#define REWARD_CHECKSUM_LENGTH 16
 #define MAX_CHANNELS 4
 
 // Struct for storing reward code history.
 struct Reward {
-  char code[SESSION_CODE_LENGTH + 1];
-  char timestamp[SESSION_TIMESTAMP_LENGTH + 1];
+  char code[REWARD_CODE_LENGTH + 1];
+  char checksum[REWARD_CHECKSUM_LENGTH + 1]; 
 };
 
 // Main state machine enum.
@@ -112,12 +112,6 @@ const SystemConfig DEFAULT_SETTINGS = {
 
 SystemConfig g_systemConfig = DEFAULT_SETTINGS;
 
-// --- NTP Configuration ---
-const char* ntpServer = "pool.ntp.org";
-const long  gmtOffset_sec = 0;
-const int   daylightOffset_sec = 3600;
-#define NTP_SYNC_TIMEOUT_MS 15000 
-
 // --- Globals ---
 AsyncWebServer server(80);
 Ticker oneSecondMasterTicker;
@@ -148,11 +142,6 @@ unsigned long testSecondsRemaining = 0;
 unsigned long penaltySecondsConfig = 0;
 unsigned long lockSecondsConfig = 0;
 bool hideTimer = false;
-
-// Time Sync State
-bool g_time_initialized = false;
-unsigned long g_lastNtpRetry = 0;
-const unsigned long NTP_RETRY_INTERVAL_MS = 60000; // Retry every 1 minute
 
 // --- WiFi Retry Logic ---
 int g_wifiRetries = 0;
@@ -230,7 +219,8 @@ void saveState(bool force = false);
 bool loadState();
 void handleRebootState();
 void startTimersForState(SessionState state);
-void generateSessionCode(char* buffer);
+void generateUniqueSessionCode(char* codeBuffer, char* checksumBuffer);
+void calculateChecksum(const char* code, char* outString);
 void initializeChannels();
 void sendChannelOn(int channel);
 void sendChannelOff(int channel);
@@ -250,8 +240,6 @@ uint16_t bytesToUint16(uint8_t* data);
 uint32_t bytesToUint32(uint8_t* data);
 void formatSeconds(unsigned long totalSeconds, char* buffer, size_t size);
 const char* stateToString(SessionState state);
-void getCurrentTimestamp(char* buffer, size_t bufferSize);
-
 
 // Health Checks
 void checkSystemHealth();
@@ -633,8 +621,6 @@ void setup() {
         connectToWiFi();
     });
 
-  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-
   if (strlen(g_wifiSSID) > 0) {
       logMessage("Found Wi-Fi credentials. Registering events.");
       g_wifiCredentialsExist = true;
@@ -661,49 +647,7 @@ void setup() {
       }
       
       if (WiFi.status() != WL_CONNECTED) {
-          logMessage("Boot: WiFi connection timed out. Skipping NTP.");
-      }
-  }
-
-  // --- STAGE 2b: WAIT FOR TIME SYNC (BLOCKING BOOT) ---
-  // We block here because the device is useless without correct time.
-  // We only enter this if WiFi is actually connected.
-  if (g_wifiCredentialsExist && WiFi.status() == WL_CONNECTED) {
-
-      logMessage("Boot: Waiting for NTP time sync...");
-      unsigned long waitStart = millis();
-      bool timeSynced = false;
-
-      // Wait up to 30 seconds for time
-      // NOTE: We must feed WDT in this loop or it might trigger (20s timeout)
-      while ((millis() - waitStart < 30000)) {
-          
-          processLogQueue(); // Flush logs so we see "Connected"
-
-          // Only check NTP if we actually have a connection
-          if (WiFi.status() == WL_CONNECTED) {
-              struct tm timeinfo;
-              // Check time manually here (configTime is async in background)
-              if (getLocalTime(&timeinfo, 0)) {
-                  g_time_initialized = true;
-                  timeSynced = true;
-                  break;
-              }
-          }
-          
-          esp_task_wdt_reset(); // Feed watchdog
-          delay(100); // Yield to allow WiFi stack to run
-      }
-
-      if (timeSynced) {
-          struct tm timeinfo;
-          getLocalTime(&timeinfo);
-          char timeBuf[64];
-          strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d %H:%M:%S", &timeinfo);
-          snprintf(logBuf, sizeof(logBuf), "NTP Sync Success: %s", timeBuf);
-          logMessage(logBuf);
-      } else {
-          logMessage("NTP sync timed out. Proceeding with 1970 timestamp.");
+          logMessage("Boot: WiFi connection timed out.");
       }
   }
 
@@ -835,28 +779,6 @@ void loop() {
 
   // Drain the log queue (Non-blocking I/O)
   processLogQueue();
-
-  // If time is not set, and we are connected to WiFi, try again every 60s
-  if (!g_time_initialized && WiFi.status() == WL_CONNECTED) {
-      unsigned long now = millis();
-      if (now - g_lastNtpRetry > NTP_RETRY_INTERVAL_MS) {
-          g_lastNtpRetry = now;
-          // Non-blocking attempt (configTime is async, but we check status)
-          struct tm timeinfo;
-          if (getLocalTime(&timeinfo, 10)) { // Quick 10ms check
-              g_time_initialized = true;
-              char logBuf[100];
-              char* timeStr = asctime(&timeinfo);
-              timeStr[strlen(timeStr)-1] = '\0'; // Remove trailing newline
-              snprintf(logBuf, sizeof(logBuf), "NTP time recovered: %s", timeStr);
-              
-              if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)100) == pdTRUE) {
-                  logMessage(logBuf); 
-                  xSemaphoreGiveRecursive(stateMutex); 
-              }
-          }
-      }
-  }
 
   // --- 2. JLed ---
   #ifdef STATUS_LED_PIN
@@ -1228,15 +1150,15 @@ void resetToReady(bool generateNewCode) {
       for (int i = REWARD_HISTORY_SIZE - 1; i > 0; i--) {
           rewardHistory[i] = rewardHistory[i - 1];
       }
-      // Generate new code and timestamp for the first entry
-      generateSessionCode(rewardHistory[0].code);
-      getCurrentTimestamp(rewardHistory[0].timestamp, SESSION_TIMESTAMP_LENGTH + 1);
+      
+      // Generate new code with collision detection against the history we just shifted
+      generateUniqueSessionCode(rewardHistory[0].code, rewardHistory[0].checksum);
 
       char logBuf[150];
       char codeSnippet[9];
       strncpy(codeSnippet, rewardHistory[0].code, 8);
       codeSnippet[8] = '\0';
-      snprintf(logBuf, sizeof(logBuf), "New Code: %s... at %s", codeSnippet, rewardHistory[0].timestamp);
+      snprintf(logBuf, sizeof(logBuf), "New Code: %s... Checksum: %s", codeSnippet, rewardHistory[0].checksum);
       logMessage(logBuf);
   } else {
       logMessage("Preserving existing reward code (Countdown Abort).");
@@ -1612,10 +1534,10 @@ void handleReward(AsyncWebServerRequest *request) {
             std::unique_ptr<JsonDocument> doc(new JsonDocument());
             JsonArray arr = (*doc).to<JsonArray>();
             for(int i = 0; i < REWARD_HISTORY_SIZE; i++) {
-                if (strlen(rewardHistory[i].code) == SESSION_CODE_LENGTH) {
+                if (strlen(rewardHistory[i].code) == REWARD_CODE_LENGTH) {
                     JsonObject reward = arr.add<JsonObject>();
                     reward["code"] = rewardHistory[i].code;
-                    reward["timestamp"] = rewardHistory[i].timestamp;
+                    reward["checksum"] = rewardHistory[i].checksum;
                 }
             }
             String response;
@@ -2209,32 +2131,6 @@ void saveState(bool force) {
 }
 
 // =================================================================
-// --- Network & Time Management ---
-// =================================================================
-// Note: WiFi reconnect logic is now handled via WiFiEvent and wifiReconnectTimer
-
-/**
- * Fills a buffer with the current timestamp (ISO 8601 or uptime).
- */
-void getCurrentTimestamp(char* buffer, size_t bufferSize) {
-  if (g_time_initialized) {
-    // Got NTP time, use ISO 8601 format
-    struct tm timeinfo;
-    if(!getLocalTime(&timeinfo)){
-      // Fallback 1: NTP was initialized but failed to get time struct
-      strncpy(buffer, "1970-01-01T00:00:00Z", bufferSize); 
-      return;
-    }
-    strftime(buffer, bufferSize, "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
-  } else {
-    // Fallback 2: NTP never initialized (e.g., boot w/o Wi-Fi).
-    // Instead of an unparsable uptime string "[+...]", send a
-    // valid, parsable "null" date (the Unix epoch).
-    strncpy(buffer, "1970-01-01T00:00:00Z", bufferSize);
-  }
-}
-
-// =================================================================
 // --- Utilities & Helpers ---
 // =================================================================
 
@@ -2267,15 +2163,12 @@ void formatSeconds(unsigned long totalSeconds, char* buffer, size_t size) {
  * Adds a message to the in-memory log buffer and pushes to the Serial Queue.
  */
 void logMessage(const char* message) {
-
     // Used shorter timeout here to prevent loop starvation
     if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(100)) == pdTRUE) {
-    char timestamp[SESSION_TIMESTAMP_LENGTH + 4]; // Room for "[+HH:MM:SS]: "
-    getCurrentTimestamp(timestamp, sizeof(timestamp)); // Pass buffer to write into
-
+    
     // Update RAM ring buffer (for API)
-    // Use snprintf for safe, bounded string formatting
-    snprintf(logBuffer[logBufferIndex], MAX_LOG_ENTRY_LENGTH, "%s: %s", timestamp, message);
+    // Removed timestamping per request. Just store the message.
+    snprintf(logBuffer[logBufferIndex], MAX_LOG_ENTRY_LENGTH, "%s", message);
     logBufferIndex++;
     if (logBufferIndex >= LOG_BUFFER_SIZE) {
         logBufferIndex = 0;
@@ -2283,21 +2176,19 @@ void logMessage(const char* message) {
     }
 
     // Push to Serial Queue
-    // Calculate next head index
     int nextHead = (serialQueueHead + 1) % SERIAL_QUEUE_SIZE;
     
     if (nextHead != serialQueueTail) {
         // Buffer not full
-        snprintf(serialLogQueue[serialQueueHead], MAX_LOG_ENTRY_LENGTH, "%s: %s", timestamp, message);
+        snprintf(serialLogQueue[serialQueueHead], MAX_LOG_ENTRY_LENGTH, "%s", message);
         serialQueueHead = nextHead;
     } else {
-        // Buffer full - drop message or overwrite?
-        // For safety, we drop message to avoid confusing the tail reader.
+        // Buffer full
     }
     
     xSemaphoreGiveRecursive(stateMutex);
   } else {
-    // Emergency fallback if locked out - do nothing to avoid crash
+    // Emergency fallback
   }
 }
 
@@ -2345,14 +2236,87 @@ void processLogQueue() {
 }
 
 /**
- * Fills a buffer with a new random session code.
+ * NATO Phonetic Alphabet Lookup
  */
-void generateSessionCode(char* buffer) {
-    const char chars[] = "UDLR";
-    for (int i = 0; i < SESSION_CODE_LENGTH; ++i) {
-        buffer[i] = chars[esp_random() % 4];
+const char* getNatoWord(char c) {
+    switch(c) {
+        case 'A': return "Alpha"; case 'B': return "Bravo"; case 'C': return "Charlie";
+        case 'D': return "Delta"; case 'E': return "Echo"; case 'F': return "Foxtrot";
+        case 'G': return "Golf"; case 'H': return "Hotel"; case 'I': return "India";
+        case 'J': return "Juliett"; case 'K': return "Kilo"; case 'L': return "Lima";
+        case 'M': return "Mike"; case 'N': return "November"; case 'O': return "Oscar";
+        case 'P': return "Papa"; case 'Q': return "Quebec"; case 'R': return "Romeo";
+        case 'S': return "Sierra"; case 'T': return "Tango"; case 'U': return "Uniform";
+        case 'V': return "Victor"; case 'W': return "Whiskey"; case 'X': return "X-ray";
+        case 'Y': return "Yankee"; case 'Z': return "Zulu";
+        default: return "";
     }
-    buffer[SESSION_CODE_LENGTH] = '\0';
+}
+
+/**
+ * Calculates the Alpha-Numeric Checksum (NATO-00)
+ * Output Format: "Alpha-92"
+ */
+void calculateChecksum(const char* code, char* outString) {
+    int weightedSum = 0;
+    int rollingVal = 0;
+    int len = strlen(code);
+
+    for (int i = 0; i < len; i++) {
+        char c = code[i];
+        int val = 0;
+        if (c == 'U') val = 1;
+        else if (c == 'D') val = 2;
+        else if (c == 'L') val = 3;
+        else if (c == 'R') val = 4;
+
+        // Alpha-Tag Logic (Weighted Sum)
+        weightedSum += val * (i + 1);
+
+        // Numeric Logic (Rolling Hash)
+        rollingVal = (rollingVal * 3 + val) % 100;
+    }
+
+    // Map to A-Z
+    int alphaIndex = weightedSum % 26;
+    char alphaChar = (char)('A' + alphaIndex);
+
+    // Format string: "NATO-NUM"
+    snprintf(outString, REWARD_CHECKSUM_LENGTH, "%s-%02d", getNatoWord(alphaChar), rollingVal);
+}
+
+/**
+ * Fills buffers with a new random session code AND its checksum.
+ * Ensures the checksum does NOT collide with any historical checksums.
+ */
+void generateUniqueSessionCode(char* codeBuffer, char* checksumBuffer) {
+    const char chars[] = "UDLR";
+    bool collision = true;
+
+    while (collision) {
+        // 1. Generate Candidate Code
+        for (int i = 0; i < REWARD_CODE_LENGTH; ++i) {
+            codeBuffer[i] = chars[esp_random() % 4];
+        }
+        codeBuffer[REWARD_CODE_LENGTH] = '\0';
+
+        // 2. Calculate Candidate Checksum
+        calculateChecksum(codeBuffer, checksumBuffer);
+
+        // 3. Check for collisions against existing history
+        // Note: rewardHistory[0] is the slot we are currently filling, so check 1..Size-1
+        collision = false;
+        for (int i = 1; i < REWARD_HISTORY_SIZE; i++) {
+            // We compare the Checksum Strings (stored in the timestamp field)
+            // If history entry is empty, skip it
+            if (strlen(rewardHistory[i].checksum) > 0) {
+                if (strncmp(checksumBuffer, rewardHistory[i].checksum, REWARD_CHECKSUM_LENGTH) == 0) {
+                    collision = true; // Duplicate found!
+                    break;
+                }
+            }
+        }
+    }
 }
 
 /**
