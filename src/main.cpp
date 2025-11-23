@@ -53,10 +53,12 @@ using namespace ArduinoJson;
 #define CRITICAL_WDT_TIMEOUT 5 // Tight for LOCKED state
 
 // --- Channel-Specific Configuration ---
-// This firmware is built specifically for the diymore 2/4-Channel MOS Switch Module.
-const int MOSFET_PINS_ARRAY[] = {16, 17};
-// const int MOSFET_PINS_ARRAY[] = {16, 17, 18, 19};
-std::vector<int> MOSFET_PINS;
+const int HARDWARE_PINS[4] = {16, 17, 18, 19};
+const int MAX_CHANNELS = 4;
+
+// Bitmask for enabled channels (loaded from Provisioning NVS)
+// Bit 0 = Ch1, Bit 1 = Ch2, etc.
+uint8_t g_enabledChannelsMask = 0x0F; // Default: 1111 (All enabled)
 
 // --- Button Configuration ---
 #ifdef ONE_BUTTON_PIN
@@ -67,7 +69,6 @@ std::vector<int> MOSFET_PINS;
 #define REWARD_HISTORY_SIZE 10
 #define REWARD_CODE_LENGTH 32
 #define REWARD_CHECKSUM_LENGTH 16
-#define MAX_CHANNELS 4
 
 // Struct for storing reward code history.
 struct Reward {
@@ -124,9 +125,10 @@ portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED; // Critical section for ti
 SessionState currentState = READY;
 
 // NVS (Preferences) objects
-Preferences wifiPreferences;
-Preferences sessionState;
-Preferences bootPrefs; // For boot loop detection
+Preferences wifiPreferences;      // Namespace: "wifi-creds"
+Preferences provisioningPrefs;    // Namespace: "provisioning" (Hardware Config)
+Preferences sessionState;         // Namespace: "session" (Dynamic State)
+Preferences bootPrefs;            // Namespace: "boot" (Crash tracking)
 
 #ifdef STATUS_LED_PIN
   jled::JLed statusLed = jled::JLed(STATUS_LED_PIN);
@@ -173,8 +175,8 @@ uint32_t abortedSessions = 0;
 uint32_t paybackAccumulated = 0; // In seconds
 uint32_t totalLockedSessionSeconds = 0; // Total accumulated lock time
 
-// Vector holding countdowns for each channel.
-std::vector<unsigned long> channelDelaysRemaining;
+// Fixed array holding countdowns for each channel (Index 0-3).
+unsigned long channelDelaysRemaining[MAX_CHANNELS] = {0, 0, 0, 0};
 
 // --- Logging System ---
 // Ring buffer for storing logs in memory.
@@ -222,8 +224,8 @@ void startTimersForState(SessionState state);
 void generateUniqueSessionCode(char* codeBuffer, char* checksumBuffer);
 void calculateChecksum(const char* code, char* outString);
 void initializeChannels();
-void sendChannelOn(int channel);
-void sendChannelOff(int channel);
+void sendChannelOn(int channelIndex);
+void sendChannelOff(int channelIndex);
 void sendChannelOnAll();
 void sendChannelOffAll();
 void setLedPattern(SessionState state);
@@ -274,6 +276,10 @@ void handleFactoryReset(AsyncWebServerRequest *request);
 #define PROV_ENABLE_STREAKS_CHAR_UUID       "5a160004-8334-469b-a316-c340cf29188f"
 #define PROV_ENABLE_PAYBACK_TIME_CHAR_UUID  "5a160005-8334-469b-a316-c340cf29188f"
 #define PROV_PAYBACK_TIME_CHAR_UUID         "5a160006-8334-469b-a316-c340cf29188f"
+#define PROV_CH1_ENABLE_UUID                "5a16000A-8334-469b-a316-c340cf29188f"
+#define PROV_CH2_ENABLE_UUID                "5a16000B-8334-469b-a316-c340cf29188f"
+#define PROV_CH3_ENABLE_UUID                "5a16000C-8334-469b-a316-c340cf29188f"
+#define PROV_CH4_ENABLE_UUID                "5a16000D-8334-469b-a316-c340cf29188f"
 
 volatile bool g_credentialsReceived = false;
 
@@ -327,6 +333,34 @@ class ProvisioningCallbacks: public BLECharacteristicCallbacks {
             sessionState.end();
             logMessage("BLE: Received Payback Time");
         }
+        // Handle Hardware Config (provisioning namespace)
+        else {
+            provisioningPrefs.begin("provisioning", false);
+            
+            // Read current mask (default to 0x0F if not set)
+            uint8_t currentMask = provisioningPrefs.getUChar("chMask", 0x0F);
+            bool enable = (bool)data[0];
+
+            if (uuid == PROV_CH1_ENABLE_UUID) {
+                if(enable) currentMask |= (1 << 0); else currentMask &= ~(1 << 0);
+                logMessage(enable ? "BLE: Enabled Ch1" : "BLE: Disabled Ch1");
+            } else if (uuid == PROV_CH2_ENABLE_UUID) {
+                if(enable) currentMask |= (1 << 1); else currentMask &= ~(1 << 1);
+                logMessage(enable ? "BLE: Enabled Ch2" : "BLE: Disabled Ch2");
+            } else if (uuid == PROV_CH3_ENABLE_UUID) {
+                if(enable) currentMask |= (1 << 2); else currentMask &= ~(1 << 2);
+                logMessage(enable ? "BLE: Enabled Ch3" : "BLE: Disabled Ch3");
+            } else if (uuid == PROV_CH4_ENABLE_UUID) {
+                if(enable) currentMask |= (1 << 3); else currentMask &= ~(1 << 3);
+                logMessage(enable ? "BLE: Enabled Ch4" : "BLE: Disabled Ch4");
+            }
+            
+            provisioningPrefs.putUChar("chMask", currentMask);
+            provisioningPrefs.end();
+            
+            // Update global immediately for this boot session
+            g_enabledChannelsMask = currentMask; 
+        }
     }
 };
 
@@ -361,6 +395,10 @@ void startBLEProvisioning() {
     createChar(PROV_ENABLE_STREAKS_CHAR_UUID);
     createChar(PROV_ENABLE_PAYBACK_TIME_CHAR_UUID);
     createChar(PROV_PAYBACK_TIME_CHAR_UUID);
+    createChar(PROV_CH1_ENABLE_UUID);
+    createChar(PROV_CH2_ENABLE_UUID);
+    createChar(PROV_CH3_ENABLE_UUID);
+    createChar(PROV_CH4_ENABLE_UUID);
 
     pService->start();
     
@@ -422,10 +460,8 @@ void startMDNS() {
  */
 void IRAM_ATTR failsafe_timer_callback(void* arg) {
     // EMERGENCY: Force all channels LOW immediately
-    // We iterate via raw array size to be safe in ISR context
-    int numPins = sizeof(MOSFET_PINS_ARRAY) / sizeof(MOSFET_PINS_ARRAY[0]);
-    for (int i = 0; i < numPins; i++) {
-        digitalWrite(MOSFET_PINS_ARRAY[i], LOW);
+    for (int i = 0; i < MAX_CHANNELS; i++) {
+        digitalWrite(HARDWARE_PINS[i], LOW);
     }
     
     // While technically not 100% ISR-safe (can panic), a panic reset 
@@ -528,6 +564,11 @@ void setup() {
   
   delay(3000);
 
+  // Safety First: Initialize all hardware pins to a safe state (LOW)
+  // immediately, before any logic or config loading occurs.
+  // This prevents floating pins while waiting for NVS.
+  initializeChannels();
+
   // Initialize the state Mutex before anything else
   stateMutex = xSemaphoreCreateRecursiveMutex();
   if (stateMutex == NULL) {
@@ -577,8 +618,21 @@ void setup() {
   logMessage("--- /System Configuration ---"  );
 
   logMessage("--- Device Features ---"); 
+
+  // Load Enable Mask from Provisioning NVS
+  provisioningPrefs.begin("provisioning", true); // Read-only
+  g_enabledChannelsMask = provisioningPrefs.getUChar("chMask", 0x0F); // Default all on
+  provisioningPrefs.end();
   
-  initializeChannels();
+  // Log which channels are logically enabled
+  for(int i=0; i<MAX_CHANNELS; i++) {
+      if ((g_enabledChannelsMask >> i) & 1) {
+          snprintf(logBuf, sizeof(logBuf), "Channel %d (GPIO %d): ENABLED", i+1, HARDWARE_PINS[i]);
+      } else {
+          snprintf(logBuf, sizeof(logBuf), "Channel %d (GPIO %d): DISABLED", i+1, HARDWARE_PINS[i]);
+      }
+      logMessage(logBuf);
+  }
 
   #ifdef STATUS_LED_PIN
     logMessage("LED Status Indicator enabled");
@@ -904,51 +958,49 @@ void updateWatchdogTimeout(uint32_t seconds) {
 
 /**
  * Initializes all channel pins as outputs.
- * This MUST be called before loadState() or resetToReady().
+ * Sets them to LOW immediately to prevent floating states on boot.
+ * This function does NOT check logical 'enabled' status, it is purely hardware init.
  */
 void initializeChannels() {
-  logMessage("Channel Module: diymore MOS module");
-
-  MOSFET_PINS.reserve(MAX_CHANNELS);
-  MOSFET_PINS.assign(MOSFET_PINS_ARRAY, MOSFET_PINS_ARRAY + (sizeof(MOSFET_PINS_ARRAY) / sizeof(MOSFET_PINS_ARRAY[0])));
+  logMessage("Initializing Channels: Setting all 4 to Output LOW (Safe State)");
   
-  channelDelaysRemaining.reserve(MAX_CHANNELS);
-
-  char logBuf[50];
-  snprintf(logBuf, sizeof(logBuf), "Device has %d channel(s).", (int)MOSFET_PINS.size());
-  logMessage(logBuf);
-
-  for (int pin : MOSFET_PINS) {
-      pinMode(pin, OUTPUT);
-      digitalWrite(pin, LOW); // Default to off
-      snprintf(logBuf, sizeof(logBuf), "Initialized GPIO %d (OFF)", pin);
-      logMessage(logBuf);
+  // Iterate through all physical pins defined in hardware config
+  for (int i = 0; i < MAX_CHANNELS; i++) {
+      pinMode(HARDWARE_PINS[i], OUTPUT);
+      digitalWrite(HARDWARE_PINS[i], LOW); // Ensure circuit is open
   }
 }
 
 /**
  * Turns a specific Channel channel ON (closes circuit).
  */
-void sendChannelOn(int channel) {
-  if (channel < 0 || channel >= (int)MOSFET_PINS.size()) return;
+void sendChannelOn(int channelIndex) {
+  if (channelIndex < 0 || channelIndex >= MAX_CHANNELS) return;
+
+  // Hardware Safety Check: Is this channel enabled in config?
+  if ( !((g_enabledChannelsMask >> channelIndex) & 1) ) {
+      return; // Silently fail if channel is disabled in config
+  }
+
   char logBuf[50];
-  snprintf(logBuf, sizeof(logBuf), "Channel %d: ON ", channel);
+  snprintf(logBuf, sizeof(logBuf), "Channel %d: ON ", channelIndex + 1);
   logMessage(logBuf);
   #ifndef DEBUG_MODE
-    digitalWrite(MOSFET_PINS[channel], HIGH);
+    digitalWrite(HARDWARE_PINS[channelIndex], HIGH);
   #endif
 }
 
 /**
  * Turns a specific Channel channel OFF (opens circuit).
  */
-void sendChannelOff(int channel) {
-  if (channel < 0 || channel >= (int)MOSFET_PINS.size()) return;
+void sendChannelOff(int channelIndex) {
+  if (channelIndex < 0 || channelIndex >= MAX_CHANNELS) return;
+  // We always allow turning off, even if disabled, for safety.
   char logBuf[50];
-  snprintf(logBuf, sizeof(logBuf), "Channel %d: OFF", channel);
+  snprintf(logBuf, sizeof(logBuf), "Channel %d: OFF", channelIndex + 1);
   logMessage(logBuf);
   #ifndef DEBUG_MODE
-    digitalWrite(MOSFET_PINS[channel], LOW);
+    digitalWrite(HARDWARE_PINS[channelIndex], LOW);
   #endif
 }
 
@@ -956,8 +1008,8 @@ void sendChannelOff(int channel) {
  * Turns all Channel channels ON.
  */
 void sendChannelOnAll() {
-  logMessage("Channels: ON (All)");
-  for (size_t i=0; i < MOSFET_PINS.size(); i++) { sendChannelOn(i); }
+  logMessage("Channels: ON (All Enabled)");
+  for (int i=0; i < MAX_CHANNELS; i++) { sendChannelOn(i); }
 }
 
 /**
@@ -965,7 +1017,7 @@ void sendChannelOnAll() {
  */
 void sendChannelOffAll() {
   logMessage("Channels: OFF (All)");
-  for (size_t i=0; i < MOSFET_PINS.size(); i++) { sendChannelOff(i); }
+  for (int i=0; i < MAX_CHANNELS; i++) { sendChannelOff(i); }
 }
 
 // =================================================================
@@ -1103,7 +1155,7 @@ void completeSession() {
   g_lastKeepAliveTime = 0; 
   g_currentKeepAliveStrikes = 0; 
   
-  channelDelaysRemaining.assign(MOSFET_PINS.size(), 0);
+  for(int i=0; i<MAX_CHANNELS; i++) channelDelaysRemaining[i] = 0;
   
   // Log Lifetime Total
   char timeBuf[64];
@@ -1139,7 +1191,7 @@ void resetToReady(bool generateNewCode) {
   lockSecondsConfig = 0;
   hideTimer = false;
   
-  channelDelaysRemaining.assign(MOSFET_PINS.size(), 0);
+  for(int i=0; i<MAX_CHANNELS; i++) channelDelaysRemaining[i] = 0;
 
   // Only generate new code if requested.
   // If we abort a countdown, we generally want to keep the same code 
@@ -1330,9 +1382,8 @@ void handleStart(AsyncWebServerRequest *request, uint8_t *data, size_t len, size
         return;
     }
 
-    // Validate JSON body using camelCase keys
-    if (!(*doc)["duration"].is<JsonInteger>() || !(*doc)["penaltyDuration"].is<JsonInteger>() || !(*doc)["delays"].is<JsonArray>()) {
-        sendJsonError(request, 400, "Missing required fields: duration, penaltyDuration, delays.");
+    if (!(*doc)["duration"].is<JsonInteger>() || !(*doc)["penaltyDuration"].is<JsonInteger>()) {
+        sendJsonError(request, 400, "Missing required fields: duration, penaltyDuration.");
         return;
     }
     
@@ -1340,7 +1391,17 @@ void handleStart(AsyncWebServerRequest *request, uint8_t *data, size_t len, size
     unsigned long durationMinutes = (*doc)["duration"];
     int penaltyMin = (*doc)["penaltyDuration"];
     bool newHideTimer = (*doc)["hideTimer"] | false; // Default to false if not present
-    JsonArray delays = (*doc)["delays"].as<JsonArray>();
+    
+    unsigned long tempDelays[4] = {0};
+    
+    // Parse channels from nested 'delays' object
+    if ((*doc)["delays"].is<JsonObject>()) {
+        JsonObject delaysObj = (*doc)["delays"];
+        if (delaysObj.containsKey("ch1")) tempDelays[0] = delaysObj["ch1"].as<unsigned long>();
+        if (delaysObj.containsKey("ch2")) tempDelays[1] = delaysObj["ch2"].as<unsigned long>();
+        if (delaysObj.containsKey("ch3")) tempDelays[2] = delaysObj["ch3"].as<unsigned long>();
+        if (delaysObj.containsKey("ch4")) tempDelays[3] = delaysObj["ch4"].as<unsigned long>();
+    }
 
     // Validate ranges using Provisioned Settings
     if (durationMinutes < g_systemConfig.minLockMinutes || durationMinutes > g_systemConfig.maxLockMinutes) {
@@ -1349,25 +1410,13 @@ void handleStart(AsyncWebServerRequest *request, uint8_t *data, size_t len, size
     if (penaltyMin < g_systemConfig.minPenaltyMinutes || penaltyMin > g_systemConfig.maxPenaltyMinutes) {
         sendJsonError(request, 400, "Invalid penaltyDuration."); return;
     }
-    if (delays.isNull()) {
-        sendJsonError(request, 400, "Invalid 'delays' field. Must be an array."); return;
-    }
-    if (delays.size() != MOSFET_PINS.size()) {
-        char errBuf[100];
-        snprintf(errBuf, sizeof(errBuf), "Incorrect number of delays. Expected %d, got %d.", (int)MOSFET_PINS.size(), delays.size());
-        sendJsonError(request, 400, errBuf);
-        return;
-    }
 
     unsigned long maxDelay = 0;
-    std::vector<unsigned long> tempDelays; // Temporary storage
-    tempDelays.reserve(MOSFET_PINS.size());
-    
-    // Store delays
-    for(JsonVariant d : delays) {
-        unsigned long delay = d.as<unsigned long>();
-        tempDelays.push_back(delay);
-        if (delay > maxDelay) maxDelay = delay;
+    for(int i=0; i<4; i++) {
+        if (!((g_enabledChannelsMask >> i) & 1)) {
+            tempDelays[i] = 0; 
+        }
+        if (tempDelays[i] > maxDelay) maxDelay = tempDelays[i];
     }
 
     // Clean up the input JSON document - automatic via RAII
@@ -1386,7 +1435,8 @@ void handleStart(AsyncWebServerRequest *request, uint8_t *data, size_t len, size
         }
 
         // Copy validated data to State
-        channelDelaysRemaining = tempDelays;
+        for(int i=0; i<MAX_CHANNELS; i++) channelDelaysRemaining[i] = tempDelays[i];
+        
         hideTimer = newHideTimer;
 
         // Apply any pending payback time from previous sessions
@@ -1554,13 +1604,13 @@ void handleReward(AsyncWebServerRequest *request) {
  * Handler for GET /status
  */
 void handleStatus(AsyncWebServerRequest *request) {
-    // 1. Create the Snapshot (Keep your existing struct logic)
+    // 1. Create the Snapshot
     struct StateSnapshot {
         SessionState state;
         unsigned long lockRemain;
         unsigned long penaltyRemain;
         unsigned long testRemain;
-        std::vector<unsigned long> delays;
+        unsigned long delays[4];
         bool hideTimer;
         uint32_t streaks;
         uint32_t aborted;
@@ -1575,7 +1625,7 @@ void handleStatus(AsyncWebServerRequest *request) {
         snapshot.lockRemain = lockSecondsRemaining;
         snapshot.penaltyRemain = penaltySecondsRemaining;
         snapshot.testRemain = testSecondsRemaining;
-        snapshot.delays = channelDelaysRemaining; // Vector copy (allocates, but on stack/temp)
+        for(int i=0; i<4; i++) snapshot.delays[i] = channelDelaysRemaining[i];
         snapshot.hideTimer = hideTimer;
         snapshot.streaks = sessionStreakCount;
         snapshot.aborted = abortedSessions;
@@ -1600,20 +1650,22 @@ void handleStatus(AsyncWebServerRequest *request) {
     doc["lockSecondsRemaining"] = snapshot.lockRemain;
     doc["penaltySecondsRemaining"] = snapshot.penaltyRemain;
     doc["testSecondsRemaining"] = snapshot.testRemain;
-    
-    JsonArray delays = doc["countdownSecondsRemaining"].to<JsonArray>();
-    for(unsigned long d : snapshot.delays) {
-        delays.add(d);
-    }
+
+    JsonObject channels = doc["delays"].to<JsonObject>();
+    channels["ch1"] = snapshot.delays[0];
+    channels["ch2"] = snapshot.delays[1];
+    channels["ch3"] = snapshot.delays[2];
+    channels["ch4"] = snapshot.delays[3];
 
     doc["hideTimer"] = snapshot.hideTimer;
 
     // Accumulated stats
-    doc["streaks"] = snapshot.streaks;
-    doc["abortedSessions"] = snapshot.aborted;
-    doc["completedSessions"] = snapshot.completed;
-    doc["totalLockedSessionSeconds"] = snapshot.totalLocked;
-    doc["pendingPaybackSeconds"] = snapshot.payback;
+    JsonObject stats = doc["stats"].to<JsonObject>();
+    stats["streaks"] = snapshot.streaks;
+    stats["aborted"] = snapshot.aborted;
+    stats["completed"] = snapshot.completed;
+    stats["totalTimeLockedSeconds"] = snapshot.totalLocked;
+    stats["totalTimeLockedSeconds"] = snapshot.payback;
 
     // Serialize directly into the response stream
     serializeJson(doc, *response);
@@ -1637,12 +1689,18 @@ void handleDetails(AsyncWebServerRequest *request) {
         (*doc)["name"] = DEVICE_NAME;
         (*doc)["id"] = uniqueHostname;
         (*doc)["version"] = DEVICE_VERSION;
-        (*doc)["numberOfChannels"] = (int)MOSFET_PINS.size();
+        (*doc)["numberOfChannels"] = 4;
         (*doc)["address"] = WiFi.localIP().toString();
-        
-        // Device Configuration
+
+        // Channels Configuration
+        JsonObject channels = (*doc)["channels"].to<JsonObject>();
+        channels["ch1"] = (bool)((g_enabledChannelsMask >> 0) & 1);
+        channels["ch2"] = (bool)((g_enabledChannelsMask >> 1) & 1);
+        channels["ch3"] = (bool)((g_enabledChannelsMask >> 2) & 1);
+        channels["ch4"] = (bool)((g_enabledChannelsMask >> 3) & 1);
+
+        // Deterrent Configuration
         JsonObject config = (*doc)["config"].to<JsonObject>();
-        config["abortDelaySeconds"] = g_systemConfig.abortDelaySeconds;
         config["enableStreaks"] = enableStreaks;
         config["enablePaybackTime"] = enablePaybackTime;
         config["paybackTimeMinutes"] = paybackTimeMinutes;
@@ -1795,12 +1853,12 @@ void handleFactoryReset(AsyncWebServerRequest *request) {
             return;
         }
 
-        logMessage("API: /factory-reset received. Erasing all credentials and session data.");
+        logMessage("API: /factory-reset received. Erasing credentials and session data.");
         
         // Erase Wi-Fi
-        wifiPreferences.begin("wifi-creds", false); // Open read/write
+        wifiPreferences.begin("wifi-creds", false); 
         wifiPreferences.clear();
-        wifiPreferences.end(); // Commit changes
+        wifiPreferences.end(); 
 
         logMessage("Wi-Fi credentials erased.");
 
@@ -1809,6 +1867,11 @@ void handleFactoryReset(AsyncWebServerRequest *request) {
         sessionState.clear();
         sessionState.end();
         logMessage("Session state and config erased.");
+        
+        // Erase all device provisioning settings
+        provisioningPrefs.begin("provisioning", false); 
+        provisioningPrefs.clear();
+        provisioningPrefs.end(); 
        
         // Clear boot loop stats
         bootPrefs.begin("boot", false);
@@ -1924,15 +1987,17 @@ void handleOneSecondTick() {
         bool allDelaysZero = true;
 
         // Decrement all active channel delays
-        size_t count = std::min(MOSFET_PINS.size(), channelDelaysRemaining.size());        
-        for (size_t i = 0; i < count; i++) {
-            if (channelDelaysRemaining[i] > 0) {
-                allDelaysZero = false;
-                if (--channelDelaysRemaining[i] == 0) {
-                    sendChannelOn(i); // Turn on Channel when its timer hits zero
-                    char logBuf[100];
-                    snprintf(logBuf, sizeof(logBuf), "Channel %d delay finished. Channel closed.", i);
-                    logMessage(logBuf);
+        for (size_t i = 0; i < MAX_CHANNELS; i++) {
+            // Check if enabled in mask
+            if ((g_enabledChannelsMask >> i) & 1) {
+                if (channelDelaysRemaining[i] > 0) {
+                    allDelaysZero = false;
+                    if (--channelDelaysRemaining[i] == 0) {
+                        sendChannelOn(i); // Turn on Channel when its timer hits zero
+                        char logBuf[100];
+                        snprintf(logBuf, sizeof(logBuf), "Channel %d delay finished. Channel closed.", (int)i + 1);
+                        logMessage(logBuf);
+                    }
                 }
             }
         }
@@ -2037,9 +2102,7 @@ bool loadState() {
     totalLockedSessionSeconds = sessionState.getUInt("totalLocked", 0);
 
     // Load arrays (as binary blobs)
-    // Important: Resize to current hardware config before loading
-    channelDelaysRemaining.resize(MOSFET_PINS.size(), 0);
-    sessionState.getBytes("delays", channelDelaysRemaining.data(), sizeof(unsigned long) * MOSFET_PINS.size());
+    sessionState.getBytes("delays", channelDelaysRemaining, sizeof(channelDelaysRemaining));
     sessionState.getBytes("rewards", rewardHistory, sizeof(rewardHistory));
 
     sessionState.end(); // Done reading
@@ -2117,9 +2180,7 @@ void saveState(bool force) {
     sessionState.putUInt("totalLocked", totalLockedSessionSeconds);
 
     // Save arrays as binary "blobs"
-    // Save vectors based on current hardware size
-    channelDelaysRemaining.resize(MOSFET_PINS.size(), 0); 
-    sessionState.putBytes("delays", channelDelaysRemaining.data(), sizeof(unsigned long) * MOSFET_PINS.size());
+    sessionState.putBytes("delays", channelDelaysRemaining, sizeof(channelDelaysRemaining));
     sessionState.putBytes("rewards", rewardHistory, sizeof(rewardHistory));
     
     // Save magic value
