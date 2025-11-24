@@ -1655,7 +1655,7 @@ void handleStatus(AsyncWebServerRequest *request) {
     stats["aborted"] = snapshot.aborted;
     stats["completed"] = snapshot.completed;
     stats["totalTimeLockedSeconds"] = snapshot.totalLocked;
-    stats["totalTimeLockedSeconds"] = snapshot.payback;
+    stats["pendingPaybackSeconds"] = snapshot.payback;
 
     // Serialize directly into the response stream
     serializeJson(doc, *response);
