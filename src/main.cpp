@@ -2438,7 +2438,6 @@ const char* stateToString(SessionState s) {
     }
 }
 
-#ifdef STATUS_LED_PIN
 /**
  * Sets the JLed pattern based on the current session state.
  * This is called every time the state changes.
@@ -2479,4 +2478,3 @@ void setLedPattern(SessionState state) {
             break;
     }
 }
-#endif
