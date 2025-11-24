@@ -7,7 +7,7 @@
  *
  * Description:
  * Core firmware for the Lobster Lock ESP32 device. This code
- * manages all session state (e.g., READY, LOCKED, ABORTED),
+ * manages all session state (e.g., READY, ARMED, LOCKED),
  * provides a JSON API for the web UI, and persists the
  * session to NVS (Preferences) to survive power loss.
  * =================================================================
@@ -61,9 +61,7 @@ const int MAX_CHANNELS = 4;
 uint8_t g_enabledChannelsMask = 0x0F; // Default: 1111 (All enabled)
 
 // --- Button Configuration ---
-#ifdef ONE_BUTTON_PIN
-  OneButton button(ONE_BUTTON_PIN, true, true); // Pin, active low, internal pull-up
-#endif
+OneButton button(ONE_BUTTON_PIN, true, true); // Pin, active low, internal pull-up
 
 // --- Session Constants & NVS ---
 #define REWARD_HISTORY_SIZE 10
@@ -77,11 +75,14 @@ struct Reward {
 };
 
 // Main state machine enum.
-enum SessionState : uint8_t { READY, COUNTDOWN, LOCKED, ABORTED, COMPLETED, TESTING };
+enum SessionState : uint8_t { READY, ARMED, LOCKED, ABORTED, COMPLETED, TESTING };
+
+// Trigger Strategy (How we move from ARMED -> LOCKED)
+enum TriggerStrategy : uint8_t { STRAT_AUTO_COUNTDOWN, STRAT_BUTTON_TRIGGER };
 
 // --- SYTEM PREFERENCES ---
 struct SystemConfig {
-    uint32_t abortDelaySeconds;
+    uint32_t longPressSeconds;
     uint32_t minLockMinutes;
     uint32_t maxLockMinutes;
     uint32_t minPenaltyMinutes;
@@ -93,11 +94,12 @@ struct SystemConfig {
     uint32_t bootLoopThreshold;
     uint32_t stableBootTimeMs;
     uint32_t wifiMaxRetries;
+    uint32_t armedTimeoutSeconds;
 };
 
 // Default values (used if NVS is empty)
 const SystemConfig DEFAULT_SETTINGS = {
-    3,      // abortDelaySeconds
+    5,      // longPressSeconds
     15,     // minLockMinutes
     180,    // maxLockMinutes
     15,     // minPenaltyMinutes
@@ -108,7 +110,8 @@ const SystemConfig DEFAULT_SETTINGS = {
     4,      // keepAliveMaxStrikes
     5,      // bootLoopThreshold (Default)
     120000, // stableBootTimeMs (Default 2 Minutes)
-    5       // wifiMaxRetries (Default)
+    5,      // wifiMaxRetries (Default)
+    600     // armedTimeoutSeconds (10 Minutes Default)
 };
 
 SystemConfig g_systemConfig = DEFAULT_SETTINGS;
@@ -123,6 +126,7 @@ SemaphoreHandle_t stateMutex = NULL;
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED; // Critical section for tick counter
 
 SessionState currentState = READY;
+TriggerStrategy currentStrategy = STRAT_AUTO_COUNTDOWN;
 
 // NVS (Preferences) objects
 Preferences wifiPreferences;      // Namespace: "wifi-creds"
@@ -130,9 +134,7 @@ Preferences provisioningPrefs;    // Namespace: "provisioning" (Hardware Config)
 Preferences sessionState;         // Namespace: "session" (Dynamic State)
 Preferences bootPrefs;            // Namespace: "boot" (Crash tracking)
 
-#ifdef STATUS_LED_PIN
-  jled::JLed statusLed = jled::JLed(STATUS_LED_PIN);
-#endif
+jled::JLed statusLed = jled::JLed(STATUS_LED_PIN);
 
 // Global array to hold reward history.
 Reward rewardHistory[REWARD_HISTORY_SIZE];
@@ -141,6 +143,8 @@ Reward rewardHistory[REWARD_HISTORY_SIZE];
 unsigned long lockSecondsRemaining = 0;
 unsigned long penaltySecondsRemaining = 0;
 unsigned long testSecondsRemaining = 0;
+unsigned long triggerTimeoutRemaining = 0;
+
 unsigned long penaltySecondsConfig = 0;
 unsigned long lockSecondsConfig = 0;
 bool hideTimer = false;
@@ -230,9 +234,8 @@ void sendChannelOnAll();
 void sendChannelOffAll();
 void setLedPattern(SessionState state);
 void sendJsonError(AsyncWebServerRequest *request, int code, const String& message);
-#ifdef ONE_BUTTON_PIN
-void handleLongPressStart();
-#endif
+void handleLongPress();
+void handleDoublePress();
 bool checkKeepAliveWatchdog();
 void armFailsafeTimer();
 void disarmFailsafeTimer();
@@ -254,7 +257,7 @@ void setupWebServer();
 void handleRoot(AsyncWebServerRequest *request);
 void handleHealth(AsyncWebServerRequest *request);
 void handleKeepAlive(AsyncWebServerRequest *request);
-void handleStart(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total);
+void handleArm(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total);
 void handleStartTest(AsyncWebServerRequest *request);
 void handleAbort(AsyncWebServerRequest *request);
 void handleReward(AsyncWebServerRequest *request);
@@ -371,15 +374,13 @@ class ProvisioningCallbacks: public BLECharacteristicCallbacks {
 void startBLEProvisioning() {
     logMessage("Starting BLE Provisioning Mode...");
     
-    #ifdef STATUS_LED_PIN
-      // Set a "pairing" pulse pattern
-      statusLed.FadeOn(500).FadeOff(500).Forever();
-    #endif
+    // Set a "pairing" pulse pattern
+    statusLed.FadeOn(500).FadeOff(500).Forever();
 
     // Initialize BLE
     BLEDevice::init(DEVICE_NAME);
     BLEServer *pServer = BLEDevice::createServer();
-    BLEService *pService = pServer->createService(PROV_SERVICE_UUID);
+    BLEService *pService = pServer->createService(BLEUUID(PROV_SERVICE_UUID), 30);
     
     ProvisioningCallbacks* callbacks = new ProvisioningCallbacks();
 
@@ -417,9 +418,9 @@ void startBLEProvisioning() {
             delay(1000);
             ESP.restart();
         }
-        #ifdef STATUS_LED_PIN
-          statusLed.Update(); // Keep the LED pattern running
-        #endif
+
+        statusLed.Update(); // Keep the LED pattern running
+
         esp_task_wdt_reset(); // Feed the watchdog
         delay(100);
     }
@@ -564,17 +565,17 @@ void setup() {
   
   delay(3000);
 
-  // Safety First: Initialize all hardware pins to a safe state (LOW)
-  // immediately, before any logic or config loading occurs.
-  // This prevents floating pins while waiting for NVS.
-  initializeChannels();
-
   // Initialize the state Mutex before anything else
   stateMutex = xSemaphoreCreateRecursiveMutex();
   if (stateMutex == NULL) {
       Serial.println("Critical Error: Could not create Mutex.");
       ESP.restart();
   }
+
+  // Safety First: Initialize all hardware pins to a safe state (LOW)
+  // immediately, before any logic or config loading occurs.
+  // This prevents floating pins while waiting for NVS.
+  initializeChannels();
 
   // --- Boot Loop Detection ---
   checkBootLoop();
@@ -601,7 +602,7 @@ void setup() {
   esp_task_wdt_add(NULL);
 
   logMessage("--- System Configuration ---");
-  snprintf(logBuf, sizeof(logBuf), "Abort Delay: %lu s", g_systemConfig.abortDelaySeconds);
+  snprintf(logBuf, sizeof(logBuf), "Long Press: %lu s", g_systemConfig.longPressSeconds);
   logMessage(logBuf);
   snprintf(logBuf, sizeof(logBuf), "Lock Range: %lu-%lu min", g_systemConfig.minLockMinutes, g_systemConfig.maxLockMinutes);
   logMessage(logBuf);
@@ -634,25 +635,19 @@ void setup() {
       logMessage(logBuf);
   }
 
-  #ifdef STATUS_LED_PIN
-    logMessage("LED Status Indicator enabled");
-  #else
-    logMessage("LED Status Indicator disabled");
-  #endif
+  logMessage("LED Status Indicator enabled");
 
-  #ifdef ONE_BUTTON_PIN
-    char btnLog[50];
-    snprintf(btnLog, sizeof(btnLog), "Abort Pedal (Pin %d) enabled", ONE_BUTTON_PIN);
-    logMessage(btnLog);
+  char btnLog[50];
+  snprintf(btnLog, sizeof(btnLog), "Button (Pin %d) enabled", ONE_BUTTON_PIN);
+  logMessage(btnLog);
 
-    // Use configurable abort delay from NVS (g_systemConfig)
-    snprintf(logBuf, sizeof(logBuf), "Long press (%lu sec) to abort session.", g_systemConfig.abortDelaySeconds);
-    logMessage(logBuf);
-    button.setLongPressIntervalMs(g_systemConfig.abortDelaySeconds * 1000);
-    button.attachLongPressStart(handleLongPressStart);
-  #else
-    logMessage("Abort Pedal disabled");
-  #endif
+  // Context-sensitive button logic.
+  // Long Press: Used for Triggering (Armed) or Aborting (Locked)
+  button.setLongPressIntervalMs(g_systemConfig.longPressSeconds * 1000);
+  button.attachLongPressStart(handleLongPress);
+
+  // Double Click: Used for safely cancelling Armed state
+  button.attachDoubleClick(handleDoublePress);
 
   logMessage("--- /Device Features ---"); 
 
@@ -693,6 +688,9 @@ void setup() {
       logMessage("Boot: Waiting for IP address...");
       unsigned long wifiWaitStart = millis();
 
+      // Stay awake WiFi
+      WiFi.setSleep(false);
+
       // Wait up to 30 seconds specifically for the IP
       while (WiFi.status() != WL_CONNECTED && (millis() - wifiWaitStart < 30000)) {
           processLogQueue();    // Keep flushing logs so "Connected" appears instantly
@@ -715,7 +713,7 @@ void setup() {
       snprintf(rawBuf, sizeof(rawBuf), "Raw NVS State: %s", stateToString(currentState));
       logMessage(rawBuf);
 
-      // 2. Decide what to do (e.g., abort if we rebooted during COUNTDOWN)
+      // 2. Decide what to do (e.g., abort if we rebooted during ARMED)
       handleRebootState();
       
       // 3. Log the final state after decision logic
@@ -835,18 +833,14 @@ void loop() {
   processLogQueue();
 
   // --- 2. JLed ---
-  #ifdef STATUS_LED_PIN
-    // JLed is not thread safe.
-    if (xSemaphoreTakeRecursive(stateMutex, 0) == pdTRUE) {
-      statusLed.Update(); // Update JLed state machine
-      xSemaphoreGiveRecursive(stateMutex);
-    }
-  #endif
+  // JLed is not thread safe.
+  if (xSemaphoreTakeRecursive(stateMutex, 0) == pdTRUE) {
+    statusLed.Update(); // Update JLed state machine
+    xSemaphoreGiveRecursive(stateMutex);
+  }
 
   // --- 3. Button ---
-  #ifdef ONE_BUTTON_PIN
-    button.tick(); // Poll the button
-  #endif
+  button.tick(); // Poll the button
 
   // --- 4. One Second Tick (Accumulated) ---
   // ISR Safe Read of g_tickCounter
@@ -893,10 +887,9 @@ void checkBootLoop() {
         initializeChannels();
 
         delay(5000);
-        #ifdef STATUS_LED_PIN
-            pinMode(STATUS_LED_PIN, OUTPUT);
-            digitalWrite(STATUS_LED_PIN, HIGH); // Solid on for error
-        #endif
+        pinMode(STATUS_LED_PIN, OUTPUT);
+        digitalWrite(STATUS_LED_PIN, HIGH);
+
         delay(30000); // 30 Second penalty box before attempting start
     }
 
@@ -1034,9 +1027,7 @@ void stopTestMode() {
     sendChannelOffAll();
     currentState = READY;
     startTimersForState(READY); // Set WDT
-    #ifdef STATUS_LED_PIN
-      setLedPattern(READY);
-    #endif
+    setLedPattern(READY);
     testSecondsRemaining = 0;
     g_lastKeepAliveTime = 0; // Disarm watchdog
     g_currentKeepAliveStrikes = 0; // Reset strikes
@@ -1044,7 +1035,7 @@ void stopTestMode() {
 }
 
 /**
- * Aborts an active session (LOCKED, COUNTDOWN, or TESTING).
+ * Aborts an active session (LOCKED, ARMED, or TESTING).
  * Implements payback logic, resets streak, and starts the reward penalty timer.
  */
 void abortSession(const char* source) {
@@ -1056,10 +1047,8 @@ void abortSession(const char* source) {
         logMessage(logBuf);
         sendChannelOffAll();
         currentState = ABORTED;
-        #ifdef STATUS_LED_PIN
-          setLedPattern(ABORTED);
-        #endif
-        
+        setLedPattern(ABORTED);
+       
         // Implement Abort Logic:
         sessionStreakCount = 0; // 1. Reset streak
         abortedSessions++;      // 2. Increment counter
@@ -1085,10 +1074,12 @@ void abortSession(const char* source) {
         g_currentKeepAliveStrikes = 0; // Reset strikes
         saveState(true); // Force save
     
-    } else if (currentState == COUNTDOWN) {
+    } else if (currentState == ARMED) {
+        // ARMED is a "Safety Off" state, but not yet "Point of No Return".
+        // Aborting here returns to READY without penalty.
         logMessage(logBuf);
         sendChannelOffAll();
-        resetToReady(false); // Cancel countdown (this disarms watchdog)
+        resetToReady(false); // Cancel arming (this disarms watchdog)
     } else if (currentState == TESTING) {
         snprintf(logBuf, sizeof(logBuf), "%s: Aborting test mode.", source);
         logMessage(logBuf);
@@ -1114,9 +1105,7 @@ void completeSession() {
   sendChannelOffAll();
   currentState = COMPLETED;
   startTimersForState(COMPLETED); // Reset WDT
-  #ifdef STATUS_LED_PIN
-    setLedPattern(COMPLETED);
-  #endif
+  setLedPattern(COMPLETED);
 
   if (previousState == LOCKED) {
       // --- SUCCESS PATH ---
@@ -1152,6 +1141,7 @@ void completeSession() {
   lockSecondsRemaining = 0;
   penaltySecondsRemaining = 0;
   testSecondsRemaining = 0;
+  triggerTimeoutRemaining = 0;
   g_lastKeepAliveTime = 0; 
   g_currentKeepAliveStrikes = 0; 
   
@@ -1179,13 +1169,13 @@ void resetToReady(bool generateNewCode) {
   currentState = READY;
   startTimersForState(READY);
 
-  #ifdef STATUS_LED_PIN
-    setLedPattern(READY);
-  #endif
+  setLedPattern(READY);
+
   // Clear all timers and configs
   lockSecondsRemaining = 0;
   penaltySecondsRemaining = 0;
   testSecondsRemaining = 0;
+  triggerTimeoutRemaining = 0;
   g_lastKeepAliveTime = 0; // Disarm watchdog
   g_currentKeepAliveStrikes = 0; // Reset strikes
   lockSecondsConfig = 0;
@@ -1213,7 +1203,7 @@ void resetToReady(bool generateNewCode) {
       snprintf(logBuf, sizeof(logBuf), "New Code: %s... Checksum: %s", codeSnippet, rewardHistory[0].checksum);
       logMessage(logBuf);
   } else {
-      logMessage("Preserving existing reward code (Countdown Abort).");
+      logMessage("Preserving existing reward code.");
   }
 
   saveState(true); // Force save
@@ -1251,13 +1241,13 @@ void setupWebServer() {
   // API: Keep-alive endpoint (POST /keepalive)
   server.on("/keepalive", HTTP_POST, handleKeepAlive);
 
-  // API: Start a new lock session (POST /start)
-  server.on("/start", HTTP_POST,
+  // API: Arm/Start a session (POST /arm) - REPLACES /start
+  server.on("/arm", HTTP_POST,
       [](AsyncWebServerRequest *request) { 
         // Empty onReq, processing happens in onBody
       },
       NULL, // onUpload
-      handleStart // onBody
+      handleArm // onBody
   );
 
   // API: Start a short test mode (POST /start-test)
@@ -1306,7 +1296,7 @@ void handleRoot(AsyncWebServerRequest *request) {
     html += "<li><b>GET /log</b> - Internal system logs.</li>";
     html += "<li><b>GET /reward</b> - Retrieve past unlock codes.</li>";
     html += "<li><b>GET /health</b> - Simple connectivity check.</li>";
-    html += "<li><b>POST /start</b> - Begin session (JSON body required).</li>";
+    html += "<li><b>POST /arm</b> - Begin session (JSON body required).</li>";
     html += "<li><b>POST /start-test</b> - Run 2-min hardware test.</li>";
     html += "<li><b>POST /abort</b> - Emergency stop (triggers penalty).</li>";
     html += "<li><b>POST /keepalive</b> - Reset connection watchdog.</li>";
@@ -1355,10 +1345,10 @@ void handleKeepAlive(AsyncWebServerRequest *request) {
 }
 
 /**
- * Handler for POST /start (body)
- * Validates JSON, sets timers, and locks channels.
+ * Handler for POST /arm (body)
+ * Validates JSON, determines Strategy, sets timers, and enters ARMED state.
  */
-void handleStart(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+void handleArm(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
     // Handle JSON body
     if (index + len != total) {
         return; // Wait for more data
@@ -1376,7 +1366,7 @@ void handleStart(AsyncWebServerRequest *request, uint8_t *data, size_t len, size
     DeserializationError error = deserializeJson(*doc, (const char*)data, len);
     if (error) {
         char logBuf[100];
-        snprintf(logBuf, sizeof(logBuf), "Failed to parse /start JSON: %s", error.c_str());
+        snprintf(logBuf, sizeof(logBuf), "Failed to parse /arm JSON: %s", error.c_str());
         logMessage(logBuf);
         sendJsonError(request, 400, "Invalid JSON body.");
         return;
@@ -1392,17 +1382,23 @@ void handleStart(AsyncWebServerRequest *request, uint8_t *data, size_t len, size
     int penaltyMin = (*doc)["penaltyDuration"];
     bool newHideTimer = (*doc)["hideTimer"] | false; // Default to false if not present
     
+    // Parse Strategy
+    String stratStr = (*doc)["triggerStrategy"] | "autoCountdown";
+    TriggerStrategy requestedStrat = STRAT_AUTO_COUNTDOWN;
+    if (stratStr == "buttonTrigger") {
+        requestedStrat = STRAT_BUTTON_TRIGGER;
+    }
+
     unsigned long tempDelays[4] = {0};
     
     // Parse channels from nested 'delays' object
     if ((*doc)["delays"].is<JsonObject>()) {
         JsonObject delaysObj = (*doc)["delays"];
-        if (delaysObj.containsKey("ch1")) tempDelays[0] = delaysObj["ch1"].as<unsigned long>();
-        if (delaysObj.containsKey("ch2")) tempDelays[1] = delaysObj["ch2"].as<unsigned long>();
-        if (delaysObj.containsKey("ch3")) tempDelays[2] = delaysObj["ch3"].as<unsigned long>();
-        if (delaysObj.containsKey("ch4")) tempDelays[3] = delaysObj["ch4"].as<unsigned long>();
+        if (delaysObj["ch1"].is<unsigned long>()) tempDelays[0] = delaysObj["ch1"].as<unsigned long>();
+        if (delaysObj["ch2"].is<unsigned long>()) tempDelays[1] = delaysObj["ch2"].as<unsigned long>();
+        if (delaysObj["ch3"].is<unsigned long>()) tempDelays[2] = delaysObj["ch3"].as<unsigned long>();
+        if (delaysObj["ch4"].is<unsigned long>()) tempDelays[3] = delaysObj["ch4"].as<unsigned long>();
     }
-
     // Validate ranges using Provisioned Settings
     if (durationMinutes < g_systemConfig.minLockMinutes || durationMinutes > g_systemConfig.maxLockMinutes) {
         sendJsonError(request, 400, "Invalid duration."); return;
@@ -1411,16 +1407,12 @@ void handleStart(AsyncWebServerRequest *request, uint8_t *data, size_t len, size
         sendJsonError(request, 400, "Invalid penaltyDuration."); return;
     }
 
-    unsigned long maxDelay = 0;
+    // Filter delays by enabled mask
     for(int i=0; i<4; i++) {
         if (!((g_enabledChannelsMask >> i) & 1)) {
             tempDelays[i] = 0; 
         }
-        if (tempDelays[i] > maxDelay) maxDelay = tempDelays[i];
     }
-
-    // Clean up the input JSON document - automatic via RAII
-    // doc will be deleted here or we can force it by reset() if we needed memory immediately.
 
     // Prepare response buffer (stack allocated String)
     String responseJson; 
@@ -1438,6 +1430,7 @@ void handleStart(AsyncWebServerRequest *request, uint8_t *data, size_t len, size
         for(int i=0; i<MAX_CHANNELS; i++) channelDelaysRemaining[i] = tempDelays[i];
         
         hideTimer = newHideTimer;
+        currentStrategy = requestedStrat;
 
         // Apply any pending payback time from previous sessions
         unsigned long paybackInSeconds = paybackAccumulated;
@@ -1450,44 +1443,34 @@ void handleStart(AsyncWebServerRequest *request, uint8_t *data, size_t len, size
         penaltySecondsConfig = penaltyMin * 60;
         
         // Logging (Inside mutex for thread safety of buffer)
-        char timeBuf[50];
-        formatSeconds(paybackInSeconds, timeBuf, sizeof(timeBuf));
         char logBuf[256];
-        snprintf(logBuf, sizeof(logBuf), "API: /start. Lock: %lu min (+%s payback). Hide: %s",
-                durationMinutes, timeBuf, (hideTimer ? "Yes" : "No"));
+        snprintf(logBuf, sizeof(logBuf), "API: /arm. Mode: %s. Lock: %lu min. Hide: %s",
+                (currentStrategy == STRAT_BUTTON_TRIGGER ? "BUTTON" : "AUTO"),
+                durationMinutes, (hideTimer ? "Yes" : "No"));
         logMessage(logBuf);
-        logMessage("Delays configured via API.");
 
         // Logic - Response Doc on Heap via RAII
         std::unique_ptr<JsonDocument> responseDoc(new JsonDocument());
 
-        if (maxDelay == 0) {
-            // No delays, start lock immediately
-            logMessage("   -> No delay. Locking immediately.");
-            currentState = LOCKED;
-            #ifdef STATUS_LED_PIN
-              setLedPattern(LOCKED);
-            #endif
-            lockSecondsRemaining = lockSecondsConfig;
-            sendChannelOnAll();
-            startTimersForState(LOCKED);
-            armFailsafeTimer(); // DEATH GRIP
-            g_lastKeepAliveTime = millis(); // Arm keep-alive watchdog
-            g_currentKeepAliveStrikes = 0;  // Reset strikes
-            (*responseDoc)["status"] = "locked";
-            (*responseDoc)["durationSeconds"] = lockSecondsRemaining;
+        // Enter ARMED state
+        currentState = ARMED;
+        setLedPattern(ARMED);
+        
+        // Setup based on strategy
+        if (currentStrategy == STRAT_BUTTON_TRIGGER) {
+            // Wait for Button: Set Timeout
+            triggerTimeoutRemaining = g_systemConfig.armedTimeoutSeconds;
+            logMessage("   -> Waiting for Manual Trigger.");
         } else {
-            // Start countdown
-            logMessage("   -> Starting countdown...");
-            currentState = COUNTDOWN;
-            #ifdef STATUS_LED_PIN
-              setLedPattern(COUNTDOWN);
-            #endif
-            lockSecondsRemaining = 0;
-            startTimersForState(COUNTDOWN);
-            // NOTE: Watchdog is NOT armed here, only when LOCKED
-            (*responseDoc)["status"] = "countdown";
+            // Auto: Timers start ticking immediately in handleOneSecondTick
+            logMessage("   -> Auto Sequence Started.");
         }
+
+        startTimersForState(ARMED);
+        // NOTE: Watchdog is NOT armed here, only when LOCKED (or in TEST)
+
+        (*responseDoc)["status"] = "armed";
+        (*responseDoc)["triggerStrategy"] = (currentStrategy == STRAT_BUTTON_TRIGGER) ? "buttonTrigger" : "autoCountdown";
         
         saveState(true);
         
@@ -1519,9 +1502,7 @@ void handleStartTest(AsyncWebServerRequest *request) {
         logMessage("API: /start-test received. Engaging Channels for 2 min.");
         sendChannelOnAll();
         currentState = TESTING;
-        #ifdef STATUS_LED_PIN
-          setLedPattern(TESTING);
-        #endif
+        setLedPattern(TESTING);
         testSecondsRemaining = g_systemConfig.testModeDurationSeconds;
         startTimersForState(TESTING);
         g_lastKeepAliveTime = millis(); // Arm keep-alive watchdog for test mode
@@ -1547,7 +1528,7 @@ void handleStartTest(AsyncWebServerRequest *request) {
 void handleAbort(AsyncWebServerRequest *request) {
     String responseJson;
     if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(1000)) == pdTRUE) {
-        if (currentState != LOCKED && currentState != COUNTDOWN && currentState != TESTING) {
+        if (currentState != LOCKED && currentState != ARMED && currentState != TESTING) {
           xSemaphoreGiveRecursive(stateMutex);
           sendJsonError(request, 409, "Device is not in an abortable state."); return;
         }
@@ -1575,7 +1556,7 @@ void handleAbort(AsyncWebServerRequest *request) {
 void handleReward(AsyncWebServerRequest *request) {
     // To be safe, we just take the lock for the whole operation here since it's read-only and fast enough.
     if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(1000)) == pdTRUE) {
-        if (currentState == LOCKED || currentState == ABORTED || currentState == COUNTDOWN) {
+        if (currentState == LOCKED || currentState == ABORTED || currentState == ARMED) {
             xSemaphoreGiveRecursive(stateMutex);
             sendJsonError(request, 403, "Reward is not yet available.");
         } else {
@@ -1607,6 +1588,7 @@ void handleStatus(AsyncWebServerRequest *request) {
     // 1. Create the Snapshot
     struct StateSnapshot {
         SessionState state;
+        TriggerStrategy strategy;
         unsigned long lockRemain;
         unsigned long penaltyRemain;
         unsigned long testRemain;
@@ -1622,6 +1604,7 @@ void handleStatus(AsyncWebServerRequest *request) {
     // Quick Lock & Copy
     if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(200)) == pdTRUE) {
         snapshot.state = currentState;
+        snapshot.strategy = currentStrategy;
         snapshot.lockRemain = lockSecondsRemaining;
         snapshot.penaltyRemain = penaltySecondsRemaining;
         snapshot.testRemain = testSecondsRemaining;
@@ -1638,11 +1621,10 @@ void handleStatus(AsyncWebServerRequest *request) {
         return;
     }
 
-    // 2. Stream directly to TCP buffer (No String objects, No 'new' Heap allocs)
+    // 2. Stream directly to TCP buffer
     AsyncResponseStream *response = request->beginResponseStream("application/json");
     
-    // Use Stack memory. ArduinoJson v7 calculates size automatically.
-    // For this specific payload, ~512-1024 bytes is plenty.
+    // Use Stack memory. 
     JsonDocument doc; 
 
     // Timers
@@ -1650,6 +1632,14 @@ void handleStatus(AsyncWebServerRequest *request) {
     doc["lockSecondsRemaining"] = snapshot.lockRemain;
     doc["penaltySecondsRemaining"] = snapshot.penaltyRemain;
     doc["testSecondsRemaining"] = snapshot.testRemain;
+    
+    // Arming Context
+    if (snapshot.state == ARMED) {
+        doc["triggerStrategy"] = (snapshot.strategy == STRAT_BUTTON_TRIGGER) ? "buttonTrigger" : "autoCountdown";
+        if (snapshot.strategy == STRAT_BUTTON_TRIGGER) {
+            doc["triggerTimeoutRemaining"] = triggerTimeoutRemaining;
+        }
+    }
 
     JsonObject channels = doc["delays"].to<JsonObject>();
     channels["ch1"] = snapshot.delays[0];
@@ -1700,20 +1690,18 @@ void handleDetails(AsyncWebServerRequest *request) {
         channels["ch4"] = (bool)((g_enabledChannelsMask >> 3) & 1);
 
         // Deterrent Configuration
-        JsonObject config = (*doc)["config"].to<JsonObject>();
+        JsonObject config = (*doc)["deterrents"].to<JsonObject>();
         config["enableStreaks"] = enableStreaks;
         config["enablePaybackTime"] = enablePaybackTime;
         config["paybackTimeMinutes"] = paybackTimeMinutes;
         
         // Add features array
         JsonArray features = (*doc)["features"].to<JsonArray>();
-        #ifdef STATUS_LED_PIN
-            features.add("LED_Indicator");
-        #endif
-        #ifdef ONE_BUTTON_PIN
-            features.add("Abort_Pedal");
-        #endif
-        
+        features.add("abortLongPress");
+        features.add("startLongPress");
+        features.add("startCountdown");
+        features.add("statusLed");
+
         serializeJson(*doc, response);
         xSemaphoreGiveRecursive(stateMutex); 
     } else {
@@ -1901,19 +1889,57 @@ void handleFactoryReset(AsyncWebServerRequest *request) {
 // --- Button Callbacks ---
 // =================================================================
 
-#ifdef ONE_BUTTON_PIN
 /**
- * Called by OneButton when a long press starts.
- * This will trigger an abort/cancel of the current session.
+ * DOUBLE PRESS: Used to Abort ARMED state (Safety).
  */
-void handleLongPressStart() {
+void handleDoublePress() {
     if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(100)) == pdTRUE) {
-        logMessage("Button: Long press detected. Aborting session.");
-        abortSession("Button");
+        if (currentState == ARMED) {
+            logMessage("Button: Double Press. Cancelling Arming.");
+            abortSession("Button DoublePress");
+        }
         xSemaphoreGiveRecursive(stateMutex);
     }
 }
-#endif
+
+/**
+ * LONG PRESS: Context-Sensitive
+ * 1. If ARMED + BUTTON_TRIGGER: Transitions to LOCKED (Trigger the session).
+ * 2. If LOCKED: Triggers ABORT (Emergency Stop / Penalty).
+ */
+void handleLongPress() {
+    if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(100)) == pdTRUE) {
+        
+        // Start the session
+        if (currentState == ARMED) {
+            // TRIGGER Logic
+            if (currentStrategy == STRAT_BUTTON_TRIGGER) {
+                logMessage("Button: Trigger confirmed! Locking session.");
+                
+                currentState = LOCKED;
+                setLedPattern(LOCKED);
+                
+                lockSecondsRemaining = lockSecondsConfig;
+                startTimersForState(LOCKED);
+                armFailsafeTimer(); 
+                g_lastKeepAliveTime = millis(); 
+                g_currentKeepAliveStrikes = 0;  
+                
+                // Engage hardware immediately
+                sendChannelOnAll();
+
+                saveState(true);
+            }
+        } 
+        // Abort the session
+        else if (currentState == LOCKED) {
+            logMessage("Button: Long press in LOCKED state. Emergency Abort.");
+            abortSession("Button LongPress");
+        }
+        
+        xSemaphoreGiveRecursive(stateMutex);
+    }
+}
 
 // =================================================================
 // --- Timer Callbacks ---
@@ -1930,8 +1956,8 @@ void startTimersForState(SessionState state) {
         updateWatchdogTimeout(DEFAULT_WDT_TIMEOUT); // Loose loop check (network delays)
     }
 
-    if (state == COUNTDOWN) {
-        logMessage("Starting countdown logic.");
+    if (state == ARMED) {
+        logMessage("Starting arming logic.");
     } else if (state == LOCKED) {
         logMessage("Starting lock logic.");
     } else if (state == ABORTED) {
@@ -1981,40 +2007,52 @@ bool checkKeepAliveWatchdog() {
  */
 void handleOneSecondTick() {
   switch (currentState) {
-    case COUNTDOWN:
+    case ARMED:
     { 
-        // Add scope for new variable
-        bool allDelaysZero = true;
+        if (currentStrategy == STRAT_AUTO_COUNTDOWN) {
+            // STRATEGY: Auto Countdown
+            // Decrement active channels immediately
+            bool allDelaysZero = true;
 
-        // Decrement all active channel delays
-        for (size_t i = 0; i < MAX_CHANNELS; i++) {
-            // Check if enabled in mask
-            if ((g_enabledChannelsMask >> i) & 1) {
-                if (channelDelaysRemaining[i] > 0) {
-                    allDelaysZero = false;
-                    if (--channelDelaysRemaining[i] == 0) {
-                        sendChannelOn(i); // Turn on Channel when its timer hits zero
-                        char logBuf[100];
-                        snprintf(logBuf, sizeof(logBuf), "Channel %d delay finished. Channel closed.", (int)i + 1);
-                        logMessage(logBuf);
+            // Decrement all active channel delays
+            for (size_t i = 0; i < MAX_CHANNELS; i++) {
+                // Check if enabled in mask
+                if ((g_enabledChannelsMask >> i) & 1) {
+                    if (channelDelaysRemaining[i] > 0) {
+                        allDelaysZero = false;
+                        if (--channelDelaysRemaining[i] == 0) {
+                            sendChannelOn(i); // Turn on Channel when its timer hits zero
+                            char logBuf[100];
+                            snprintf(logBuf, sizeof(logBuf), "Channel %d delay finished. Channel closed.", (int)i + 1);
+                            logMessage(logBuf);
+                        }
                     }
                 }
             }
-        }
 
-        // If all delays are done, transition to LOCKED
-        if (allDelaysZero) {
-            logMessage("All channel delays finished. Transitioning to LOCKED state.");
-            currentState = LOCKED;
-            #ifdef STATUS_LED_PIN
-              setLedPattern(LOCKED);
-            #endif
-            lockSecondsRemaining = lockSecondsConfig;
-            startTimersForState(LOCKED);
-            armFailsafeTimer(); // DEATH GRIP
-            g_lastKeepAliveTime = millis(); // Arm keep-alive watchdog
-            g_currentKeepAliveStrikes = 0;  // Reset strikes
-            saveState(true); // Force save
+            // If all delays are done, transition to LOCKED
+            if (allDelaysZero) {
+                logMessage("Auto-Start: All delays finished. Transitioning to LOCKED state.");
+                currentState = LOCKED;
+                setLedPattern(LOCKED);
+                lockSecondsRemaining = lockSecondsConfig;
+                startTimersForState(LOCKED);
+                armFailsafeTimer(); // DEATH GRIP
+                g_lastKeepAliveTime = millis(); // Arm keep-alive watchdog
+                g_currentKeepAliveStrikes = 0;  // Reset strikes
+                saveState(true); // Force save
+            }
+        } 
+        else if (currentStrategy == STRAT_BUTTON_TRIGGER) {
+            // STRATEGY: Wait for Button
+            // Channels do NOT tick down here. We just wait for the button event.
+            // Check for timeout.
+            if (triggerTimeoutRemaining > 0) {
+                triggerTimeoutRemaining--;
+            } else {
+                logMessage("Armed Timeout: Button not pressed in time. Aborting.");
+                abortSession("Arm Timeout");
+            }
         }
         break;
     }
@@ -2082,11 +2120,14 @@ bool loadState() {
     
     // Load all values from NVS, providing a default for each
     currentState = (SessionState)sessionState.getUChar("state", (uint8_t)READY);
+    currentStrategy = (TriggerStrategy)sessionState.getUChar("strategy", (uint8_t)STRAT_AUTO_COUNTDOWN);
+
     lockSecondsRemaining = sessionState.getULong("lockRemain", 0);
     penaltySecondsRemaining = sessionState.getULong("penaltyRemain", 0);
     penaltySecondsConfig = sessionState.getULong("penaltyConfig", 0);
     lockSecondsConfig = sessionState.getULong("lockConfig", 0);
     testSecondsRemaining = sessionState.getULong("testRemain", 0);
+    
     hideTimer = sessionState.getBool("hideTimer", false);
 
     // Load device configuration (Session Specific)
@@ -2118,7 +2159,7 @@ void handleRebootState() {
 
     switch (currentState) {
         case LOCKED:
-        case COUNTDOWN:
+        case ARMED:
         case TESTING:
             // These are active states. A reboot during them is an abort.
             logMessage("Reboot detected during session. Aborting session...");
@@ -2160,6 +2201,8 @@ void saveState(bool force) {
     
     // Save all dynamic state variables
     sessionState.putUChar("state", (uint8_t)currentState);
+    sessionState.putUChar("strategy", (uint8_t)currentStrategy);
+    
     sessionState.putULong("lockRemain", lockSecondsRemaining);
     sessionState.putULong("penaltyRemain", penaltySecondsRemaining);
     sessionState.putULong("penaltyConfig", penaltySecondsConfig);
@@ -2386,7 +2429,7 @@ void generateUniqueSessionCode(char* codeBuffer, char* checksumBuffer) {
 const char* stateToString(SessionState s) {
     switch (s) {
         case READY: return "ready";
-        case COUNTDOWN: return "countdown";
+        case ARMED: return "armed";
         case LOCKED: return "locked";
         case ABORTED: return "aborted";
         case COMPLETED: return "completed";
@@ -2407,15 +2450,15 @@ void setLedPattern(SessionState state) {
 
     switch (state) {
         case READY:
-            // Slow Breath
+            // Slow Breath - Waiting for session configuration
             statusLed.FadeOn(2000).FadeOff(2000).Forever();
             break;
-        case COUNTDOWN:
-            // Fast Blink (2Hz) - Urgent
+        case ARMED:
+            // Fast Blink (2Hz) - Waiting for trigger or counting down
             statusLed.Blink(250, 250).Forever();
             break;
         case LOCKED:
-            // Solid On
+            // Solid On - Solid as a lock
             statusLed.On().Forever();
             break;
         case ABORTED:
@@ -2423,11 +2466,11 @@ void setLedPattern(SessionState state) {
             statusLed.Blink(500, 500).Forever();
             break;
         case COMPLETED:
-            // Slow Double-Blink notification
+            // Slow Double-Blink notification - Ready for more?
             statusLed.Blink(200, 200).Repeat(2).DelayAfter(3000).Forever();
             break;
         case TESTING:
-            // Medium Pulse
+            // Medium Pulse - I'm alive and all is well
             statusLed.FadeOn(750).FadeOff(750).Forever();
             break;
         default:
