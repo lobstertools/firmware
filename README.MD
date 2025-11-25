@@ -1,3 +1,7 @@
+> [!IMPORTANT]
+> **Unreleased Beta**
+> This software is currently in an unreleased beta state. Features are subject to change and stability is not guaranteed.
+
 # Lobster Lock - Firmware
 
 This is the PlatformIO-based firmware for the Lobster Lock ESP32 device.
