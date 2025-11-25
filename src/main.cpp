@@ -642,11 +642,11 @@ void setup() {
   logMessage(btnLog);
 
   // Context-sensitive button logic.
-  // Long Press: Used for Triggering (Armed) or Aborting (Locked)
+  // Long Press: ALWAYS ABORT/CANCEL (Armed -> Ready, Locked -> Penalty)
   button.setLongPressIntervalMs(g_systemConfig.longPressSeconds * 1000);
   button.attachLongPressStart(handleLongPress);
 
-  // Double Click: Used for safely cancelling Armed state
+  // Double Click: TRIGGER (Armed -> Locked)
   button.attachDoubleClick(handleDoublePress);
 
   logMessage("--- /Device Features ---"); 
@@ -1890,31 +1890,15 @@ void handleFactoryReset(AsyncWebServerRequest *request) {
 // =================================================================
 
 /**
- * DOUBLE PRESS: Used to Abort ARMED state (Safety).
+ * DOUBLE PRESS: Used to TRIGGER the session when ARMED.
  */
 void handleDoublePress() {
     if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(100)) == pdTRUE) {
-        if (currentState == ARMED) {
-            logMessage("Button: Double Press. Cancelling Arming.");
-            abortSession("Button DoublePress");
-        }
-        xSemaphoreGiveRecursive(stateMutex);
-    }
-}
-
-/**
- * LONG PRESS: Context-Sensitive
- * 1. If ARMED + BUTTON_TRIGGER: Transitions to LOCKED (Trigger the session).
- * 2. If LOCKED: Triggers ABORT (Emergency Stop / Penalty).
- */
-void handleLongPress() {
-    if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(100)) == pdTRUE) {
         
-        // Start the session
+        // TRIGGER Logic
         if (currentState == ARMED) {
-            // TRIGGER Logic
             if (currentStrategy == STRAT_BUTTON_TRIGGER) {
-                logMessage("Button: Trigger confirmed! Locking session.");
+                logMessage("Button: Double Click confirmed! Locking session.");
                 
                 currentState = LOCKED;
                 setLedPattern(LOCKED);
@@ -1930,8 +1914,26 @@ void handleLongPress() {
 
                 saveState(true);
             }
+        }
+
+        xSemaphoreGiveRecursive(stateMutex);
+    }
+}
+
+/**
+ * LONG PRESS: Universal Cancel/Abort.
+ * 1. If ARMED: Cancels arming (Returns to READY, no penalty).
+ * 2. If LOCKED: Triggers ABORT (Emergency Stop / Penalty).
+ */
+void handleLongPress() {
+    if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(100)) == pdTRUE) {
+        
+        // Cancel Arming (Safety reset)
+        if (currentState == ARMED) {
+            logMessage("Button: Long Press. Cancelling Arming.");
+            abortSession("Button LongPress");
         } 
-        // Abort the session
+        // Abort the session (Emergency Stop)
         else if (currentState == LOCKED) {
             logMessage("Button: Long press in LOCKED state. Emergency Abort.");
             abortSession("Button LongPress");
