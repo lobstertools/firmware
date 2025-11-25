@@ -83,10 +83,10 @@ enum TriggerStrategy : uint8_t { STRAT_AUTO_COUNTDOWN, STRAT_BUTTON_TRIGGER };
 // --- SYTEM PREFERENCES ---
 struct SystemConfig {
     uint32_t longPressSeconds;
-    uint32_t minLockMinutes;
-    uint32_t maxLockMinutes;
-    uint32_t minPenaltyMinutes;
-    uint32_t maxPenaltyMinutes;
+    uint32_t minLockSeconds;
+    uint32_t maxLockSeconds;
+    uint32_t minPenaltySeconds;
+    uint32_t maxPenaltySeconds;
     uint32_t testModeDurationSeconds;
     uint32_t failsafeMaxLockSeconds;
     uint32_t keepAliveIntervalMs;
@@ -99,19 +99,19 @@ struct SystemConfig {
 
 // Default values (used if NVS is empty)
 const SystemConfig DEFAULT_SETTINGS = {
-    5,      // longPressSeconds
-    15,     // minLockMinutes
-    180,    // maxLockMinutes
-    15,     // minPenaltyMinutes
-    180,    // maxPenaltyMinutes
-    120,    // testModeDurationSeconds
-    14400,  // failsafeMaxLockSeconds (4 hours)
-    10000,  // keepAliveIntervalMs
-    4,      // keepAliveMaxStrikes
-    5,      // bootLoopThreshold (Default)
-    120000, // stableBootTimeMs (Default 2 Minutes)
-    5,      // wifiMaxRetries (Default)
-    600     // armedTimeoutSeconds (10 Minutes Default)
+    5,          // longPressSeconds
+    900,        // minLockSeconds (15 min)
+    10800,      // maxLockSeconds (180 min)
+    900,        // minPenaltySeconds (15 min)
+    10800,      // maxPenaltySeconds (180 min)
+    120,        // testModeDurationSeconds
+    14400,      // failsafeMaxLockSeconds (4 hours)
+    10000,      // keepAliveIntervalMs
+    4,          // keepAliveMaxStrikes
+    5,          // bootLoopThreshold (Default)
+    120000,     // stableBootTimeMs (Default 2 Minutes)
+    5,          // wifiMaxRetries (Default)
+    600         // armedTimeoutSeconds (10 Minutes Default)
 };
 
 SystemConfig g_systemConfig = DEFAULT_SETTINGS;
@@ -170,7 +170,7 @@ bool g_bootMarkedStable = false;
 // Global Config (loaded from NVS)
 bool enableStreaks = true;          // Default to true
 bool enablePaybackTime = true;      // Default to true
-uint16_t paybackTimeMinutes = 15;   // Default to 15min
+uint32_t paybackTimeSeconds = 900;  // Default to 900s (15min).
 
 // Persistent Session Counters (loaded from NVS)
 uint32_t sessionStreakCount = 0;
@@ -331,10 +331,10 @@ class ProvisioningCallbacks: public BLECharacteristicCallbacks {
             logMessage("BLE: Received Enable Payback Time");
         } else if (uuid == PROV_PAYBACK_TIME_CHAR_UUID) {
             sessionState.begin("session", false);
-            uint16_t val = bytesToUint16(data);
-            sessionState.putUShort("paybackTime", val);
+            uint32_t val = bytesToUint32(data);
+            sessionState.putUInt("paybackSeconds", val);
             sessionState.end();
-            logMessage("BLE: Received Payback Time");
+            logMessage("BLE: Received Payback Time (Seconds)");
         }
         // Handle Hardware Config (provisioning namespace)
         else {
@@ -604,9 +604,9 @@ void setup() {
   logMessage("--- System Configuration ---");
   snprintf(logBuf, sizeof(logBuf), "Long Press: %lu s", g_systemConfig.longPressSeconds);
   logMessage(logBuf);
-  snprintf(logBuf, sizeof(logBuf), "Lock Range: %lu-%lu min", g_systemConfig.minLockMinutes, g_systemConfig.maxLockMinutes);
+  snprintf(logBuf, sizeof(logBuf), "Lock Range: %lu-%lu s", g_systemConfig.minLockSeconds, g_systemConfig.maxLockSeconds);
   logMessage(logBuf);
-  snprintf(logBuf, sizeof(logBuf), "Penalty Range: %lu-%lu min", g_systemConfig.minPenaltyMinutes, g_systemConfig.maxPenaltyMinutes);
+  snprintf(logBuf, sizeof(logBuf), "Penalty Range: %lu-%lu s", g_systemConfig.minPenaltySeconds, g_systemConfig.maxPenaltySeconds);
   logMessage(logBuf);
   snprintf(logBuf, sizeof(logBuf), "Test Mode: %lu s", g_systemConfig.testModeDurationSeconds);
   logMessage(logBuf);
@@ -1054,15 +1054,15 @@ void abortSession(const char* source) {
         abortedSessions++;      // 2. Increment counter
 
         if (enablePaybackTime) { // 3. Add payback
-            paybackAccumulated += (paybackTimeMinutes * 60);
+            paybackAccumulated += paybackTimeSeconds;
             
             // Use helper to format payback time
             char timeStr[64];
             formatSeconds(paybackAccumulated, timeStr, sizeof(timeStr));
             
             char paybackLog[150];
-            snprintf(paybackLog, sizeof(paybackLog), "Payback enabled. Added %u min. Total pending: %s",
-                     paybackTimeMinutes, timeStr);
+            snprintf(paybackLog, sizeof(paybackLog), "Payback enabled. Added %u s. Total pending: %s",
+                     paybackTimeSeconds, timeStr);
             logMessage(paybackLog);
         }
 
@@ -1372,14 +1372,14 @@ void handleArm(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t
         return;
     }
 
-    if (!(*doc)["duration"].is<JsonInteger>() || !(*doc)["penaltyDuration"].is<JsonInteger>()) {
-        sendJsonError(request, 400, "Missing required fields: duration, penaltyDuration.");
+    if (!(*doc)["lockDurationSeconds"].is<JsonInteger>() || !(*doc)["penaltyDurationSeconds"].is<JsonInteger>()) {
+        sendJsonError(request, 400, "Missing required fields: lockDurationSeconds, penaltyDurationSeconds.");
         return;
     }
     
     // Read session-specific data from the request
-    unsigned long durationMinutes = (*doc)["duration"];
-    int penaltyMin = (*doc)["penaltyDuration"];
+    unsigned long durationSeconds = (*doc)["lockDurationSeconds"];
+    unsigned long penaltySeconds = (*doc)["penaltyDurationSeconds"];
     bool newHideTimer = (*doc)["hideTimer"] | false; // Default to false if not present
     
     // Parse Strategy
@@ -1391,20 +1391,26 @@ void handleArm(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t
 
     unsigned long tempDelays[4] = {0};
     
-    // Parse channels from nested 'delays' object
-    if ((*doc)["delays"].is<JsonObject>()) {
-        JsonObject delaysObj = (*doc)["delays"];
+    // Parse channels from nested 'channelDelaysSeconds' object
+    if ((*doc)["channelDelaysSeconds"].is<JsonObject>()) {
+        JsonObject delaysObj = (*doc)["channelDelaysSeconds"];
         if (delaysObj["ch1"].is<unsigned long>()) tempDelays[0] = delaysObj["ch1"].as<unsigned long>();
         if (delaysObj["ch2"].is<unsigned long>()) tempDelays[1] = delaysObj["ch2"].as<unsigned long>();
         if (delaysObj["ch3"].is<unsigned long>()) tempDelays[2] = delaysObj["ch3"].as<unsigned long>();
         if (delaysObj["ch4"].is<unsigned long>()) tempDelays[3] = delaysObj["ch4"].as<unsigned long>();
     }
-    // Validate ranges using Provisioned Settings
-    if (durationMinutes < g_systemConfig.minLockMinutes || durationMinutes > g_systemConfig.maxLockMinutes) {
-        sendJsonError(request, 400, "Invalid duration."); return;
+    
+    // Validate ranges against System Config
+    unsigned long minLockSec = g_systemConfig.minLockSeconds;
+    unsigned long maxLockSec = g_systemConfig.maxLockSeconds;
+    unsigned long minPenaltySec = g_systemConfig.minPenaltySeconds;
+    unsigned long maxPenaltySec = g_systemConfig.maxPenaltySeconds;
+
+    if (durationSeconds < minLockSec || durationSeconds > maxLockSec) {
+        sendJsonError(request, 400, "Invalid lockDurationSeconds."); return;
     }
-    if (penaltyMin < g_systemConfig.minPenaltyMinutes || penaltyMin > g_systemConfig.maxPenaltyMinutes) {
-        sendJsonError(request, 400, "Invalid penaltyDuration."); return;
+    if (penaltySeconds < minPenaltySec || penaltySeconds > maxPenaltySec) {
+        sendJsonError(request, 400, "Invalid penaltyDurationSeconds."); return;
     }
 
     // Filter delays by enabled mask
@@ -1439,14 +1445,14 @@ void handleArm(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t
         }
 
         // Save configs
-        lockSecondsConfig = (durationMinutes * 60) + paybackInSeconds;
-        penaltySecondsConfig = penaltyMin * 60;
+        lockSecondsConfig = durationSeconds + paybackInSeconds;
+        penaltySecondsConfig = penaltySeconds;
         
         // Logging (Inside mutex for thread safety of buffer)
         char logBuf[256];
-        snprintf(logBuf, sizeof(logBuf), "API: /arm. Mode: %s. Lock: %lu min. Hide: %s",
+        snprintf(logBuf, sizeof(logBuf), "API: /arm. Mode: %s. Lock: %lu s. Hide: %s",
                 (currentStrategy == STRAT_BUTTON_TRIGGER ? "BUTTON" : "AUTO"),
-                durationMinutes, (hideTimer ? "Yes" : "No"));
+                durationSeconds, (hideTimer ? "Yes" : "No"));
         logMessage(logBuf);
 
         // Logic - Response Doc on Heap via RAII
@@ -1511,7 +1517,7 @@ void handleStartTest(AsyncWebServerRequest *request) {
         
         std::unique_ptr<JsonDocument> doc(new JsonDocument());
         (*doc)["status"] = "testing";
-        (*doc)["testTimeRemainingSeconds"] = testSecondsRemaining;
+        (*doc)["testSecondsRemaining"] = testSecondsRemaining;
         serializeJson(*doc, responseJson);
         
         xSemaphoreGiveRecursive(stateMutex); 
@@ -1637,11 +1643,11 @@ void handleStatus(AsyncWebServerRequest *request) {
     if (snapshot.state == ARMED) {
         doc["triggerStrategy"] = (snapshot.strategy == STRAT_BUTTON_TRIGGER) ? "buttonTrigger" : "autoCountdown";
         if (snapshot.strategy == STRAT_BUTTON_TRIGGER) {
-            doc["triggerTimeoutRemaining"] = triggerTimeoutRemaining;
+            doc["triggerTimeoutRemainingSeconds"] = triggerTimeoutRemaining;
         }
     }
 
-    JsonObject channels = doc["delays"].to<JsonObject>();
+    JsonObject channels = doc["channelDelaysRemainingSeconds"].to<JsonObject>();
     channels["ch1"] = snapshot.delays[0];
     channels["ch2"] = snapshot.delays[1];
     channels["ch3"] = snapshot.delays[2];
@@ -1693,7 +1699,7 @@ void handleDetails(AsyncWebServerRequest *request) {
         JsonObject config = (*doc)["deterrents"].to<JsonObject>();
         config["enableStreaks"] = enableStreaks;
         config["enablePaybackTime"] = enablePaybackTime;
-        config["paybackTimeMinutes"] = paybackTimeMinutes;
+        config["paybackDurationSeconds"] = paybackTimeSeconds; 
         
         // Add features array
         JsonArray features = (*doc)["features"].to<JsonArray>();
@@ -2135,7 +2141,7 @@ bool loadState() {
     // Load device configuration (Session Specific)
     enableStreaks = sessionState.getBool("enableStreaks", true);
     enablePaybackTime = sessionState.getBool("enablePayback", true);
-    paybackTimeMinutes = sessionState.getUShort("paybackTime", 15);
+    paybackTimeSeconds = sessionState.getUInt("paybackSeconds", 900);
 
     // Load persistent session counters
     sessionStreakCount = sessionState.getUInt("streak", 0);
@@ -2215,7 +2221,7 @@ void saveState(bool force) {
     sessionState.putBool("hideTimer", hideTimer);
     sessionState.putBool("enableStreaks", enableStreaks);
     sessionState.putBool("enablePayback", enablePaybackTime);
-    sessionState.putUShort("paybackTime", paybackTimeMinutes);
+    sessionState.putUInt("paybackSeconds", paybackTimeSeconds);
 
     // Save persistent counters
     sessionState.putUInt("streak", sessionStreakCount);
