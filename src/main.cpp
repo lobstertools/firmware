@@ -52,6 +52,11 @@ using namespace ArduinoJson;
 #define DEFAULT_WDT_TIMEOUT 20 // Relaxed for READY state
 #define CRITICAL_WDT_TIMEOUT 5 // Tight for LOCKED state
 
+// --- Logging Visuals ---
+#define LOG_SEP_MAJOR "=================================================="
+#define LOG_SEP_MINOR "--------------------------------------------------"
+#define LOG_PREFIX_STATE ">>> STATE CHANGE: "
+
 // --- Channel-Specific Configuration ---
 const int HARDWARE_PINS[4] = {16, 17, 18, 19};
 const int MAX_CHANNELS = 4;
@@ -592,33 +597,44 @@ void setup() {
   esp_timer_create(&failsafe_timer_args, &failsafeTimer);
 
   char logBuf[100];
-  snprintf(logBuf, sizeof(logBuf), "%s starting up...", DEVICE_NAME);
+  
+  // --- STARTUP BANNER ---
+  logMessage(LOG_SEP_MAJOR);
+  snprintf(logBuf, sizeof(logBuf), " %s", DEVICE_NAME);
   logMessage(logBuf);
-  snprintf(logBuf, sizeof(logBuf), "Firmware Version: %s", DEVICE_VERSION);
+  snprintf(logBuf, sizeof(logBuf), " Version: %s", DEVICE_VERSION);
   logMessage(logBuf);
+  logMessage(LOG_SEP_MAJOR);
 
   logMessage("Initializing hardware watchdog...");
   esp_task_wdt_init(DEFAULT_WDT_TIMEOUT, true);
   esp_task_wdt_add(NULL);
 
-  logMessage("--- System Configuration ---");
-  snprintf(logBuf, sizeof(logBuf), "Long Press: %lu s", g_systemConfig.longPressSeconds);
-  logMessage(logBuf);
-  snprintf(logBuf, sizeof(logBuf), "Lock Range: %lu-%lu s", g_systemConfig.minLockSeconds, g_systemConfig.maxLockSeconds);
-  logMessage(logBuf);
-  snprintf(logBuf, sizeof(logBuf), "Penalty Range: %lu-%lu s", g_systemConfig.minPenaltySeconds, g_systemConfig.maxPenaltySeconds);
-  logMessage(logBuf);
-  snprintf(logBuf, sizeof(logBuf), "Test Mode: %lu s", g_systemConfig.testModeDurationSeconds);
-  logMessage(logBuf);
-  snprintf(logBuf, sizeof(logBuf), "Failsafe: %lu s", g_systemConfig.failsafeMaxLockSeconds);
-  logMessage(logBuf);
-  snprintf(logBuf, sizeof(logBuf), "KeepAlive: %lu ms (Max Strikes: %lu)", g_systemConfig.keepAliveIntervalMs, g_systemConfig.keepAliveMaxStrikes);
-  logMessage(logBuf);
-  snprintf(logBuf, sizeof(logBuf), "Boot Loop: %lu (Stable: %lu ms)", g_systemConfig.bootLoopThreshold, g_systemConfig.stableBootTimeMs);
-  logMessage(logBuf);
-  logMessage("--- /System Configuration ---"  );
+  // --- SYSTEM CONFIG BLOCK ---
+  logMessage(LOG_SEP_MINOR);
+  logMessage("[ SYSTEM CONFIGURATION ]");
+  logMessage(LOG_SEP_MINOR);
+  
+  auto logCfg = [](const char* label, uint32_t val, const char* suffix = "") {
+      char buf[100];
+      // %-25s ensures the label takes up 25 chars, aligning the colon
+      snprintf(buf, sizeof(buf), " %-25s : %lu%s", label, val, suffix);
+      logMessage(buf);
+  };
 
-  logMessage("--- Device Features ---"); 
+  logCfg("Long Press Time", g_systemConfig.longPressSeconds, " s");
+  logCfg("Min Lock Time", g_systemConfig.minLockSeconds, " s");
+  logCfg("Max Lock Time", g_systemConfig.maxLockSeconds, " s");
+  logCfg("Min Penalty Time", g_systemConfig.minPenaltySeconds, " s");
+  logCfg("Max Penalty Time", g_systemConfig.maxPenaltySeconds, " s");
+  logCfg("Failsafe Limit", g_systemConfig.failsafeMaxLockSeconds, " s");
+  logCfg("KeepAlive Interval", g_systemConfig.keepAliveIntervalMs, " ms");
+  logCfg("Boot Loop Threshold", g_systemConfig.bootLoopThreshold, " crashes");
+
+  // --- DEVICE FEATURES BLOCK ---
+  logMessage(LOG_SEP_MINOR);
+  logMessage("[ DEVICE FEATURES ]");
+  logMessage(LOG_SEP_MINOR);
 
   // Load Enable Mask from Provisioning NVS
   provisioningPrefs.begin("provisioning", true); // Read-only
@@ -627,19 +643,19 @@ void setup() {
   
   // Log which channels are logically enabled
   for(int i=0; i<MAX_CHANNELS; i++) {
-      if ((g_enabledChannelsMask >> i) & 1) {
-          snprintf(logBuf, sizeof(logBuf), "Channel %d (GPIO %d): ENABLED", i+1, HARDWARE_PINS[i]);
-      } else {
-          snprintf(logBuf, sizeof(logBuf), "Channel %d (GPIO %d): DISABLED", i+1, HARDWARE_PINS[i]);
-      }
+      bool isEnabled = (g_enabledChannelsMask >> i) & 1;
+      snprintf(logBuf, sizeof(logBuf), " %-25s : %s (GPIO %d)", 
+        ("Channel " + String(i+1)).c_str(), 
+        isEnabled ? "ENABLED" : "DISABLED", 
+        HARDWARE_PINS[i]);
       logMessage(logBuf);
   }
 
-  logMessage("LED Status Indicator enabled");
-
-  char btnLog[50];
-  snprintf(btnLog, sizeof(btnLog), "Button (Pin %d) enabled", ONE_BUTTON_PIN);
-  logMessage(btnLog);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Status LED", "Enabled");
+  logMessage(logBuf);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Pin %d)", "Button Input", "Enabled", ONE_BUTTON_PIN);
+  logMessage(logBuf);
+  logMessage(LOG_SEP_MAJOR); // End of boot block
 
   // Context-sensitive button logic.
   // Long Press: ALWAYS ABORT/CANCEL (Armed -> Ready, Locked -> Penalty)
@@ -649,7 +665,6 @@ void setup() {
   // Double Click: TRIGGER (Armed -> Locked)
   button.attachDoubleClick(handleDoublePress);
 
-  logMessage("--- /Device Features ---"); 
 
   // Read credentials from NVS
   if (!wifiPreferences.begin("wifi-creds", true)) {
@@ -705,7 +720,9 @@ void setup() {
 
   // --- STAGE 3: OPERATIONAL MODE ---
 
+  logMessage(LOG_SEP_MAJOR);
   logMessage("Initializing Session State from NVS...");  
+  logMessage(LOG_SEP_MINOR);
   
   if (loadState()) {
       // 1. Log the raw state we just recovered from flash
@@ -732,45 +749,50 @@ void setup() {
       logMessage(finalBuf);
   }
 
-    // Helper buffers for string formatting
+  // Helper buffers for string formatting
   char tBuf1[50];
   char tBuf2[50];
 
-  logMessage("--- Session State ---");
+  // --- SESSION STATE BLOCK ---
+  logMessage(LOG_SEP_MINOR);
+  logMessage("[ SESSION STATE ]");
+  logMessage(LOG_SEP_MINOR);
 
-  snprintf(logBuf, sizeof(logBuf), "State: %s (Hide Timer: %s)", 
-             stateToString(currentState), hideTimer ? "Yes" : "No");
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Current State", stateToString(currentState));
   logMessage(logBuf);
 
-  // Format Lock Timer: "Remaining (Configured)"
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Timer Visibility", hideTimer ? "Hidden" : "Visible");
+  logMessage(logBuf);
+
+  // Format Lock Timer
   formatSeconds(lockSecondsRemaining, tBuf1, sizeof(tBuf1));
   formatSeconds(lockSecondsConfig, tBuf2, sizeof(tBuf2));
-  snprintf(logBuf, sizeof(logBuf), "Lock Timer: %s (Cfg: %s)", tBuf1, tBuf2);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Cfg: %s)", "Lock Timer", tBuf1, tBuf2);
   logMessage(logBuf);
 
   // Format Penalty Timer
   formatSeconds(penaltySecondsRemaining, tBuf1, sizeof(tBuf1));
   formatSeconds(penaltySecondsConfig, tBuf2, sizeof(tBuf2));
-  snprintf(logBuf, sizeof(logBuf), "Penalty Timer: %s (Cfg: %s)", tBuf1, tBuf2);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Cfg: %s)", "Penalty Timer", tBuf1, tBuf2);
   logMessage(logBuf);
 
   // Payback Debt
   formatSeconds(paybackAccumulated, tBuf1, sizeof(tBuf1));
-  snprintf(logBuf, sizeof(logBuf), "Payback: %s (Debt: %s)", 
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Debt: %s)", "Payback Mode", 
            enablePaybackTime ? "Enabled" : "Disabled", tBuf1);
   logMessage(logBuf);
 
   // Statistics
-  snprintf(logBuf, sizeof(logBuf), "Stats: Streak %u | Complete %u | Aborted %u", 
-           sessionStreakCount, completedSessions, abortedSessions);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : Streak %u | Complete %u | Aborted %u", 
+           "Statistics", sessionStreakCount, completedSessions, abortedSessions);
   logMessage(logBuf);
 
   // Lifetime
   formatSeconds(totalLockedSessionSeconds, tBuf1, sizeof(tBuf1));
-  snprintf(logBuf, sizeof(logBuf), "Lifetime Locked: %s", tBuf1);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Lifetime Locked", tBuf1);
   logMessage(logBuf);
 
-  logMessage("--- /Session State ---");  
+  logMessage(LOG_SEP_MAJOR); // End of block
 
   // --- Start web server and timers ---
   logMessage("Attaching master 1-second ticker.");
@@ -1040,11 +1062,18 @@ void stopTestMode() {
  */
 void abortSession(const char* source) {
     char logBuf[100];
-    snprintf(logBuf, sizeof(logBuf), "%s: Aborting session (%s).", source, stateToString(currentState));
     
     if (currentState == LOCKED) {
         disarmFailsafeTimer();
+
+        // LOGGING VISUALS: Abort Block
+        logMessage(LOG_SEP_MAJOR);
+        snprintf(logBuf, sizeof(logBuf), "%sABORTED", LOG_PREFIX_STATE);
         logMessage(logBuf);
+        snprintf(logBuf, sizeof(logBuf), " Source: %s", source);
+        logMessage(logBuf);
+        logMessage(LOG_SEP_MINOR);
+
         sendChannelOffAll();
         currentState = ABORTED;
         setLedPattern(ABORTED);
@@ -1060,11 +1089,16 @@ void abortSession(const char* source) {
             char timeStr[64];
             formatSeconds(paybackAccumulated, timeStr, sizeof(timeStr));
             
-            char paybackLog[150];
-            snprintf(paybackLog, sizeof(paybackLog), "Payback enabled. Added %u s. Total pending: %s",
-                     paybackTimeSeconds, timeStr);
-            logMessage(paybackLog);
+            // Log formatted payback stats
+            snprintf(logBuf, sizeof(logBuf), " %-20s : +%u s", "Payback Added", paybackTimeSeconds);
+            logMessage(logBuf);
+            snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Total Debt", timeStr);
+            logMessage(logBuf);
+        } else {
+             logMessage(" Payback: Disabled (No time added)");
         }
+        
+        logMessage(LOG_SEP_MAJOR); // End block
 
         lockSecondsRemaining = 0;
         penaltySecondsRemaining = penaltySecondsConfig; // 4. Start REWARD penalty
@@ -1077,6 +1111,7 @@ void abortSession(const char* source) {
     } else if (currentState == ARMED) {
         // ARMED is a "Safety Off" state, but not yet "Point of No Return".
         // Aborting here returns to READY without penalty.
+        snprintf(logBuf, sizeof(logBuf), "%s: Aborting session (ARMED).", source);
         logMessage(logBuf);
         sendChannelOffAll();
         resetToReady(false); // Cancel arming (this disarms watchdog)
@@ -1098,8 +1133,14 @@ void abortSession(const char* source) {
  */
 void completeSession() {
   SessionState previousState = currentState;
+  
+  // LOGGING VISUALS: Complete Block
+  char logBuf[100];
+  logMessage(LOG_SEP_MAJOR);
+  snprintf(logBuf, sizeof(logBuf), "%sCOMPLETED", LOG_PREFIX_STATE);
+  logMessage(logBuf);
+  logMessage(LOG_SEP_MINOR);
 
-  logMessage("Timer finished. State is now COMPLETED.");
   if (previousState == LOCKED) disarmFailsafeTimer();
   
   sendChannelOffAll();
@@ -1111,7 +1152,7 @@ void completeSession() {
       // --- SUCCESS PATH ---
       // On successful completion of a LOCK, we clear debt and reward streaks.
       if (paybackAccumulated > 0) {
-          logMessage("Valid session complete. Clearing accumulated payback debt.");
+          logMessage(" > Valid session complete. Clearing accumulated payback debt.");
           paybackAccumulated = 0;
       }
 
@@ -1120,20 +1161,19 @@ void completeSession() {
           sessionStreakCount++;
       }
 
-      // Log the new winning stats
-      char statBuf[100];
-      snprintf(statBuf, sizeof(statBuf), "Stats updated: Streak %u | Completed %u", 
-               sessionStreakCount, completedSessions);
-      logMessage(statBuf);
+      // Log the new winning stats in aligned block
+      snprintf(logBuf, sizeof(logBuf), " %-20s : %u", "New Streak", sessionStreakCount);
+      logMessage(logBuf);
+      snprintf(logBuf, sizeof(logBuf), " %-20s : %u", "Total Completed", completedSessions);
+      logMessage(logBuf);
   } 
   else if (previousState == ABORTED) {
       // --- PENALTY SERVED PATH ---
       // The user finished the penalty box. 
-      
       if (enablePaybackTime) {
-          logMessage("Penalty time served. Payback debt retained.");
+          logMessage(" > Penalty time served. Payback debt retained.");
       } else {
-          logMessage("Penalty time served.");
+          logMessage(" > Penalty time served.");
       }
   }
 
@@ -1150,9 +1190,10 @@ void completeSession() {
   // Log Lifetime Total
   char timeBuf[64];
   formatSeconds(totalLockedSessionSeconds, timeBuf, sizeof(timeBuf));
-  char totalLog[100];
-  snprintf(totalLog, sizeof(totalLog), "Lifetime Locked: %s", timeBuf);
-  logMessage(totalLog);
+  
+  snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Lifetime Locked", timeBuf);
+  logMessage(logBuf);
+  logMessage(LOG_SEP_MAJOR);
 
   saveState(true); // Force save
 }
@@ -1162,7 +1203,11 @@ void completeSession() {
  * Does NOT reset counters or payback.
  */
 void resetToReady(bool generateNewCode) {
-  logMessage("Resetting state to READY.");
+  logMessage(LOG_SEP_MAJOR);
+  char logBuf[150];
+  snprintf(logBuf, sizeof(logBuf), "%sREADY", LOG_PREFIX_STATE);
+  logMessage(logBuf);
+  
   if (currentState == LOCKED) disarmFailsafeTimer();
   sendChannelOffAll();
 
@@ -1187,7 +1232,6 @@ void resetToReady(bool generateNewCode) {
   // If we abort a countdown, we generally want to keep the same code 
   // unless we specifically want to roll it.
   if (generateNewCode) {
-      logMessage("Generating new reward code and updating history.");
       // Shift reward history
       for (int i = REWARD_HISTORY_SIZE - 1; i > 0; i--) {
           rewardHistory[i] = rewardHistory[i - 1];
@@ -1196,15 +1240,21 @@ void resetToReady(bool generateNewCode) {
       // Generate new code with collision detection against the history we just shifted
       generateUniqueSessionCode(rewardHistory[0].code, rewardHistory[0].checksum);
 
-      char logBuf[150];
       char codeSnippet[9];
       strncpy(codeSnippet, rewardHistory[0].code, 8);
       codeSnippet[8] = '\0';
-      snprintf(logBuf, sizeof(logBuf), "New Code: %s... Checksum: %s", codeSnippet, rewardHistory[0].checksum);
+      
+      logMessage(LOG_SEP_MINOR);
+      snprintf(logBuf, sizeof(logBuf), " New Reward Code Generated");
+      logMessage(logBuf);
+      snprintf(logBuf, sizeof(logBuf), " %-20s : %s...", "Code Snippet", codeSnippet);
+      logMessage(logBuf);
+      snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Checksum", rewardHistory[0].checksum);
       logMessage(logBuf);
   } else {
-      logMessage("Preserving existing reward code.");
+      logMessage(" > Preserving existing reward code.");
   }
+  logMessage(LOG_SEP_MAJOR);
 
   saveState(true); // Force save
 }
@@ -1448,12 +1498,20 @@ void handleArm(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t
         lockSecondsConfig = durationSeconds + paybackInSeconds;
         penaltySecondsConfig = penaltySeconds;
         
-        // Logging (Inside mutex for thread safety of buffer)
+        // LOGGING VISUALS: Arming Block
         char logBuf[256];
-        snprintf(logBuf, sizeof(logBuf), "API: /arm. Mode: %s. Lock: %lu s. Hide: %s",
-                (currentStrategy == STRAT_BUTTON_TRIGGER ? "BUTTON" : "AUTO"),
-                durationSeconds, (hideTimer ? "Yes" : "No"));
+        logMessage(LOG_SEP_MAJOR);
+        snprintf(logBuf, sizeof(logBuf), "%sARMED", LOG_PREFIX_STATE);
         logMessage(logBuf);
+        logMessage(LOG_SEP_MINOR);
+        
+        snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Strategy", (currentStrategy == STRAT_BUTTON_TRIGGER ? "Manual Button" : "Auto Countdown"));
+        logMessage(logBuf);
+        snprintf(logBuf, sizeof(logBuf), " %-20s : %lu s", "Lock Time", durationSeconds);
+        logMessage(logBuf);
+        snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Visibility", (hideTimer ? "Hidden" : "Visible"));
+        logMessage(logBuf);
+        logMessage(LOG_SEP_MAJOR);
 
         // Logic - Response Doc on Heap via RAII
         std::unique_ptr<JsonDocument> responseDoc(new JsonDocument());
@@ -1904,7 +1962,13 @@ void handleDoublePress() {
         // TRIGGER Logic
         if (currentState == ARMED) {
             if (currentStrategy == STRAT_BUTTON_TRIGGER) {
-                logMessage("Button: Double Click confirmed! Locking session.");
+                // LOGGING VISUALS: Manual Trigger
+                char logBuf[100];
+                logMessage(LOG_SEP_MAJOR);
+                snprintf(logBuf, sizeof(logBuf), "%sLOCKED", LOG_PREFIX_STATE);
+                logMessage(logBuf);
+                logMessage(" Source: Button Double-Click");
+                logMessage(LOG_SEP_MAJOR);
                 
                 currentState = LOCKED;
                 setLedPattern(LOCKED);
@@ -1951,7 +2015,6 @@ void handleLongPress() {
             logMessage("Button: Long press in LOCKED state. Emergency Abort.");
             abortSession("Button LongPress");
         }
-        
         xSemaphoreGiveRecursive(stateMutex);
     }
 }
@@ -2047,7 +2110,14 @@ void handleOneSecondTick() {
 
             // If all delays are done, transition to LOCKED
             if (allDelaysZero) {
-                logMessage("Auto-Start: All delays finished. Transitioning to LOCKED state.");
+                // LOGGING VISUALS: Auto-Lock Transition
+                char logBuf[100];
+                logMessage(LOG_SEP_MAJOR);
+                snprintf(logBuf, sizeof(logBuf), "%sLOCKED", LOG_PREFIX_STATE);
+                logMessage(logBuf);
+                logMessage(" Source: Auto Sequence");
+                logMessage(LOG_SEP_MAJOR);
+
                 currentState = LOCKED;
                 setLedPattern(LOCKED);
                 lockSecondsRemaining = lockSecondsConfig;
