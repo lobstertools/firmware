@@ -53,8 +53,8 @@ using namespace ArduinoJson;
 #define CRITICAL_WDT_TIMEOUT 5 // Tight for LOCKED state
 
 // --- Logging Visuals ---
-#define LOG_SEP_MAJOR "=================================================="
-#define LOG_SEP_MINOR "--------------------------------------------------"
+#define LOG_SEP_MAJOR "=========================================================================="
+#define LOG_SEP_MINOR "--------------------------------------------------------------------------"
 #define LOG_PREFIX_STATE ">>> STATE CHANGE: "
 
 // --- Channel-Specific Configuration ---
@@ -221,10 +221,18 @@ void connectToWiFi();
 void startBLEProvisioning();
 void startMDNS();
 
-void resetToReady(bool generateNewCode);
-void completeSession();
+// --- Core Logic Prototypes ("The do-ers") ---
+// All core logic functions assume Mutex is ALREADY LOCKED by the caller
+int startSession(unsigned long duration, unsigned long penalty, TriggerStrategy strategy, unsigned long* delays, bool hide);
+int startTestMode();
 void stopTestMode();
 void abortSession(const char* source);
+void triggerLock(const char* source);
+void enterLockedState(const char* source); // Shared by Auto-Countdown and Trigger
+void resetToReady(bool generateNewCode);
+void completeSession();
+
+// --- Helper Prototypes ---
 void handleOneSecondTick();
 void saveState(bool force = false);
 bool loadState();
@@ -1036,10 +1044,102 @@ void sendChannelOffAll() {
 }
 
 // =================================================================
-// --- Session State Management ---
+// --- Session State Management (Core Logic) ---
 // =================================================================
 // NOTE: Functions in this section assume the caller (Loop or API) 
 // HAS ALREADY LOCKED THE MUTEX unless otherwise noted.
+
+/**
+ * Validates configuration and starts a new session in ARMED state.
+ * Returns HTTP-style error codes: 200 (OK), 409 (Not Ready), 400 (Invalid Config).
+ */
+int startSession(unsigned long duration, unsigned long penalty, TriggerStrategy strategy, unsigned long* delays, bool hide) {
+    // State check
+    if (currentState != READY) {
+        return 409; 
+    }
+
+    // Validate ranges against System Config
+    unsigned long minLockSec = g_systemConfig.minLockSeconds;
+    unsigned long maxLockSec = g_systemConfig.maxLockSeconds;
+    unsigned long minPenaltySec = g_systemConfig.minPenaltySeconds;
+    unsigned long maxPenaltySec = g_systemConfig.maxPenaltySeconds;
+
+    if (duration < minLockSec || duration > maxLockSec) return 400;
+    if (penalty < minPenaltySec || penalty > maxPenaltySec) return 400;
+
+    // Apply configuration
+    for(int i=0; i<MAX_CHANNELS; i++) channelDelaysRemaining[i] = delays[i];
+    
+    hideTimer = hide;
+    currentStrategy = strategy;
+
+    // Apply any pending payback time from previous sessions
+    unsigned long paybackInSeconds = paybackAccumulated;
+    if (paybackInSeconds > 0) {
+        logMessage("Applying pending payback time to this session.");
+    }
+
+    // Save configs
+    lockSecondsConfig = duration + paybackInSeconds;
+    penaltySecondsConfig = penalty;
+    
+    // LOGGING VISUALS: Arming Block
+    char logBuf[256];
+    snprintf(logBuf, sizeof(logBuf), "%sARMED", LOG_PREFIX_STATE);
+    logMessage(logBuf);
+    
+    snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Strategy", (currentStrategy == STRAT_BUTTON_TRIGGER ? "Manual Button" : "Auto Countdown"));
+    logMessage(logBuf);
+    snprintf(logBuf, sizeof(logBuf), " %-20s : %lu s", "Lock Time", duration);
+    logMessage(logBuf);
+    snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Visibility", (hideTimer ? "Hidden" : "Visible"));
+    logMessage(logBuf);
+
+    // Enter ARMED state
+    currentState = ARMED;
+    setLedPattern(ARMED);
+    
+    // Setup based on strategy
+    if (currentStrategy == STRAT_BUTTON_TRIGGER) {
+        // Wait for Button: Set Timeout
+        triggerTimeoutRemaining = g_systemConfig.armedTimeoutSeconds;
+        logMessage("   -> Waiting for Manual Trigger.");
+    } else {
+        // Auto: Timers start ticking immediately in handleOneSecondTick
+        logMessage("   -> Auto Sequence Started.");
+    }
+
+    startTimersForState(ARMED);
+    // NOTE: Watchdog is NOT armed here, only when LOCKED (or in TEST)
+
+    saveState(true);
+
+    return 200;
+}
+
+/**
+ * Starts the hardware test mode.
+ * Returns: 200 (OK), 409 (Not Ready).
+ */
+int startTestMode() {
+    if (currentState != READY) {
+        return 409;
+    }
+    
+    logMessage("Logic: Engaging Channels for 2 min test.");
+
+    sendChannelOnAll();
+    currentState = TESTING;
+    setLedPattern(TESTING);
+    testSecondsRemaining = g_systemConfig.testModeDurationSeconds;
+    startTimersForState(TESTING);
+    g_lastKeepAliveTime = millis(); // Arm keep-alive watchdog for test mode
+    g_currentKeepAliveStrikes = 0;  // Reset strikes
+    saveState(true);
+    
+    return 200;
+}
 
 /**
  * Stops the test mode and returns to READY.
@@ -1057,6 +1157,46 @@ void stopTestMode() {
 }
 
 /**
+ * Transition from ARMED to LOCKED.
+ * Used by Button Press or Auto Countdown completion.
+ */
+void enterLockedState(const char* source) {
+    // LOGGING VISUALS: Transition
+    char logBuf[100];
+    snprintf(logBuf, sizeof(logBuf), "%sLOCKED", LOG_PREFIX_STATE);
+    logMessage(logBuf);
+    snprintf(logBuf, sizeof(logBuf), " Source: %s", source);
+    logMessage(logBuf);
+
+    currentState = LOCKED;
+    setLedPattern(LOCKED);
+    
+    lockSecondsRemaining = lockSecondsConfig;
+    startTimersForState(LOCKED);
+    armFailsafeTimer(); // DEATH GRIP
+    g_lastKeepAliveTime = millis(); // Arm keep-alive watchdog
+    g_currentKeepAliveStrikes = 0;  // Reset strikes
+    
+    // Engage hardware immediately
+    sendChannelOnAll();
+
+    saveState(true); // Force save
+}
+
+/**
+ * Logic to trigger the lock from a manual source (Button).
+ */
+void triggerLock(const char* source) {
+    if (currentState == ARMED) {
+        if (currentStrategy == STRAT_BUTTON_TRIGGER) {
+             enterLockedState(source);
+        }
+    } else if (currentState == TESTING) {
+        logMessage("Trigger ignored: Currently in Hardware Test.");
+    }
+}
+
+/**
  * Aborts an active session (LOCKED, ARMED, or TESTING).
  * Implements payback logic, resets streak, and starts the reward penalty timer.
  */
@@ -1067,12 +1207,10 @@ void abortSession(const char* source) {
         disarmFailsafeTimer();
 
         // LOGGING VISUALS: Abort Block
-        logMessage(LOG_SEP_MAJOR);
         snprintf(logBuf, sizeof(logBuf), "%sABORTED", LOG_PREFIX_STATE);
         logMessage(logBuf);
         snprintf(logBuf, sizeof(logBuf), " Source: %s", source);
         logMessage(logBuf);
-        logMessage(LOG_SEP_MINOR);
 
         sendChannelOffAll();
         currentState = ABORTED;
@@ -1098,8 +1236,6 @@ void abortSession(const char* source) {
              logMessage(" Payback: Disabled (No time added)");
         }
         
-        logMessage(LOG_SEP_MAJOR); // End block
-
         lockSecondsRemaining = 0;
         penaltySecondsRemaining = penaltySecondsConfig; // 4. Start REWARD penalty
         startTimersForState(ABORTED);
@@ -1115,6 +1251,7 @@ void abortSession(const char* source) {
         logMessage(logBuf);
         sendChannelOffAll();
         resetToReady(false); // Cancel arming (this disarms watchdog)
+    
     } else if (currentState == TESTING) {
         snprintf(logBuf, sizeof(logBuf), "%s: Aborting test mode.", source);
         logMessage(logBuf);
@@ -1136,10 +1273,8 @@ void completeSession() {
   
   // LOGGING VISUALS: Complete Block
   char logBuf[100];
-  logMessage(LOG_SEP_MAJOR);
   snprintf(logBuf, sizeof(logBuf), "%sCOMPLETED", LOG_PREFIX_STATE);
   logMessage(logBuf);
-  logMessage(LOG_SEP_MINOR);
 
   if (previousState == LOCKED) disarmFailsafeTimer();
   
@@ -1193,7 +1328,6 @@ void completeSession() {
   
   snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Lifetime Locked", timeBuf);
   logMessage(logBuf);
-  logMessage(LOG_SEP_MAJOR);
 
   saveState(true); // Force save
 }
@@ -1203,7 +1337,6 @@ void completeSession() {
  * Does NOT reset counters or payback.
  */
 void resetToReady(bool generateNewCode) {
-  logMessage(LOG_SEP_MAJOR);
   char logBuf[150];
   snprintf(logBuf, sizeof(logBuf), "%sREADY", LOG_PREFIX_STATE);
   logMessage(logBuf);
@@ -1244,7 +1377,6 @@ void resetToReady(bool generateNewCode) {
       strncpy(codeSnippet, rewardHistory[0].code, 8);
       codeSnippet[8] = '\0';
       
-      logMessage(LOG_SEP_MINOR);
       snprintf(logBuf, sizeof(logBuf), " New Reward Code Generated");
       logMessage(logBuf);
       snprintf(logBuf, sizeof(logBuf), " %-20s : %s...", "Code Snippet", codeSnippet);
@@ -1254,7 +1386,6 @@ void resetToReady(bool generateNewCode) {
   } else {
       logMessage(" > Preserving existing reward code.");
   }
-  logMessage(LOG_SEP_MAJOR);
 
   saveState(true); // Force save
 }
@@ -1450,19 +1581,6 @@ void handleArm(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t
         if (delaysObj["ch4"].is<unsigned long>()) tempDelays[3] = delaysObj["ch4"].as<unsigned long>();
     }
     
-    // Validate ranges against System Config
-    unsigned long minLockSec = g_systemConfig.minLockSeconds;
-    unsigned long maxLockSec = g_systemConfig.maxLockSeconds;
-    unsigned long minPenaltySec = g_systemConfig.minPenaltySeconds;
-    unsigned long maxPenaltySec = g_systemConfig.maxPenaltySeconds;
-
-    if (durationSeconds < minLockSec || durationSeconds > maxLockSec) {
-        sendJsonError(request, 400, "Invalid lockDurationSeconds."); return;
-    }
-    if (penaltySeconds < minPenaltySec || penaltySeconds > maxPenaltySec) {
-        sendJsonError(request, 400, "Invalid penaltyDurationSeconds."); return;
-    }
-
     // Filter delays by enabled mask
     for(int i=0; i<4; i++) {
         if (!((g_enabledChannelsMask >> i) & 1)) {
@@ -1475,80 +1593,32 @@ void handleArm(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t
 
     // We lock briefly ONLY to update the state machine.
     if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(1000)) == pdTRUE) {
-        // State check inside mutex
-        if (currentState != READY) {
-            xSemaphoreGiveRecursive(stateMutex);
-            sendJsonError(request, 409, "Device is not ready.");
-            return;
-        }
-
-        // Copy validated data to State
-        for(int i=0; i<MAX_CHANNELS; i++) channelDelaysRemaining[i] = tempDelays[i];
         
-        hideTimer = newHideTimer;
-        currentStrategy = requestedStrat;
-
-        // Apply any pending payback time from previous sessions
-        unsigned long paybackInSeconds = paybackAccumulated;
-        if (paybackInSeconds > 0) {
-            logMessage("Applying pending payback time to this session.");
-        }
-
-        // Save configs
-        lockSecondsConfig = durationSeconds + paybackInSeconds;
-        penaltySecondsConfig = penaltySeconds;
-        
-        // LOGGING VISUALS: Arming Block
-        char logBuf[256];
         logMessage(LOG_SEP_MAJOR);
-        snprintf(logBuf, sizeof(logBuf), "%sARMED", LOG_PREFIX_STATE);
-        logMessage(logBuf);
-        logMessage(LOG_SEP_MINOR);
+        logMessage("API REQUEST: /arm");
         
-        snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Strategy", (currentStrategy == STRAT_BUTTON_TRIGGER ? "Manual Button" : "Auto Countdown"));
-        logMessage(logBuf);
-        snprintf(logBuf, sizeof(logBuf), " %-20s : %lu s", "Lock Time", durationSeconds);
-        logMessage(logBuf);
-        snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Visibility", (hideTimer ? "Hidden" : "Visible"));
-        logMessage(logBuf);
-        logMessage(LOG_SEP_MAJOR);
-
-        // Logic - Response Doc on Heap via RAII
-        std::unique_ptr<JsonDocument> responseDoc(new JsonDocument());
-
-        // Enter ARMED state
-        currentState = ARMED;
-        setLedPattern(ARMED);
+        int result = startSession(durationSeconds, penaltySeconds, requestedStrat, tempDelays, newHideTimer);
         
-        // Setup based on strategy
-        if (currentStrategy == STRAT_BUTTON_TRIGGER) {
-            // Wait for Button: Set Timeout
-            triggerTimeoutRemaining = g_systemConfig.armedTimeoutSeconds;
-            logMessage("   -> Waiting for Manual Trigger.");
-        } else {
-            // Auto: Timers start ticking immediately in handleOneSecondTick
-            logMessage("   -> Auto Sequence Started.");
-        }
-
-        startTimersForState(ARMED);
-        // NOTE: Watchdog is NOT armed here, only when LOCKED (or in TEST)
-
-        (*responseDoc)["status"] = "armed";
-        (*responseDoc)["triggerStrategy"] = (currentStrategy == STRAT_BUTTON_TRIGGER) ? "buttonTrigger" : "autoCountdown";
-        
-        saveState(true);
-        
-        serializeJson(*responseDoc, responseJson);
-        // responseDoc deleted here automatically
-        
+        logMessage(LOG_SEP_MINOR); // End Interaction Visual
         xSemaphoreGiveRecursive(stateMutex); // RELEASE LOCK
+
+        // Handle Result
+        if (result == 200) {
+            std::unique_ptr<JsonDocument> responseDoc(new JsonDocument());
+            (*responseDoc)["status"] = "armed";
+            (*responseDoc)["triggerStrategy"] = (requestedStrat == STRAT_BUTTON_TRIGGER) ? "buttonTrigger" : "autoCountdown";
+            serializeJson(*responseDoc, responseJson);
+            request->send(200, "application/json", responseJson);
+        } else if (result == 409) {
+            sendJsonError(request, 409, "Device is not ready.");
+        } else {
+            // 400
+            sendJsonError(request, 400, "Invalid configuration values.");
+        }
+
     } else {
         sendJsonError(request, 503, "System Busy");
-        return;
     }
-
-    // Send response OUTSIDE of lock
-    request->send(200, "application/json", responseJson);
 }
 
 /**
@@ -1558,32 +1628,29 @@ void handleStartTest(AsyncWebServerRequest *request) {
     String responseJson;
 
     if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(1000)) == pdTRUE) {
-        if (currentState != READY) {
-          xSemaphoreGiveRecursive(stateMutex);
-          sendJsonError(request, 409, "Device must be in READY state to run test.");
-          return;
-        }
-        logMessage("API: /start-test received. Engaging Channels for 2 min.");
-        sendChannelOnAll();
-        currentState = TESTING;
-        setLedPattern(TESTING);
-        testSecondsRemaining = g_systemConfig.testModeDurationSeconds;
-        startTimersForState(TESTING);
-        g_lastKeepAliveTime = millis(); // Arm keep-alive watchdog for test mode
-        g_currentKeepAliveStrikes = 0;  // Reset strikes
-        saveState(true);
         
-        std::unique_ptr<JsonDocument> doc(new JsonDocument());
-        (*doc)["status"] = "testing";
-        (*doc)["testSecondsRemaining"] = testSecondsRemaining;
-        serializeJson(*doc, responseJson);
+        logMessage(LOG_SEP_MAJOR);
+        logMessage("API REQUEST: /start-test");
         
+        int result = startTestMode();
+        
+        logMessage(LOG_SEP_MINOR); // End Interaction Visual
         xSemaphoreGiveRecursive(stateMutex); 
+
+        // Handle Result
+        if (result == 200) {
+            std::unique_ptr<JsonDocument> doc(new JsonDocument());
+            (*doc)["status"] = "testing";
+            (*doc)["testSecondsRemaining"] = g_systemConfig.testModeDurationSeconds;
+            serializeJson(*doc, responseJson);
+            request->send(200, "application/json", responseJson);
+        } else {
+            sendJsonError(request, 409, "Device must be in READY state to run test.");
+        }
+
     } else {
         sendJsonError(request, 503, "System Busy");
-        return;
     }
-    request->send(200, "application/json", responseJson);
 }
 
 /**
@@ -1597,13 +1664,15 @@ void handleAbort(AsyncWebServerRequest *request) {
           sendJsonError(request, 409, "Device is not in an abortable state."); return;
         }
         
-        String statusMsg = "ready";
-        if (currentState == LOCKED) statusMsg = "aborted"; // Aborting a lock goes to penalty
+        logMessage(LOG_SEP_MAJOR);
+        logMessage("API REQUEST: /abort");
         
-        abortSession("API"); // This handles all logic
+        abortSession("API Request");
         
+        logMessage(LOG_SEP_MINOR); // End Interaction Visual
+
         std::unique_ptr<JsonDocument> doc(new JsonDocument());
-        (*doc)["status"] = statusMsg;
+        (*doc)["status"] = (currentState == ABORTED) ? "aborted" : "ready";
         serializeJson(*doc, responseJson);
         
         xSemaphoreGiveRecursive(stateMutex); 
@@ -1959,35 +2028,12 @@ void handleFactoryReset(AsyncWebServerRequest *request) {
 void handleDoublePress() {
     if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(100)) == pdTRUE) {
         
-        // TRIGGER Logic
-        if (currentState == ARMED) {
-            if (currentStrategy == STRAT_BUTTON_TRIGGER) {
-                // LOGGING VISUALS: Manual Trigger
-                char logBuf[100];
-                logMessage(LOG_SEP_MAJOR);
-                snprintf(logBuf, sizeof(logBuf), "%sLOCKED", LOG_PREFIX_STATE);
-                logMessage(logBuf);
-                logMessage(" Source: Button Double-Click");
-                logMessage(LOG_SEP_MAJOR);
-                
-                currentState = LOCKED;
-                setLedPattern(LOCKED);
-                
-                lockSecondsRemaining = lockSecondsConfig;
-                startTimersForState(LOCKED);
-                armFailsafeTimer(); 
-                g_lastKeepAliveTime = millis(); 
-                g_currentKeepAliveStrikes = 0;  
-                
-                // Engage hardware immediately
-                sendChannelOnAll();
+        logMessage(LOG_SEP_MAJOR);
+        logMessage("BUTTON: Double-Click");
 
-                saveState(true);
-            }
-        } else if (currentState == TESTING) {
-            logMessage("Button Double-Click during Hardware Test, no action is needed. Long Press to abort.");
-        }
+        triggerLock("Button Double-Click");
 
+        logMessage(LOG_SEP_MINOR); // End Interaction Visual
         xSemaphoreGiveRecursive(stateMutex);
     }
 }
@@ -2000,21 +2046,12 @@ void handleDoublePress() {
 void handleLongPress() {
     if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(100)) == pdTRUE) {
         
-        // Cancel Arming (Safety reset)
-        if (currentState == ARMED) {
-            logMessage("Button: Long Press. Cancelling Arming.");
-            abortSession("Button LongPress");
-        } 
-        // Abort the hardware test
-        else if (currentState == TESTING) {
-            logMessage("Button: Long press in TESTING state. Ending Hardware Test.");
-            abortSession("Button LongPress");
-        }
-        // Abort the session (Emergency Stop)
-        else if (currentState == LOCKED) {
-            logMessage("Button: Long press in LOCKED state. Emergency Abort.");
-            abortSession("Button LongPress");
-        }
+        logMessage(LOG_SEP_MAJOR);
+        logMessage("BUTTON: Long Press");
+        
+        abortSession("Button LongPress");
+        
+        logMessage(LOG_SEP_MINOR); // End Interaction Visual
         xSemaphoreGiveRecursive(stateMutex);
     }
 }
@@ -2110,22 +2147,8 @@ void handleOneSecondTick() {
 
             // If all delays are done, transition to LOCKED
             if (allDelaysZero) {
-                // LOGGING VISUALS: Auto-Lock Transition
-                char logBuf[100];
-                logMessage(LOG_SEP_MAJOR);
-                snprintf(logBuf, sizeof(logBuf), "%sLOCKED", LOG_PREFIX_STATE);
-                logMessage(logBuf);
-                logMessage(" Source: Auto Sequence");
-                logMessage(LOG_SEP_MAJOR);
-
-                currentState = LOCKED;
-                setLedPattern(LOCKED);
-                lockSecondsRemaining = lockSecondsConfig;
-                startTimersForState(LOCKED);
-                armFailsafeTimer(); // DEATH GRIP
-                g_lastKeepAliveTime = millis(); // Arm keep-alive watchdog
-                g_currentKeepAliveStrikes = 0;  // Reset strikes
-                saveState(true); // Force save
+                // Using shared logic function to transition
+                enterLockedState("Auto Sequence");
             }
         } 
         else if (currentStrategy == STRAT_BUTTON_TRIGGER) {
