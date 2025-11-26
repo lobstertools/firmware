@@ -104,7 +104,7 @@ struct SystemConfig {
 
 // Default values (used if NVS is empty)
 const SystemConfig DEFAULT_SETTINGS = {
-    5,          // longPressSeconds
+    8,          // longPressSeconds
     900,        // minLockSeconds (15 min)
     10800,      // maxLockSeconds (180 min)
     900,        // minPenaltySeconds (15 min)
@@ -665,14 +665,15 @@ void setup() {
   logMessage(logBuf);
   logMessage(LOG_SEP_MAJOR); // End of boot block
 
-  // Context-sensitive button logic.
-  // Long Press: ALWAYS ABORT/CANCEL (Armed -> Ready, Locked -> Penalty)
-  button.setLongPressIntervalMs(g_systemConfig.longPressSeconds * 1000);
+  // Foot Pedal configuration
+  unsigned long longPressMs = (unsigned long)g_systemConfig.longPressSeconds * 1000;
+  if (longPressMs < 1000) { longPressMs = 10000; }
+  snprintf(logBuf, sizeof(logBuf), "Button: Long Press set to %lu ms", longPressMs);
+  logMessage(logBuf);
+  
+  button.setPressMs(longPressMs);
   button.attachLongPressStart(handleLongPress);
-
-  // Double Click: TRIGGER (Armed -> Locked)
   button.attachDoubleClick(handleDoublePress);
-
 
   // Read credentials from NVS
   if (!wifiPreferences.begin("wifi-creds", true)) {
@@ -1256,6 +1257,7 @@ void abortSession(const char* source) {
         snprintf(logBuf, sizeof(logBuf), "%s: Aborting test mode.", source);
         logMessage(logBuf);
         stopTestMode(); // Cancel test (this disarms watchdog)
+        
     } else {
          snprintf(logBuf, sizeof(logBuf), "%s: Abort ignored, device not in abortable state.", source);
          logMessage(logBuf);
@@ -1693,8 +1695,6 @@ void handleReward(AsyncWebServerRequest *request) {
             xSemaphoreGiveRecursive(stateMutex);
             sendJsonError(request, 403, "Reward is not yet available.");
         } else {
-            // Send history (READY or COMPLETED)
-            logMessage("API: /reward GET success. Releasing code history.");
             std::unique_ptr<JsonDocument> doc(new JsonDocument());
             JsonArray arr = (*doc).to<JsonArray>();
             for(int i = 0; i < REWARD_HISTORY_SIZE; i++) {
@@ -1830,8 +1830,7 @@ void handleDetails(AsyncWebServerRequest *request) {
         
         // Add features array
         JsonArray features = (*doc)["features"].to<JsonArray>();
-        features.add("abortLongPress");
-        features.add("startLongPress");
+        features.add("footPedal");
         features.add("startCountdown");
         features.add("statusLed");
 
@@ -2023,34 +2022,34 @@ void handleFactoryReset(AsyncWebServerRequest *request) {
 // =================================================================
 
 /**
- * DOUBLE PRESS: Used to TRIGGER the session when ARMED.
+ * DOUBLE PRESS: Universal Cancel/Abort.
+ * 1. If ARMED: Cancels arming (Returns to READY, no penalty).
+ * 2. If LOCKED: Triggers ABORT (Emergency Stop / Penalty).
  */
 void handleDoublePress() {
     if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(100)) == pdTRUE) {
         
         logMessage(LOG_SEP_MAJOR);
         logMessage("BUTTON: Double-Click");
-
-        triggerLock("Button Double-Click");
-
+        
+        abortSession("Button Double-Click");
+        
         logMessage(LOG_SEP_MINOR); // End Interaction Visual
         xSemaphoreGiveRecursive(stateMutex);
     }
 }
 
 /**
- * LONG PRESS: Universal Cancel/Abort.
- * 1. If ARMED: Cancels arming (Returns to READY, no penalty).
- * 2. If LOCKED: Triggers ABORT (Emergency Stop / Penalty).
+ * LONG PRESS: Used to TRIGGER the session when ARMED.
  */
 void handleLongPress() {
     if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(100)) == pdTRUE) {
         
         logMessage(LOG_SEP_MAJOR);
         logMessage("BUTTON: Long Press");
-        
-        abortSession("Button LongPress");
-        
+
+        triggerLock("Button Long Press");
+
         logMessage(LOG_SEP_MINOR); // End Interaction Visual
         xSemaphoreGiveRecursive(stateMutex);
     }
