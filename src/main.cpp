@@ -1920,6 +1920,8 @@ void handleDoublePress() {
 
                 saveState(true);
             }
+        } else if (currentState == TESTING) {
+            logMessage("Button Double-Click during Hardware Test, no action is needed. Long Press to abort.");
         }
 
         xSemaphoreGiveRecursive(stateMutex);
@@ -1939,6 +1941,11 @@ void handleLongPress() {
             logMessage("Button: Long Press. Cancelling Arming.");
             abortSession("Button LongPress");
         } 
+        // Abort the hardware test
+        else if (currentState == TESTING) {
+            logMessage("Button: Long press in TESTING state. Ending Hardware Test.");
+            abortSession("Button LongPress");
+        }
         // Abort the session (Emergency Stop)
         else if (currentState == LOCKED) {
             logMessage("Button: Long press in LOCKED state. Emergency Abort.");
