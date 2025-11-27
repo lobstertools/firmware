@@ -596,8 +596,7 @@ void setup() {
 
   // Safety First: Initialize all hardware pins to a safe state (LOW)
   // immediately, before any logic or config loading occurs.
-  // This prevents floating pins while waiting for NVS.
-  initializeChannels();
+  initializeChannels(); //
 
   // --- Boot Loop Detection ---
   checkBootLoop();
@@ -613,7 +612,9 @@ void setup() {
   };
   esp_timer_create(&failsafe_timer_args, &failsafeTimer);
 
-  char logBuf[100];
+  char logBuf[150]; // Increased size slightly for complex lines
+  char tBuf1[50];   // Helper buffer 1
+  char tBuf2[50];   // Helper buffer 2
   
   // --- STARTUP BANNER ---
   logMessage(LOG_SEP_MAJOR);
@@ -627,38 +628,45 @@ void setup() {
   esp_task_wdt_init(DEFAULT_WDT_TIMEOUT, true);
   esp_task_wdt_add(NULL);
 
-  // --- SYSTEM CONFIG BLOCK ---
-  logMessage(LOG_SEP_MINOR);
-  logMessage("[ SYSTEM CONFIGURATION ]");
-  logMessage(LOG_SEP_MINOR);
+  // =================================================================
+  // 1. DATA LOADING (Moved up to populate logs)
+  // =================================================================
   
-  auto logCfg = [](const char* label, uint32_t val, const char* suffix = "") {
-      char buf[100];
-      // %-25s ensures the label takes up 25 chars, aligning the colon
-      snprintf(buf, sizeof(buf), " %-25s : %lu%s", label, val, suffix);
-      logMessage(buf);
-  };
-
-  logCfg("Long Press Time", g_systemConfig.longPressSeconds, " s");
-  logCfg("Min Lock Time", g_systemConfig.minLockSeconds, " s");
-  logCfg("Max Lock Time", g_systemConfig.maxLockSeconds, " s");
-  logCfg("Min Penalty Time", g_systemConfig.minPenaltySeconds, " s");
-  logCfg("Max Penalty Time", g_systemConfig.maxPenaltySeconds, " s");
-  logCfg("Failsafe Limit", g_systemConfig.failsafeMaxLockSeconds, " s");
-  logCfg("KeepAlive Interval", g_systemConfig.keepAliveIntervalMs, " ms");
-  logCfg("Boot Loop Threshold", g_systemConfig.bootLoopThreshold, " crashes");
-
-  // --- DEVICE FEATURES BLOCK ---
-  logMessage(LOG_SEP_MINOR);
-  logMessage("[ DEVICE FEATURES ]");
-  logMessage(LOG_SEP_MINOR);
-
-  // Load Enable Mask from Provisioning NVS
-  provisioningPrefs.begin("provisioning", true); // Read-only
-  g_enabledChannelsMask = provisioningPrefs.getUChar("chMask", 0x0F); // Default all on
+  // Load Hardware Enable Mask
+  provisioningPrefs.begin("provisioning", true); 
+  g_enabledChannelsMask = provisioningPrefs.getUChar("chMask", 0x0F); 
   provisioningPrefs.end();
+
+  // Load Session State & Deterrent Configs
+  bool validStateLoaded = loadState();
+
+  // Determine logical state (Handle power-loss during lock, etc)
+  if (validStateLoaded) {
+      handleRebootState();
+  } else {
+      resetToReady(true);
+  }
+
+  // Initialize Button (Features)
+  unsigned long longPressMs = (unsigned long)g_systemConfig.longPressSeconds * 1000;
+  if (longPressMs < 1000) { longPressMs = 1000; }
+  button.setPressMs(longPressMs);
+  button.attachLongPressStart(handleLongPress);
+  button.attachDoubleClick(handleDoublePress);
   
-  // Log which channels are logically enabled
+  // Set initial LED pattern based on the loaded/determined state
+  setLedPattern(currentState); 
+
+  // =================================================================
+  // 2. LOGGING SECTIONS
+  // =================================================================
+
+  // --- SECTION: HARDWARE & FEATURES ---
+  logMessage(LOG_SEP_MINOR);
+  logMessage("[ HARDWARE & FEATURES ]");
+  logMessage(LOG_SEP_MINOR);
+
+  // Channels
   for(int i=0; i<MAX_CHANNELS; i++) {
       bool isEnabled = (g_enabledChannelsMask >> i) & 1;
       snprintf(logBuf, sizeof(logBuf), " %-25s : %s (GPIO %d)", 
@@ -668,27 +676,94 @@ void setup() {
       logMessage(logBuf);
   }
 
+  // Other Hardware
   snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Status LED", "Enabled");
   logMessage(logBuf);
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Pin %d)", "Button Input", "Enabled", ONE_BUTTON_PIN);
-  logMessage(logBuf);
-  logMessage(LOG_SEP_MAJOR); // End of boot block
-
-  // Foot Pedal configuration
-  unsigned long longPressMs = (unsigned long)g_systemConfig.longPressSeconds * 1000;
-  if (longPressMs < 1000) { longPressMs = 10000; }
-  snprintf(logBuf, sizeof(logBuf), "Button: Long Press set to %lu ms", longPressMs);
+  
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Pin %d)", "Foot Pedal/Button", "Enabled", ONE_BUTTON_PIN);
   logMessage(logBuf);
   
-  button.setPressMs(longPressMs);
-  button.attachLongPressStart(handleLongPress);
-  button.attachDoubleClick(handleDoublePress);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %lu ms", "Long Press Time", longPressMs);
+  logMessage(logBuf);
 
+  // --- SECTION: DETERRENTS ---
+  logMessage(LOG_SEP_MINOR);
+  logMessage("[ DETERRENT CONFIG ]");
+  logMessage(LOG_SEP_MINOR);
+
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Session Streaks", enableStreaks ? "Enabled" : "Disabled");
+  logMessage(logBuf);
+
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Time Payback", enablePaybackTime ? "Enabled" : "Disabled");
+  logMessage(logBuf);
+
+  // Only show details if enabled
+  if (enablePaybackTime) {
+      formatSeconds(paybackTimeSeconds, tBuf1, sizeof(tBuf1));
+      snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Payback Duration", tBuf1);
+      logMessage(logBuf);
+  }
+
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Reward Code", enableRewardCode ? "Enabled" : "Disabled");
+  logMessage(logBuf);
+
+
+  // --- SECTION: STATISTICS ---
+  logMessage(LOG_SEP_MINOR);
+  logMessage("[ STATISTICS ]");
+  logMessage(LOG_SEP_MINOR);
+
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u", "Streak Count", sessionStreakCount);
+  logMessage(logBuf);
+  
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u", "Completed Sessions", completedSessions);
+  logMessage(logBuf);
+  
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u", "Aborted Sessions", abortedSessions);
+  logMessage(logBuf);
+
+  formatSeconds(paybackAccumulated, tBuf1, sizeof(tBuf1));
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Accumulated Debt", tBuf1);
+  logMessage(logBuf);
+
+  formatSeconds(totalLockedSessionSeconds, tBuf1, sizeof(tBuf1));
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Lifetime Locked", tBuf1);
+  logMessage(logBuf);
+
+
+  // --- SECTION: CURRENT SESSION ---
+  logMessage(LOG_SEP_MINOR);
+  logMessage("[ CURRENT SESSION ]");
+  logMessage(LOG_SEP_MINOR);
+
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Current State", stateToString(currentState));
+  logMessage(logBuf);
+
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Timer Visibility", hideTimer ? "Hidden" : "Visible");
+  logMessage(logBuf);
+
+  // Lock Timer (Remaining vs Config)
+  formatSeconds(lockSecondsRemaining, tBuf1, sizeof(tBuf1));
+  formatSeconds(lockSecondsConfig, tBuf2, sizeof(tBuf2));
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Cfg: %s)", "Lock Timer", tBuf1, tBuf2);
+  logMessage(logBuf);
+
+  // Penalty Timer (Remaining vs Config)
+  formatSeconds(penaltySecondsRemaining, tBuf1, sizeof(tBuf1));
+  formatSeconds(penaltySecondsConfig, tBuf2, sizeof(tBuf2));
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Cfg: %s)", "Penalty Timer", tBuf1, tBuf2);
+  logMessage(logBuf);
+
+  logMessage(LOG_SEP_MAJOR); // End of logging blocks
+
+
+  // =================================================================
+  // 3. NETWORK STARTUP (Deferred to end)
+  // =================================================================
+  
   // Read credentials from NVS
   if (!wifiPreferences.begin("wifi-creds", true)) {
       logMessage("NVS Warning: 'wifi-creds' namespace not found (First boot?)");
-  } else {
-      logMessage("NVS: 'wifi-creds' loaded successfully.");
   }
   String ssidTemp = wifiPreferences.getString("ssid", "");
   String passTemp = wifiPreferences.getString("pass", "");
@@ -736,87 +811,6 @@ void setup() {
       }
   }
 
-  // --- STAGE 3: OPERATIONAL MODE ---
-
-  logMessage(LOG_SEP_MAJOR);
-  logMessage("Initializing Session State from NVS...");  
-  logMessage(LOG_SEP_MINOR);
-  
-  if (loadState()) {
-      // 1. Log the raw state we just recovered from flash
-      char rawBuf[64];
-      snprintf(rawBuf, sizeof(rawBuf), "Raw NVS State: %s", stateToString(currentState));
-      logMessage(rawBuf);
-
-      // 2. Decide what to do (e.g., abort if we rebooted during ARMED)
-      handleRebootState();
-      
-      // 3. Log the final state after decision logic
-      char finalBuf[64];
-      snprintf(finalBuf, sizeof(finalBuf), "Final Boot State: %s", stateToString(currentState));
-      logMessage(finalBuf);
-
-  } else {
-      // No valid data in NVS. Initialize a fresh state.
-      logMessage("No valid session data in NVS. Initializing fresh state.");
-      resetToReady(true); // This saves the new, fresh state
-      
-      // Log the final state (always ready)
-      char finalBuf[64];
-      snprintf(finalBuf, sizeof(finalBuf), "Final Boot State: %s", stateToString(currentState));
-      logMessage(finalBuf);
-  }
-
-  // Helper buffers for string formatting
-  char tBuf1[50];
-  char tBuf2[50];
-
-  // --- SESSION STATE BLOCK ---
-  logMessage(LOG_SEP_MINOR);
-  logMessage("[ SESSION STATE ]");
-  logMessage(LOG_SEP_MINOR);
-
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Current State", stateToString(currentState));
-  logMessage(logBuf);
-
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Timer Visibility", hideTimer ? "Hidden" : "Visible");
-  logMessage(logBuf);
-
-  // Format Lock Timer
-  formatSeconds(lockSecondsRemaining, tBuf1, sizeof(tBuf1));
-  formatSeconds(lockSecondsConfig, tBuf2, sizeof(tBuf2));
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Cfg: %s)", "Lock Timer", tBuf1, tBuf2);
-  logMessage(logBuf);
-
-  // Format Penalty Timer
-  formatSeconds(penaltySecondsRemaining, tBuf1, sizeof(tBuf1));
-  formatSeconds(penaltySecondsConfig, tBuf2, sizeof(tBuf2));
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Cfg: %s)", "Penalty Timer", tBuf1, tBuf2);
-  logMessage(logBuf);
-
-  // Payback Debt
-  formatSeconds(paybackAccumulated, tBuf1, sizeof(tBuf1));
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Debt: %s)", "Payback Mode", 
-           enablePaybackTime ? "Enabled" : "Disabled", tBuf1);
-  logMessage(logBuf);
-
-  // Reward Code
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Reward Code Feature", 
-           enableRewardCode ? "Enabled" : "Disabled");
-  logMessage(logBuf);
-
-  // Statistics
-  snprintf(logBuf, sizeof(logBuf), " %-25s : Streak %u | Complete %u | Aborted %u", 
-           "Statistics", sessionStreakCount, completedSessions, abortedSessions);
-  logMessage(logBuf);
-
-  // Lifetime
-  formatSeconds(totalLockedSessionSeconds, tBuf1, sizeof(tBuf1));
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Lifetime Locked", tBuf1);
-  logMessage(logBuf);
-
-  logMessage(LOG_SEP_MAJOR); // End of block
-
   // --- Start web server and timers ---
   logMessage("Attaching master 1-second ticker.");
   
@@ -826,9 +820,6 @@ void setup() {
       g_tickCounter++; 
       portEXIT_CRITICAL_ISR(&timerMux);
   });
-
-  // Status led
-  setLedPattern(currentState); // Set initial LED pattern
 
   setupWebServer();
   server.begin();  
