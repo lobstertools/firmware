@@ -15,6 +15,20 @@ This firmware is responsible for:
     2.  **mDNS Discovery:** Once provisioned, it connects to Wi-Fi and announces itself on the network as `lobster-lock.local`.
 * Controlling hardware: MOSFET channels, status LED, and an optional abort pedal.
 
+## ⚠️ Disclaimer & Safety Warning
+
+This project is intended for educational and novelty purposes by responsible adults. Self-bondage carries inherent and serious risks, including nerve damage, circulation loss, and asphyxiation.
+
+* You are building this toolkit at your **own risk**.
+* Thoroughly test all components, especially release mechanisms, before any use.
+* Always have a failsafe plan and emergency tools (like shears or cutters) within reach.
+* Never use this system in a way that restricts breathing or in any situation you cannot safely escape from.
+* The creators of this project assume **no liability** for any harm, damage, or legal consequences.
+
+## License
+
+Distributed under the Apache License 2.0. See `LICENSE` for more information.
+
 ## Technical Overview
 
 * **Platform:** [PlatformIO](https://platformio.org/)
