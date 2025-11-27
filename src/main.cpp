@@ -242,8 +242,8 @@ void startTimersForState(SessionState state);
 void generateUniqueSessionCode(char* codeBuffer, char* checksumBuffer);
 void calculateChecksum(const char* code, char* outString);
 void initializeChannels();
-void sendChannelOn(int channelIndex);
-void sendChannelOff(int channelIndex);
+void sendChannelOn(int channelIndex, bool silent = false);
+void sendChannelOff(int channelIndex, bool silent = false);
 void sendChannelOnAll();
 void sendChannelOffAll();
 void setLedPattern(SessionState state);
@@ -1002,8 +1002,8 @@ void initializeChannels() {
 
 /**
  * Turns a specific Channel channel ON (closes circuit).
- */
-void sendChannelOn(int channelIndex) {
+  */
+void sendChannelOn(int channelIndex, bool silent) {
   if (channelIndex < 0 || channelIndex >= MAX_CHANNELS) return;
 
   // Hardware Safety Check: Is this channel enabled in config?
@@ -1011,9 +1011,12 @@ void sendChannelOn(int channelIndex) {
       return; // Silently fail if channel is disabled in config
   }
 
-  char logBuf[50];
-  snprintf(logBuf, sizeof(logBuf), "Channel %d: ON ", channelIndex + 1);
-  logMessage(logBuf);
+  if (!silent) {
+      char logBuf[50];
+      snprintf(logBuf, sizeof(logBuf), "Channel %d: ON ", channelIndex + 1);
+      logMessage(logBuf);
+  }
+  
   #ifndef DEBUG_MODE
     digitalWrite(HARDWARE_PINS[channelIndex], HIGH);
   #endif
@@ -1021,13 +1024,17 @@ void sendChannelOn(int channelIndex) {
 
 /**
  * Turns a specific Channel channel OFF (opens circuit).
- */
-void sendChannelOff(int channelIndex) {
+  */
+void sendChannelOff(int channelIndex, bool silent) {
   if (channelIndex < 0 || channelIndex >= MAX_CHANNELS) return;
   // We always allow turning off, even if disabled, for safety.
-  char logBuf[50];
-  snprintf(logBuf, sizeof(logBuf), "Channel %d: OFF", channelIndex + 1);
-  logMessage(logBuf);
+  
+  if (!silent) {
+      char logBuf[50];
+      snprintf(logBuf, sizeof(logBuf), "Channel %d: OFF", channelIndex + 1);
+      logMessage(logBuf);
+  }
+
   #ifndef DEBUG_MODE
     digitalWrite(HARDWARE_PINS[channelIndex], LOW);
   #endif
@@ -1038,7 +1045,7 @@ void sendChannelOff(int channelIndex) {
  */
 void sendChannelOnAll() {
   logMessage("Channels: ON (All Enabled)");
-  for (int i=0; i < MAX_CHANNELS; i++) { sendChannelOn(i); }
+  for (int i=0; i < MAX_CHANNELS; i++) { sendChannelOn(i, true); }
 }
 
 /**
@@ -1046,7 +1053,7 @@ void sendChannelOnAll() {
  */
 void sendChannelOffAll() {
   logMessage("Channels: OFF (All)");
-  for (int i=0; i < MAX_CHANNELS; i++) { sendChannelOff(i); }
+  for (int i=0; i < MAX_CHANNELS; i++) { sendChannelOff(i, true); }
 }
 
 // =================================================================
@@ -2168,10 +2175,7 @@ void handleOneSecondTick() {
                     if (channelDelaysRemaining[i] > 0) {
                         allDelaysZero = false;
                         if (--channelDelaysRemaining[i] == 0) {
-                            sendChannelOn(i); // Turn on Channel when its timer hits zero
-                            char logBuf[100];
-                            snprintf(logBuf, sizeof(logBuf), "Channel %d delay finished. Channel closed.", (int)i + 1);
-                            logMessage(logBuf);
+                            sendChannelOn(i);
                         }
                     }
                 }
