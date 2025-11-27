@@ -175,6 +175,7 @@ bool g_bootMarkedStable = false;
 // Global Config (loaded from NVS)
 bool enableStreaks = true;          // Default to true
 bool enablePaybackTime = true;      // Default to true
+bool enableRewardCode = true;       // Default to true
 uint32_t paybackTimeSeconds = 900;  // Default to 900s (15min).
 
 // Persistent Session Counters (loaded from NVS)
@@ -289,6 +290,7 @@ void handleFactoryReset(AsyncWebServerRequest *request);
 #define PROV_SERVICE_UUID                   "5a160000-8334-469b-a316-c340cf29188f"
 #define PROV_SSID_CHAR_UUID                 "5a160001-8334-469b-a316-c340cf29188f"
 #define PROV_PASS_CHAR_UUID                 "5a160002-8334-469b-a316-c340cf29188f"
+#define PROV_ENABLE_REWARD_CODE_CHAR_UUID   "5a160003-8334-469b-a316-c340cf29188f"
 #define PROV_ENABLE_STREAKS_CHAR_UUID       "5a160004-8334-469b-a316-c340cf29188f"
 #define PROV_ENABLE_PAYBACK_TIME_CHAR_UUID  "5a160005-8334-469b-a316-c340cf29188f"
 #define PROV_PAYBACK_TIME_CHAR_UUID         "5a160006-8334-469b-a316-c340cf29188f"
@@ -330,7 +332,13 @@ class ProvisioningCallbacks: public BLECharacteristicCallbacks {
             g_credentialsReceived = true; // Flag to restart
         } 
         // Handle Global Config (session namespace)
-        else if (uuid == PROV_ENABLE_STREAKS_CHAR_UUID) {
+        else if (uuid == PROV_ENABLE_REWARD_CODE_CHAR_UUID) {
+            sessionState.begin("session", false);
+            bool val = (bool)data[0];
+            sessionState.putBool("enableCode", val);
+            sessionState.end();
+            logMessage("BLE: Received Enable Reward Code");
+        } else if (uuid == PROV_ENABLE_STREAKS_CHAR_UUID) {
             sessionState.begin("session", false);
             bool val = (bool)data[0];
             sessionState.putBool("enableStreaks", val);
@@ -406,6 +414,7 @@ void startBLEProvisioning() {
 
     createChar(PROV_SSID_CHAR_UUID);
     createChar(PROV_PASS_CHAR_UUID);
+    createChar(PROV_ENABLE_REWARD_CODE_CHAR_UUID);
     createChar(PROV_ENABLE_STREAKS_CHAR_UUID);
     createChar(PROV_ENABLE_PAYBACK_TIME_CHAR_UUID);
     createChar(PROV_PAYBACK_TIME_CHAR_UUID);
@@ -791,6 +800,11 @@ void setup() {
            enablePaybackTime ? "Enabled" : "Disabled", tBuf1);
   logMessage(logBuf);
 
+  // Reward Code
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Reward Code Feature", 
+           enableRewardCode ? "Enabled" : "Disabled");
+  logMessage(logBuf);
+
   // Statistics
   snprintf(logBuf, sizeof(logBuf), " %-25s : Streak %u | Complete %u | Aborted %u", 
            "Statistics", sessionStreakCount, completedSessions, abortedSessions);
@@ -1067,7 +1081,11 @@ int startSession(unsigned long duration, unsigned long penalty, TriggerStrategy 
     unsigned long maxPenaltySec = g_systemConfig.maxPenaltySeconds;
 
     if (duration < minLockSec || duration > maxLockSec) return 400;
-    if (penalty < minPenaltySec || penalty > maxPenaltySec) return 400;
+    
+    // Only enforce penalty range if Reward Code is enabled
+    if (enableRewardCode) {
+        if (penalty < minPenaltySec || penalty > maxPenaltySec) return 400;
+    }
 
     // Apply configuration
     for(int i=0; i<MAX_CHANNELS; i++) channelDelaysRemaining[i] = delays[i];
@@ -1200,6 +1218,7 @@ void triggerLock(const char* source) {
 /**
  * Aborts an active session (LOCKED, ARMED, or TESTING).
  * Implements payback logic, resets streak, and starts the reward penalty timer.
+ * If Reward Code is disabled, skips penalty and goes to COMPLETED.
  */
 void abortSession(const char* source) {
     char logBuf[100];
@@ -1214,8 +1233,6 @@ void abortSession(const char* source) {
         logMessage(logBuf);
 
         sendChannelOffAll();
-        currentState = ABORTED;
-        setLedPattern(ABORTED);
        
         // Implement Abort Logic:
         sessionStreakCount = 0; // 1. Reset streak
@@ -1237,9 +1254,26 @@ void abortSession(const char* source) {
              logMessage(" Payback: Disabled (No time added)");
         }
         
-        lockSecondsRemaining = 0;
-        penaltySecondsRemaining = penaltySecondsConfig; // 4. Start REWARD penalty
-        startTimersForState(ABORTED);
+        // 4. Handle Reward Code / Penalty
+        if (enableRewardCode) {
+            // Standard behavior: Penalty Box
+            currentState = ABORTED;
+            setLedPattern(ABORTED);
+            
+            lockSecondsRemaining = 0;
+            penaltySecondsRemaining = penaltySecondsConfig; 
+            startTimersForState(ABORTED);
+        } else {
+            // New behavior: No Reward Code = No Penalty Box
+            logMessage(" Reward Code disabled. Skipping penalty. Transitioning to COMPLETED.");
+            
+            currentState = COMPLETED;
+            setLedPattern(COMPLETED);
+            
+            lockSecondsRemaining = 0;
+            penaltySecondsRemaining = 0;
+            startTimersForState(COMPLETED);
+        }
         
         g_lastKeepAliveTime = 0; // Disarm watchdog
         g_currentKeepAliveStrikes = 0; // Reset strikes
@@ -1555,14 +1589,21 @@ void handleArm(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t
         return;
     }
 
-    if (!(*doc)["lockDurationSeconds"].is<JsonInteger>() || !(*doc)["penaltyDurationSeconds"].is<JsonInteger>()) {
-        sendJsonError(request, 400, "Missing required fields: lockDurationSeconds, penaltyDurationSeconds.");
+    if (!(*doc)["lockDurationSeconds"].is<JsonInteger>()) {
+        sendJsonError(request, 400, "Missing required field: lockDurationSeconds.");
         return;
+    }
+
+    // Penalty is required ONLY if Reward Code is enabled
+    if (enableRewardCode && !(*doc)["penaltyDurationSeconds"].is<JsonInteger>()) {
+            sendJsonError(request, 400, "Missing required field: penaltyDurationSeconds (Reward Code is enabled).");
+            return;
     }
     
     // Read session-specific data from the request
     unsigned long durationSeconds = (*doc)["lockDurationSeconds"];
-    unsigned long penaltySeconds = (*doc)["penaltyDurationSeconds"];
+    // Default to 0 if missing (allowed only if Reward Code is disabled)
+    unsigned long penaltySeconds = (*doc)["penaltyDurationSeconds"] | 0;
     bool newHideTimer = (*doc)["hideTimer"] | false; // Default to false if not present
     
     // Parse Strategy
@@ -1674,7 +1715,7 @@ void handleAbort(AsyncWebServerRequest *request) {
         logMessage(LOG_SEP_MINOR); // End Interaction Visual
 
         std::unique_ptr<JsonDocument> doc(new JsonDocument());
-        (*doc)["status"] = (currentState == ABORTED) ? "aborted" : "ready";
+        (*doc)["status"] = (currentState == ABORTED) ? "aborted" : (currentState == COMPLETED ? "completed" : "ready");
         serializeJson(*doc, responseJson);
         
         xSemaphoreGiveRecursive(stateMutex); 
@@ -1826,6 +1867,7 @@ void handleDetails(AsyncWebServerRequest *request) {
         JsonObject config = (*doc)["deterrents"].to<JsonObject>();
         config["enableStreaks"] = enableStreaks;
         config["enablePaybackTime"] = enablePaybackTime;
+        config["enableRewardCode"] = enableRewardCode;
         config["paybackDurationSeconds"] = paybackTimeSeconds; 
         
         // Add features array
@@ -2240,6 +2282,7 @@ bool loadState() {
     // Load device configuration (Session Specific)
     enableStreaks = sessionState.getBool("enableStreaks", true);
     enablePaybackTime = sessionState.getBool("enablePayback", true);
+    enableRewardCode = sessionState.getBool("enableCode", true);
     paybackTimeSeconds = sessionState.getUInt("paybackSeconds", 900);
 
     // Load persistent session counters
@@ -2320,6 +2363,7 @@ void saveState(bool force) {
     sessionState.putBool("hideTimer", hideTimer);
     sessionState.putBool("enableStreaks", enableStreaks);
     sessionState.putBool("enablePayback", enablePaybackTime);
+    sessionState.putBool("enableCode", enableRewardCode);
     sessionState.putUInt("paybackSeconds", paybackTimeSeconds);
 
     // Save persistent counters
