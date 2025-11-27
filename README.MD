@@ -4,6 +4,8 @@
 
 # Lobster Lock - Firmware
 
+![AI Assisted](https://img.shields.io/badge/Code-AI_Assisted-success)
+
 This is the PlatformIO-based firmware for the Lobster Lock ESP32 device.
 
 This firmware is responsible for:
