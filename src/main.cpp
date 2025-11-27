@@ -294,10 +294,10 @@ void handleFactoryReset(AsyncWebServerRequest *request);
 #define PROV_ENABLE_STREAKS_CHAR_UUID       "5a160004-8334-469b-a316-c340cf29188f"
 #define PROV_ENABLE_PAYBACK_TIME_CHAR_UUID  "5a160005-8334-469b-a316-c340cf29188f"
 #define PROV_PAYBACK_TIME_CHAR_UUID         "5a160006-8334-469b-a316-c340cf29188f"
-#define PROV_CH1_ENABLE_UUID                "5a16000A-8334-469b-a316-c340cf29188f"
-#define PROV_CH2_ENABLE_UUID                "5a16000B-8334-469b-a316-c340cf29188f"
-#define PROV_CH3_ENABLE_UUID                "5a16000C-8334-469b-a316-c340cf29188f"
-#define PROV_CH4_ENABLE_UUID                "5a16000D-8334-469b-a316-c340cf29188f"
+#define PROV_CH1_ENABLE_UUID                "5a16000a-8334-469b-a316-c340cf29188f"
+#define PROV_CH2_ENABLE_UUID                "5a16000b-8334-469b-a316-c340cf29188f"
+#define PROV_CH3_ENABLE_UUID                "5a16000d-8334-469b-a316-c340cf29188f"
+#define PROV_CH4_ENABLE_UUID                "5a16000c-8334-469b-a316-c340cf29188f"
 
 volatile bool g_credentialsReceived = false;
 
