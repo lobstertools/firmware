@@ -469,6 +469,7 @@ void startMDNS() {
     }
     // Announce the service your NodeJS app will look for
     MDNS.addService("lobster-lock", "tcp", 80);
+    MDNS.addServiceTxt("lobster-lock", "tcp", "mac", WiFi.macAddress().c_str());
     logMessage("mDNS service announced: _lobster-lock._tcp.local");
 }
 
@@ -1853,6 +1854,8 @@ void handleDetails(AsyncWebServerRequest *request) {
         (*doc)["version"] = DEVICE_VERSION;
         (*doc)["numberOfChannels"] = 4;
         (*doc)["address"] = WiFi.localIP().toString();
+        (*doc)["mac"] = WiFi.macAddress();
+        (*doc)["port"] = 80;
 
         // Channels Configuration
         JsonObject channels = (*doc)["channels"].to<JsonObject>();
