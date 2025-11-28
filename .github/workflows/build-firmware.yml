@@ -13,7 +13,6 @@ jobs:
   build-and-release:
     name: "Build and Maybe Release"
     runs-on: ubuntu-latest
-    
     permissions:
       contents: write
     
@@ -76,26 +75,28 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Trigger was a tag push. Creating release for ${{ env.RELEASE_TAG }}..."
+          echo "Creating release bundle for ${{ env.RELEASE_TAG }}..."
           
-          # 1. Define paths
-          ORIGINAL_ASSET_PATH=".pio/build/esp32_diymore_release/firmware.bin"
+          # 1. Define Source Paths
+          BUILD_DIR=".pio/build/esp32_diymore_release"
+          SRC_FW="$BUILD_DIR/firmware.bin"
+          SRC_BL="$BUILD_DIR/bootloader.bin"
+          SRC_PT="$BUILD_DIR/partitions.bin"
           
-          # 2. Create the new versioned asset name, e.g., "lobster-lock-v0.7.1.bin"
-          NEW_ASSET_NAME="lobster-lock-${{ env.RELEASE_TAG }}.bin"
-          NEW_ASSET_PATH="/tmp/${NEW_ASSET_NAME}"
+          # 2. Define Output Zip Name
+          OUT_ZIP="lobster-firmware-bundle-${{ env.RELEASE_TAG }}.zip"
 
-          # 3. Safety check to ensure the file exists
-          if [ ! -f "$ORIGINAL_ASSET_PATH" ]; then
-            echo "::error::Build asset not found at $ORIGINAL_ASSET_PATH"
+          # 3. Verify files exist
+          if [[ ! -f "$SRC_FW" || ! -f "$SRC_BL" || ! -f "$SRC_PT" ]]; then
+            echo "::error::Missing build assets in $BUILD_DIR"
             exit 1
           fi
           
-          echo "Renaming '$ORIGINAL_ASSET_PATH' to '$NEW_ASSET_PATH'"
-          cp "$ORIGINAL_ASSET_PATH" "$NEW_ASSET_PATH"
-          
-          # 4. Use the GitHub CLI to create a new release
+          # 4. Create ZIP (Junk paths so they are flat inside the zip)
+          zip -j "$OUT_ZIP" "$SRC_FW" "$SRC_BL" "$SRC_PT"
+
+          # 5. Release ONLY the zip
           gh release create ${{ env.RELEASE_TAG }} \
-            "$NEW_ASSET_PATH" \
+            "$OUT_ZIP" \
             --title "Release ${{ env.RELEASE_TAG }}" \
             --generate-notes
