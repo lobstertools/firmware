@@ -44,7 +44,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-platformio-
 
-      # --- 3. Set Version & Build Firmware ---
+      # --- 3. Verify Code Formatting ---
+      
+      - name: "Verify Code Formatting"
+        run: pio run -e esp32_diymore_release -t verify
+
+      # --- 4. Set Version & Build Firmware ---
       
       - name: "Calculate Version Strings"
         id: versioning
@@ -68,7 +73,7 @@ jobs:
           PLATFORMIO_BUILD_FLAGS: "-D DEVICE_VERSION='\"${{ env.BUILD_VERSION }}\"'"
         run: pio run -e esp32_diymore_release
 
-      # --- 4. Create Release (ONLY on tag push) ---
+      # --- 5. Create Release (ONLY on tag push) ---
       
       - name: "Create GitHub Release"
         if: github.ref_type == 'tag'
