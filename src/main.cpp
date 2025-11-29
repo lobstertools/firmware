@@ -58,7 +58,7 @@ using namespace ArduinoJson;
 #define LOG_PREFIX_STATE ">>> STATE CHANGE: "
 
 // --- Channel-Specific Configuration ---
-const int HARDWARE_PINS[4] = {16, 17, 18, 19};
+const int HARDWARE_PINS[4] = {16, 17, 26, 27};
 const int MAX_CHANNELS = 4;
 
 // Bitmask for enabled channels (loaded from Provisioning NVS)
