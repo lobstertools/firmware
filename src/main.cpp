@@ -109,7 +109,7 @@ const SystemConfig DEFAULT_SETTINGS = {
     10800,      // maxLockSeconds (180 min)
     900,        // minPenaltySeconds (15 min)
     10800,      // maxPenaltySeconds (180 min)
-    120,        // testModeDurationSeconds
+    240,        // testModeDurationSeconds
     14400,      // failsafeMaxLockSeconds (4 hours)
     10000,      // keepAliveIntervalMs
     4,          // keepAliveMaxStrikes
