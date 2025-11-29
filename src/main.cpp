@@ -116,7 +116,7 @@ const SystemConfig DEFAULT_SETTINGS = {
     5,          // bootLoopThreshold (Default)
     120000,     // stableBootTimeMs (Default 2 Minutes)
     5,          // wifiMaxRetries (Default)
-    600         // armedTimeoutSeconds (10 Minutes Default)
+    1800        // armedTimeoutSeconds (30 Minutes)
 };
 
 SystemConfig g_systemConfig = DEFAULT_SETTINGS;
