@@ -104,7 +104,7 @@ struct SystemConfig {
 
 // Default values (used if NVS is empty)
 const SystemConfig DEFAULT_SETTINGS = {
-    8,          // longPressSeconds
+    3,          // longPressSeconds
     900,        // minLockSeconds (15 min)
     10800,      // maxLockSeconds (180 min)
     900,        // minPenaltySeconds (15 min)
