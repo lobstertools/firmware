@@ -2285,11 +2285,12 @@ void handleOneSecondTick() {
       }
       // Decrement lock timer
       if (lockSecondsRemaining > 0) {
-          if (--lockSecondsRemaining == 0) {
+        // Increment total locked time only when session is active
+        totalLockedSessionSeconds++;
+
+        if (--lockSecondsRemaining == 0) {
               completeSession(); // Timer finished
-          }
-          // Increment total locked time only when session is active
-          totalLockedSessionSeconds++;
+        }
       }
       break;
     case ABORTED:
