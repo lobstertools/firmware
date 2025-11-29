@@ -141,6 +141,9 @@ Preferences bootPrefs;            // Namespace: "boot" (Crash tracking)
 
 jled::JLed statusLed = jled::JLed(STATUS_LED_PIN);
 
+// --- Hardware Tracking Globals ---
+volatile unsigned long g_buttonPressStartTime = 0;
+
 // Global array to hold reward history.
 Reward rewardHistory[REWARD_HISTORY_SIZE];
 
@@ -235,6 +238,7 @@ void completeSession();
 
 // --- Helper Prototypes ---
 void handleOneSecondTick();
+void handlePress();
 void saveState(bool force = false);
 bool loadState();
 void handleRebootState();
@@ -655,6 +659,9 @@ void setup() {
   button.attachLongPressStart(handleLongPress);
   button.attachDoubleClick(handleDoublePress);
   
+  // --- Track Physical Press Start for Hardware State ---
+  button.attachPress(handlePress);
+
   // Set initial LED pattern based on the loaded/determined state
   setLedPattern(currentState); 
 
@@ -1760,6 +1767,8 @@ void handleReward(AsyncWebServerRequest *request) {
 void handleStatus(AsyncWebServerRequest *request) {
     // 1. Create the Snapshot
     struct StateSnapshot {
+        
+        // Session
         SessionState state;
         TriggerStrategy strategy;
         unsigned long lockRemain;
@@ -1767,11 +1776,22 @@ void handleStatus(AsyncWebServerRequest *request) {
         unsigned long testRemain;
         unsigned long delays[4];
         bool hideTimer;
+
+        // Stats
         uint32_t streaks;
         uint32_t aborted;
         uint32_t completed;
         uint32_t totalLocked;
         uint32_t payback;
+
+        // Hardware
+        bool isPressed;
+        uint32_t pressDuration;
+        uint32_t longPressThreshold;
+        int rssi;
+        uint32_t freeHeap;
+        uint32_t uptime;
+        float internalTemp;
     } snapshot;
 
     // Quick Lock & Copy
@@ -1788,6 +1808,24 @@ void handleStatus(AsyncWebServerRequest *request) {
         snapshot.completed = completedSessions;
         snapshot.totalLocked = totalLockedSessionSeconds;
         snapshot.payback = paybackAccumulated;
+
+        // --- HARDWARE STATUS COLLECTION ---
+        // 1. Button Logic: "Instant Truth" check
+        // Active LOW: 0 = Pressed, 1 = Released
+        snapshot.isPressed = (digitalRead(ONE_BUTTON_PIN) == 0); 
+        
+        if (snapshot.isPressed) {
+            snapshot.pressDuration = millis() - g_buttonPressStartTime;
+        } else {
+            snapshot.pressDuration = 0;
+        }
+
+        // 2. Connectivity & System
+        snapshot.rssi = WiFi.RSSI();
+        snapshot.freeHeap = ESP.getFreeHeap();
+        snapshot.uptime = millis() / 1000;
+        snapshot.internalTemp = temperatureRead();
+        
         xSemaphoreGiveRecursive(stateMutex);
     } else {
         request->send(503, "text/plain", "System Busy");
@@ -1814,6 +1852,7 @@ void handleStatus(AsyncWebServerRequest *request) {
         }
     }
 
+    // Channel info
     JsonObject channels = doc["channelDelaysRemainingSeconds"].to<JsonObject>();
     channels["ch1"] = snapshot.delays[0];
     channels["ch2"] = snapshot.delays[1];
@@ -1829,6 +1868,21 @@ void handleStatus(AsyncWebServerRequest *request) {
     stats["completed"] = snapshot.completed;
     stats["totalTimeLockedSeconds"] = snapshot.totalLocked;
     stats["pendingPaybackSeconds"] = snapshot.payback;
+
+    // --- Hardware
+    JsonObject hw = doc["hardwareStatus"].to<JsonObject>();
+    hw["buttonPressed"] = snapshot.isPressed;
+    hw["currentPressDurationMs"] = snapshot.pressDuration;
+    hw["rssi"] = snapshot.rssi;
+    hw["freeHeap"] = snapshot.freeHeap;
+    hw["uptimeSeconds"] = snapshot.uptime;    
+
+    // Handle temperature NaN or invalid reads gracefully
+    if (isnan(snapshot.internalTemp)) {
+        hw["internalTempC"] = "N/A";
+    } else {
+        hw["internalTempC"] = snapshot.internalTemp;
+    }
 
     // Serialize directly into the response stream
     serializeJson(doc, *response);
@@ -1852,7 +1906,9 @@ void handleDetails(AsyncWebServerRequest *request) {
         (*doc)["name"] = DEVICE_NAME;
         (*doc)["id"] = uniqueHostname;
         (*doc)["version"] = DEVICE_VERSION;
-        (*doc)["numberOfChannels"] = 4;
+        
+        (*doc)["longPressMs"] = g_systemConfig.longPressSeconds * 1000;
+        
         (*doc)["address"] = WiFi.localIP().toString();
         (*doc)["mac"] = WiFi.macAddress();
         (*doc)["port"] = 80;
@@ -2386,6 +2442,14 @@ void saveState(bool force) {
 // =================================================================
 // --- Utilities & Helpers ---
 // =================================================================
+
+/**
+ * Immediate callback when button goes active (DOWN).
+ * Used for hardware state.
+ */
+void handlePress() {
+    g_buttonPressStartTime = millis();
+}
 
 /**
  * Helper to convert a 2-byte LE array to uint16_t
