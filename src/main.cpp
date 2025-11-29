@@ -51,6 +51,7 @@ using namespace ArduinoJson;
 #define SERIAL_BAUD_RATE 115200
 #define DEFAULT_WDT_TIMEOUT 20 // Relaxed for READY state
 #define CRITICAL_WDT_TIMEOUT 5 // Tight for LOCKED state
+#define MAX_SAFE_TEMP_C 85.0 // Safety Threshold (85°C)  
 
 // --- Logging Visuals ---
 #define LOG_SEP_MAJOR "=========================================================================="
@@ -961,11 +962,13 @@ void checkHeapHealth() {
 }
 
 /**
- * Monitor stack usage and emergency stop if overflow is imminent.
+ * Monitor stack usage and internal tempeature
+ * and emergency stop if overflow is imminent or overheating.
  */
 void checkSystemHealth() {
+    
+    // 1. Stack Health Check
     UBaseType_t loopStack = uxTaskGetStackHighWaterMark(NULL);
-    // Note: This assumes a task named "async_tcp" exists. If the library changes task name, this returns null.
     TaskHandle_t asyncHandle = xTaskGetHandle("async_tcp");
     UBaseType_t asyncStack = 0;
     if (asyncHandle != NULL) {
@@ -974,6 +977,22 @@ void checkSystemHealth() {
     
     if (loopStack < 512 || (asyncHandle != NULL && asyncStack < 512)) {
         logMessage("CRITICAL: Stack near overflow! Emergency Stop.");
+        sendChannelOffAll();
+        // Force a restart as memory corruption is likely
+        ESP.restart(); 
+    }
+
+    // 2. Thermal Protection
+    float currentTemp = temperatureRead(); // The die temperature in Celsius.
+
+    // Validate reading (isnan check) and compare against threshold
+    if (!isnan(currentTemp) && currentTemp > MAX_SAFE_TEMP_C) {
+        
+        // Log the critical event
+        char logBuf[100];
+        snprintf(logBuf, sizeof(logBuf), "CRITICAL: Overheating detected (%.1f C)! Emergency Stop.", currentTemp);
+        logMessage(logBuf);
+
         sendChannelOffAll();
     }
 }
