@@ -103,6 +103,8 @@ struct SystemConfig {
   uint32_t maxLockSeconds;
   uint32_t minPenaltySeconds;
   uint32_t maxPenaltySeconds;
+  uint32_t minPaybackTimeSeconds;
+  uint32_t maxPaybackTimeSeconds;
   uint32_t testModeDurationSeconds;
   uint32_t failsafeMaxLockSeconds;
   uint32_t keepAliveIntervalMs;
@@ -120,6 +122,8 @@ const SystemConfig DEFAULT_SETTINGS = {
     10800,  // maxLockSeconds (180 min)
     900,    // minPenaltySeconds (15 min)
     10800,  // maxPenaltySeconds (180 min)
+    300,    // minPaybackTimeSeconds (5 min)
+    2700,   // maxPaybackTimeSeconds (45 min)
     240,    // testModeDurationSeconds
     14400,  // failsafeMaxLockSeconds (4 hours)
     10000,  // keepAliveIntervalMs
@@ -2136,6 +2140,13 @@ void handleDetails(AsyncWebServerRequest *request) {
 
     (*doc)["longPressMs"] = g_systemConfig.longPressSeconds * 1000;
 
+    // System Limits
+    (*doc)["minLockSeconds"] = g_systemConfig.minLockSeconds;
+    (*doc)["maxLockSeconds"] = g_systemConfig.maxLockSeconds;
+    (*doc)["minPenaltySeconds"] = g_systemConfig.minPenaltySeconds;
+    (*doc)["maxPenaltySeconds"] = g_systemConfig.maxPenaltySeconds;
+    (*doc)["testModeDurationSeconds"] = g_systemConfig.testModeDurationSeconds;
+
     (*doc)["address"] = WiFi.localIP().toString();
     (*doc)["mac"] = WiFi.macAddress();
     (*doc)["port"] = 80;
@@ -2148,11 +2159,13 @@ void handleDetails(AsyncWebServerRequest *request) {
     channels["ch4"] = (bool)((g_enabledChannelsMask >> 3) & 1);
 
     // Deterrent Configuration
-    JsonObject config = (*doc)["deterrents"].to<JsonObject>();
-    config["enableStreaks"] = enableStreaks;
-    config["enablePaybackTime"] = enablePaybackTime;
-    config["enableRewardCode"] = enableRewardCode;
-    config["paybackDurationSeconds"] = paybackTimeSeconds;
+    JsonObject deterrents = (*doc)["deterrents"].to<JsonObject>();
+    deterrents["enableStreaks"] = enableStreaks;
+    deterrents["enablePaybackTime"] = enablePaybackTime;
+    deterrents["enableRewardCode"] = enableRewardCode;
+    deterrents["paybackDurationSeconds"] = paybackTimeSeconds;
+    deterrents["minPaybackTimeSeconds"] = g_systemConfig.minPaybackTimeSeconds;
+    deterrents["maxPaybackTimeSeconds"] = g_systemConfig.maxPaybackTimeSeconds;
 
     // Add features array
     JsonArray features = (*doc)["features"].to<JsonArray>();
