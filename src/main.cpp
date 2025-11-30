@@ -14,19 +14,19 @@
  */
 
 #include <Arduino.h>
-#include <WiFi.h>
 #include <Ticker.h>
+#include <WiFi.h>
 #include <esp_task_wdt.h>
 
 // --- Module Includes ---
 #include "Config.h"
 #include "Globals.h"
-#include "Logger.h"
-#include "Utils.h"
 #include "Hardware.h"
-#include "Storage.h"
+#include "Logger.h"
 #include "Network.h"
 #include "Session.h"
+#include "Storage.h"
+#include "Utils.h"
 #include "WebAPI.h"
 
 // --- Globals Local to Main ---
@@ -93,15 +93,15 @@ void setup() {
   // 1. DATA LOADING
   // =================================================================
 
-  // --- Load Hardware Enable Mask --- 
+  // --- Load Hardware Enable Mask ---
   provisioningPrefs.begin("provisioning", true);
   g_enabledChannelsMask = provisioningPrefs.getUChar("chMask", 0x0F);
   provisioningPrefs.end();
 
-  // --- Load Session State & Deterrent Configs --- 
+  // --- Load Session State & Deterrent Configs ---
   bool validStateLoaded = loadState();
 
-  // --- Determine logical state (Handle power-loss during lock, etc) --- 
+  // --- Determine logical state (Handle power-loss during lock, etc) ---
   if (validStateLoaded) {
     handleRebootState();
   } else {
@@ -139,9 +139,8 @@ void setup() {
   // Channels
   for (int i = 0; i < MAX_CHANNELS; i++) {
     bool isEnabled = (g_enabledChannelsMask >> i) & 1;
-    snprintf(logBuf, sizeof(logBuf), " %-25s : %s (GPIO %d)",
-             ("Channel " + String(i + 1)).c_str(),
-             isEnabled ? "ENABLED" : "DISABLED", HARDWARE_PINS[i]);
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %s (GPIO %d)", ("Channel " + String(i + 1)).c_str(), isEnabled ? "ENABLED" : "DISABLED",
+             HARDWARE_PINS[i]);
     logMessage(logBuf);
   }
 
@@ -149,12 +148,10 @@ void setup() {
   snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Status LED", "Enabled");
   logMessage(logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Pin %d)", "Foot Pedal/Button",
-           "Enabled", ONE_BUTTON_PIN);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Pin %d)", "Foot Pedal/Button", "Enabled", ONE_BUTTON_PIN);
   logMessage(logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %lu ms", "Long Press Time",
-           longPressMs);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %lu ms", "Long Press Time", longPressMs);
   logMessage(logBuf);
 
   // --- SECTION: DETERRENTS ---
@@ -162,12 +159,10 @@ void setup() {
   logMessage("[ DETERRENT CONFIG ]");
   logMessage(LOG_SEP_MINOR);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Session Streaks",
-           enableStreaks ? "Enabled" : "Disabled");
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Session Streaks", enableStreaks ? "Enabled" : "Disabled");
   logMessage(logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Time Payback",
-           enablePaybackTime ? "Enabled" : "Disabled");
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Time Payback", enablePaybackTime ? "Enabled" : "Disabled");
   logMessage(logBuf);
 
   // Only show details if enabled
@@ -177,8 +172,7 @@ void setup() {
     logMessage(logBuf);
   }
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Reward Code",
-           enableRewardCode ? "Enabled" : "Disabled");
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Reward Code", enableRewardCode ? "Enabled" : "Disabled");
   logMessage(logBuf);
 
   // --- SECTION: STATISTICS ---
@@ -186,16 +180,13 @@ void setup() {
   logMessage("[ STATISTICS ]");
   logMessage(LOG_SEP_MINOR);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %u", "Streak Count",
-           sessionStreakCount);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u", "Streak Count", sessionStreakCount);
   logMessage(logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %u", "Completed Sessions",
-           completedSessions);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u", "Completed Sessions", completedSessions);
   logMessage(logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %u", "Aborted Sessions",
-           abortedSessions);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u", "Aborted Sessions", abortedSessions);
   logMessage(logBuf);
 
   formatSeconds(paybackAccumulated, tBuf1, sizeof(tBuf1));
@@ -211,26 +202,22 @@ void setup() {
   logMessage("[ CURRENT SESSION ]");
   logMessage(LOG_SEP_MINOR);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Current State",
-           stateToString(currentState));
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Current State", stateToString(currentState));
   logMessage(logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Timer Visibility",
-           hideTimer ? "Hidden" : "Visible");
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Timer Visibility", hideTimer ? "Hidden" : "Visible");
   logMessage(logBuf);
 
   // Lock Timer (Remaining vs Config)
   formatSeconds(lockSecondsRemaining, tBuf1, sizeof(tBuf1));
   formatSeconds(lockSecondsConfig, tBuf2, sizeof(tBuf2));
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Cfg: %s)", "Lock Timer", tBuf1,
-           tBuf2);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Cfg: %s)", "Lock Timer", tBuf1, tBuf2);
   logMessage(logBuf);
 
   // Penalty Timer (Remaining vs Config)
   formatSeconds(penaltySecondsRemaining, tBuf1, sizeof(tBuf1));
   formatSeconds(penaltySecondsConfig, tBuf2, sizeof(tBuf2));
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Cfg: %s)", "Penalty Timer",
-           tBuf1, tBuf2);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Cfg: %s)", "Penalty Timer", tBuf1, tBuf2);
   logMessage(logBuf);
 
   logMessage(LOG_SEP_MAJOR); // End of logging blocks
@@ -261,7 +248,7 @@ void setup() {
   // --- HTTP Server ---
   setupWebServer();
 
-  logMessage("Device is operational.");   
+  logMessage("Device is operational.");
 }
 
 /**
@@ -288,8 +275,7 @@ void loop() {
 
   // Check if we have been running long enough to be considered "Stable"
   // Uses g_systemConfig.stableBootTimeMs
-  if (!g_bootMarkedStable &&
-      (millis() - g_bootStartTime > g_systemConfig.stableBootTimeMs)) {
+  if (!g_bootMarkedStable && (millis() - g_bootStartTime > g_systemConfig.stableBootTimeMs)) {
     g_bootMarkedStable = true;
     bootPrefs.begin("boot", false);
     bootPrefs.putInt("crashes", 0);
@@ -329,17 +315,16 @@ void loop() {
 
   if (pendingTicks > 0) {
     // Only process ticks if we can get the lock.
-    if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(50)) ==
-        pdTRUE) {
+    if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(50)) == pdTRUE) {
       while (pendingTicks > 0) {
         handleOneSecondTick();
         pendingTicks--;
       }
-      
+
       // Run immediately after processing logic ticks to ensure synchronization.
       // Checks for anomalies and ensures ARMED/Safety logic is respected.
       enforceHardwareState();
-      
+
       xSemaphoreGiveRecursive(stateMutex);
     } else {
       // Mutex contention detected.

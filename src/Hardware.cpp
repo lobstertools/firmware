@@ -38,7 +38,6 @@ void initializeChannels() {
     pinMode(HARDWARE_PINS[i], OUTPUT);
     digitalWrite(HARDWARE_PINS[i], LOW); // Ensure circuit is open
   }
-
 }
 
 /**

@@ -660,7 +660,7 @@ void handleFactoryReset(AsyncWebServerRequest *request) {
  * This function is now just a clean list of routes.
  */
 void setupWebServer() {
-  
+
   // Root endpoint, list the API.
   server.on("/", HTTP_GET, handleRoot);
 
@@ -698,6 +698,6 @@ void setupWebServer() {
   server.on("/factory-reset", HTTP_POST, handleFactoryReset);
 
   server.begin();
-  
+
   logMessage("HTTP server started.");
 }

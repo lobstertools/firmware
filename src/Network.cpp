@@ -308,9 +308,8 @@ void waitForNetwork() {
     WiFi.setSleep(false);
 
     // Wait up to 30 seconds specifically for the IP
-    while (WiFi.status() != WL_CONNECTED &&
-           (millis() - wifiWaitStart < 30000)) {
-      processLogQueue(); // Keep flushing logs so "Connected" appears instantly
+    while (WiFi.status() != WL_CONNECTED && (millis() - wifiWaitStart < 30000)) {
+      processLogQueue();    // Keep flushing logs so "Connected" appears instantly
       esp_task_wdt_reset(); // Feed the watchdog so we don't crash
       delay(100);
     }
