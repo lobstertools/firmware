@@ -1300,8 +1300,12 @@ int startSession(unsigned long duration, unsigned long penalty,
            (currentStrategy == STRAT_BUTTON_TRIGGER ? "Manual Button"
                                                     : "Auto Countdown"));
   logMessage(logBuf);
-  snprintf(logBuf, sizeof(logBuf), " %-20s : %lu s", "Lock Time", duration);
+  
+  char timeStr[64];
+  formatSeconds(duration, timeStr, sizeof(timeStr));
+  snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Lock Time", timeStr);
   logMessage(logBuf);
+
   snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Visibility",
            (hideTimer ? "Hidden" : "Visible"));
   logMessage(logBuf);
