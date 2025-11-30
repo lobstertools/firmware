@@ -380,9 +380,20 @@ class ProvisioningCallbacks : public BLECharacteristicCallbacks {
     } else if (uuid == PROV_PAYBACK_TIME_CHAR_UUID) {
       sessionState.begin("session", false);
       uint32_t val = bytesToUint32(data);
+      
+      // Clamp value against System Config limits
+      if (val < g_systemConfig.minPaybackTimeSeconds) {
+        val = g_systemConfig.minPaybackTimeSeconds;
+      } else if (val > g_systemConfig.maxPaybackTimeSeconds) {
+        val = g_systemConfig.maxPaybackTimeSeconds;
+      }
+
       sessionState.putUInt("paybackSeconds", val);
       sessionState.end();
-      logMessage("BLE: Received Payback Time (Seconds)");
+      
+      char logBuf[64];
+      snprintf(logBuf, sizeof(logBuf), "BLE: Received Payback Time (%u s)", val);
+      logMessage(logBuf);
     }
     // Handle Hardware Config (provisioning namespace)
     else {
