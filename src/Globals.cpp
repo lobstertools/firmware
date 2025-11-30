@@ -10,7 +10,16 @@ AsyncWebServer server(80);
 SystemConfig g_systemConfig = DEFAULT_SETTINGS;
 
 // --- Button Configuration ---
-OneButton button(ONE_BUTTON_PIN, true, true); // Pin, active low, internal pull-up
+#ifdef DEBUG_MODE
+// Development: Uses the standard on-board Normally Open (NO) button.
+// Standard logic: Ground = Pressed.
+OneButton button(ONE_BUTTON_PIN, true, true);
+#else
+// Production: Uses a Normally Closed (NC) abort switch.
+// Fail-safe logic: A physical press, wire break, or disconnected cable
+// creates an open circuit. This "open" state triggers the abort.
+OneButton button(ONE_BUTTON_PIN, false, true);
+#endif
 
 jled::JLed statusLed = jled::JLed(STATUS_LED_PIN);
 
