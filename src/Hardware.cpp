@@ -1,0 +1,336 @@
+#include "Hardware.h"
+#include "Globals.h"
+#include "Logger.h"
+#include "Utils.h"
+#include "esp_timer.h"
+#include <esp_task_wdt.h>
+
+// --- Fail-Safe Timer Handle ---
+esp_timer_handle_t failsafeTimer = NULL;
+
+/**
+ * Hardware Timer Callback for "Death Grip".
+ * This runs in ISR context when the absolute maximum safety limit is hit.
+ * Forces a reboot to ensure pins go low.
+ */
+void IRAM_ATTR failsafe_timer_callback(void *arg) {
+  // EMERGENCY: Force all channels LOW immediately
+  for (int i = 0; i < MAX_CHANNELS; i++) {
+    digitalWrite(HARDWARE_PINS[i], LOW);
+  }
+
+  // While technically not 100% ISR-safe (can panic), a panic reset
+  // is exactly what we want for a "Failsafe" condition.
+  esp_restart();
+}
+
+/**
+ * Initializes all channel pins as outputs.
+ * Sets them to LOW immediately to prevent floating states on boot.
+ * This function does NOT check logical 'enabled' status, it is purely hardware
+ * init.
+ */
+void initializeChannels() {
+  logMessage("Initializing Channels: Setting all 4 to Output LOW (Safe State)");
+
+  // Iterate through all physical pins defined in hardware config
+  for (int i = 0; i < MAX_CHANNELS; i++) {
+    pinMode(HARDWARE_PINS[i], OUTPUT);
+    digitalWrite(HARDWARE_PINS[i], LOW); // Ensure circuit is open
+  }
+
+}
+
+/**
+ * Hardware Timer for "Death Grip".
+ */
+void initializeFailSafeTimer() {
+  const esp_timer_create_args_t failsafe_timer_args = {.callback = &failsafe_timer_callback, .name = "failsafe_wdt"};
+  esp_timer_create(&failsafe_timer_args, &failsafeTimer);
+}
+
+/**
+ * Continuous safety enforcement & Anomaly detection in hardware state
+ * * 1. LOCKED / TESTING = Channels ON (if enabled).
+ * 2. ALL OTHER STATES = Channels OFF.
+ * * Returns true if a correction was applied.
+ */
+bool enforceHardwareState() {
+  bool correctionApplied = false;
+
+  // 1. SAFETY: Detect Memory Corruption
+  if (currentState > TESTING) {
+    static unsigned long lastPanicLog = 0;
+    if (millis() - lastPanicLog > 1000) {
+      logMessage("CRITICAL: Invalid State Enum! Failsafe Triggered.");
+      lastPanicLog = millis();
+    }
+
+    for (int i = 0; i < MAX_CHANNELS; i++)
+      digitalWrite(HARDWARE_PINS[i], LOW);
+    currentState = READY;
+    return true;
+  }
+
+  // 2. CALCULATE TARGET MASK
+  uint8_t targetMask = 0;
+
+  for (int i = 0; i < MAX_CHANNELS; i++) {
+    bool isEnabled = (g_enabledChannelsMask >> i) & 1;
+    bool shouldBeHigh = false;
+
+    if (isEnabled) {
+      switch (currentState) {
+      case LOCKED:
+      case TESTING:
+        shouldBeHigh = true;
+        break;
+
+      case ARMED:
+        // In countdown, pin is high only if delay has elapsed
+        if (currentStrategy == STRAT_AUTO_COUNTDOWN && channelDelaysRemaining[i] == 0) {
+          shouldBeHigh = true;
+        }
+        break;
+
+      case READY:
+      case ABORTED:
+      case COMPLETED:
+      default:
+        shouldBeHigh = false;
+        break;
+      }
+    }
+
+    if (shouldBeHigh) {
+      targetMask |= (1 << i);
+    }
+  }
+
+  // 3. DETECT LOGIC CHANGES
+  static uint8_t lastTargetMask = 0;
+  bool logicHasChanged = (targetMask != lastTargetMask);
+
+  // 4. ENFORCE HARDWARE
+  for (int i = 0; i < MAX_CHANNELS; i++) {
+    int pin = HARDWARE_PINS[i];
+    int expectedLevel = (targetMask >> i) & 1 ? HIGH : LOW;
+    int currentLevel = digitalRead(pin);
+
+    // If physics don't match logic...
+    if (currentLevel != expectedLevel) {
+
+      // set hardware state
+      digitalWrite(pin, expectedLevel);
+      correctionApplied = true;
+
+      if (logicHasChanged) {
+        char logBuf[64];
+        snprintf(logBuf, sizeof(logBuf), "State Update: Ch%d set to %s", i + 1, expectedLevel ? "HIGH" : "LOW");
+        logMessage(logBuf);
+      } else {
+        // CRITICAL ANOMALY (Glitch or Interference)
+        char logBuf[100];
+        snprintf(logBuf, sizeof(logBuf), "CRITICAL ANOMALY: Ch%d drifted to %s! Corrected.", i + 1, currentLevel ? "HIGH" : "LOW");
+        logMessage(logBuf);
+      }
+    }
+  }
+
+  lastTargetMask = targetMask;
+  return correctionApplied;
+}
+
+/**
+ * Turns a specific Channel channel ON (closes circuit).
+ */
+void sendChannelOn(int channelIndex, bool silent) {
+  if (channelIndex < 0 || channelIndex >= MAX_CHANNELS)
+    return;
+
+  // Hardware Safety Check: Is this channel enabled in config?
+  if (!((g_enabledChannelsMask >> channelIndex) & 1)) {
+    return; // Silently fail if channel is disabled in config
+  }
+
+  if (!silent) {
+    char logBuf[50];
+    snprintf(logBuf, sizeof(logBuf), "Channel %d: ON ", channelIndex + 1);
+    logMessage(logBuf);
+  }
+
+  digitalWrite(HARDWARE_PINS[channelIndex], HIGH);
+}
+
+/**
+ * Turns a specific Channel channel OFF (opens circuit).
+ */
+void sendChannelOff(int channelIndex, bool silent) {
+  if (channelIndex < 0 || channelIndex >= MAX_CHANNELS)
+    return;
+  // We always allow turning off, even if disabled, for safety.
+
+  if (!silent) {
+    char logBuf[50];
+    snprintf(logBuf, sizeof(logBuf), "Channel %d: OFF", channelIndex + 1);
+    logMessage(logBuf);
+  }
+
+  digitalWrite(HARDWARE_PINS[channelIndex], LOW);
+}
+
+/**
+ * Turns all Channel channels ON.
+ */
+void sendChannelOnAll() {
+  logMessage("Channels: ON (All Enabled)");
+  for (int i = 0; i < MAX_CHANNELS; i++) {
+    sendChannelOn(i, true);
+  }
+}
+
+/**
+ * Turns all Channel channels OFF.
+ */
+void sendChannelOffAll() {
+  logMessage("Channels: OFF (All)");
+  for (int i = 0; i < MAX_CHANNELS; i++) {
+    sendChannelOff(i, true);
+  }
+}
+
+/**
+ * Arms the independent hardware timer.
+ */
+void armFailsafeTimer() {
+  if (failsafeTimer == NULL)
+    return;
+
+  // Start one-shot timer. FAILSAFE_MAX_LOCK_SECONDS converted to microseconds.
+  // This is completely independent of the main FreeRTOS tasks.
+  uint64_t timeout_us = (uint64_t)g_systemConfig.failsafeMaxLockSeconds * 1000000ULL;
+  esp_timer_start_once(failsafeTimer, timeout_us);
+
+  char timeStr[64];
+  formatSeconds(g_systemConfig.failsafeMaxLockSeconds, timeStr, sizeof(timeStr));
+
+  char logBuf[100];
+  snprintf(logBuf, sizeof(logBuf), "Death Grip Timer ARMED: %s", timeStr);
+  logMessage(logBuf);
+}
+
+/**
+ * Disarms the independent hardware timer.
+ */
+void disarmFailsafeTimer() {
+  if (failsafeTimer == NULL)
+    return;
+  esp_timer_stop(failsafeTimer);
+  logMessage("Death Grip Timer DISARMED.");
+}
+
+/**
+ * Monitor heap memory and emergency stop if fragmentation is high.
+ */
+void checkHeapHealth() {
+  size_t freeMem = ESP.getFreeHeap();
+  size_t largestBlock = ESP.getMaxAllocHeap();
+
+  // If fragmentation is high (plenty of free mem but no big blocks)
+  if (largestBlock < 8192 && freeMem > 20000) {
+    logMessage("WARNING: Heap fragmentation detected!");
+  }
+
+  // Critical low memory
+  if (freeMem < 10000) {
+    logMessage("CRITICAL: Low Heap! Executing failsafe.");
+    sendChannelOffAll();
+  }
+}
+
+/**
+ * Monitor stack usage and internal tempeature
+ * and emergency stop if overflow is imminent or overheating.
+ */
+void checkSystemHealth() {
+
+  // 1. Stack Health Check
+  UBaseType_t loopStack = uxTaskGetStackHighWaterMark(NULL);
+  TaskHandle_t asyncHandle = xTaskGetHandle("async_tcp");
+  UBaseType_t asyncStack = 0;
+  if (asyncHandle != NULL) {
+    asyncStack = uxTaskGetStackHighWaterMark(asyncHandle);
+  }
+
+  if (loopStack < 512 || (asyncHandle != NULL && asyncStack < 512)) {
+    logMessage("CRITICAL: Stack near overflow! Emergency Stop.");
+    sendChannelOffAll();
+    // Force a restart as memory corruption is likely
+    ESP.restart();
+  }
+
+  // 2. Thermal Protection
+  float currentTemp = temperatureRead(); // The die temperature in Celsius.
+
+  // Validate reading (isnan check) and compare against threshold
+  if (!isnan(currentTemp) && currentTemp > MAX_SAFE_TEMP_C) {
+
+    // Log the critical event
+    char logBuf[100];
+    snprintf(logBuf, sizeof(logBuf), "CRITICAL: Overheating detected (%.1f C)! Emergency Stop.", currentTemp);
+    logMessage(logBuf);
+
+    sendChannelOffAll();
+  }
+}
+
+/**
+ * Dynamically update the Task Watchdog Timeout period.
+ */
+void updateWatchdogTimeout(uint32_t seconds) {
+  esp_task_wdt_init(seconds, true);
+  char logBuf[50];
+  snprintf(logBuf, sizeof(logBuf), "WDT Timeout set to %u s", seconds);
+  logMessage(logBuf);
+}
+
+/**
+ * Sets the JLed pattern based on the current session state.
+ * This is called every time the state changes.
+ */
+void setLedPattern(SessionState state) {
+  char logBuf[50];
+  snprintf(logBuf, sizeof(logBuf), "Setting LED pattern for: %s", stateToString(state));
+  logMessage(logBuf);
+
+  switch (state) {
+  case READY:
+    // Slow Breath - Waiting for session configuration
+    statusLed.FadeOn(2000).FadeOff(2000).Forever();
+    break;
+  case ARMED:
+    // Fast Blink (2Hz) - Waiting for trigger or counting down
+    statusLed.Blink(250, 250).Forever();
+    break;
+  case LOCKED:
+    // Solid On - Solid as a lock
+    statusLed.On().Forever();
+    break;
+  case ABORTED:
+    // Standard Blink (1Hz) - Steady "Penalty Wait" pacing
+    statusLed.Blink(500, 500).Forever();
+    break;
+  case COMPLETED:
+    // Slow Double-Blink notification - Ready for more?
+    statusLed.Blink(200, 200).Repeat(2).DelayAfter(3000).Forever();
+    break;
+  case TESTING:
+    // Medium Pulse - I'm alive and all is well
+    statusLed.FadeOn(750).FadeOff(750).Forever();
+    break;
+  default:
+    // Default to off
+    statusLed.Off().Forever();
+    break;
+  }
+}
