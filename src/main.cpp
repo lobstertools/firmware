@@ -261,6 +261,7 @@ void startTimersForState(SessionState state);
 void generateUniqueSessionCode(char *codeBuffer, char *checksumBuffer);
 void calculateChecksum(const char *code, char *outString);
 void initializeChannels();
+bool enforceHardwareState();
 void sendChannelOn(int channelIndex, bool silent = false);
 void sendChannelOff(int channelIndex, bool silent = false);
 void sendChannelOnAll();
@@ -955,6 +956,11 @@ void loop() {
         handleOneSecondTick();
         pendingTicks--;
       }
+      
+      // Run immediately after processing logic ticks to ensure synchronization.
+      // Checks for anomalies and ensures ARMED/Safety logic is respected.
+      enforceHardwareState();
+      
       xSemaphoreGiveRecursive(stateMutex);
     } else {
       // Mutex contention detected.
@@ -1083,6 +1089,101 @@ void initializeChannels() {
 }
 
 /**
+ * Continuous safety enforcement & Anomaly detection in hardware state
+ * 
+ * 1. LOCKED / TESTING = Channels ON (if enabled).
+ * 2. ALL OTHER STATES = Channels OFF.
+ * 
+ * Returns true if a correction was applied.
+ */
+bool enforceHardwareState() {
+  bool correctionApplied = false;
+
+  // 1. SAFETY: Detect Memory Corruption
+  if (currentState > TESTING) {
+     static unsigned long lastPanicLog = 0;
+     if (millis() - lastPanicLog > 1000) {
+        logMessage("CRITICAL: Invalid State Enum! Failsafe Triggered.");
+        lastPanicLog = millis();
+     }
+     
+     for (int i = 0; i < MAX_CHANNELS; i++) digitalWrite(HARDWARE_PINS[i], LOW);
+     currentState = READY; 
+     return true;
+  }
+
+  // 2. CALCULATE TARGET MASK
+  uint8_t targetMask = 0;
+
+  for (int i = 0; i < MAX_CHANNELS; i++) {
+    bool isEnabled = (g_enabledChannelsMask >> i) & 1;
+    bool shouldBeHigh = false;
+
+    if (isEnabled) {
+      switch (currentState) {
+        case LOCKED:
+        case TESTING:
+          shouldBeHigh = true; 
+          break;
+        
+        case ARMED: 
+          // In countdown, pin is high only if delay has elapsed
+          if (currentStrategy == STRAT_AUTO_COUNTDOWN && channelDelaysRemaining[i] == 0) {
+            shouldBeHigh = true;
+          }
+          break;
+
+        case READY:
+        case ABORTED:
+        case COMPLETED:
+        default: 
+          shouldBeHigh = false; 
+          break;
+      }
+    }
+    
+    if (shouldBeHigh) {
+      targetMask |= (1 << i);
+    }
+  }
+
+  // 3. DETECT LOGIC CHANGES
+  static uint8_t lastTargetMask = 0; 
+  bool logicHasChanged = (targetMask != lastTargetMask);
+
+  // 4. ENFORCE HARDWARE
+  for (int i = 0; i < MAX_CHANNELS; i++) {
+    int pin = HARDWARE_PINS[i];
+    int expectedLevel = (targetMask >> i) & 1 ? HIGH : LOW;
+    int currentLevel = digitalRead(pin);
+
+    // If physics don't match logic...
+    if (currentLevel != expectedLevel) {
+       
+       // set hardware state
+       digitalWrite(pin, expectedLevel);
+       correctionApplied = true;
+
+       if (logicHasChanged) {
+         char logBuf[64];
+         snprintf(logBuf, sizeof(logBuf), "State Update: Ch%d set to %s", i+1, expectedLevel ? "HIGH" : "LOW");
+         logMessage(logBuf);
+       } else {
+         // CRITICAL ANOMALY (Glitch or Interference)
+         char logBuf[100];
+         snprintf(logBuf, sizeof(logBuf), "CRITICAL ANOMALY: Ch%d drifted to %s! Corrected.", 
+                  i+1, 
+                  currentLevel ? "HIGH" : "LOW");
+         logMessage(logBuf);
+       }
+    }
+  }
+
+  lastTargetMask = targetMask;
+  return correctionApplied;
+}
+
+/**
  * Turns a specific Channel channel ON (closes circuit).
  */
 void sendChannelOn(int channelIndex, bool silent) {
@@ -1100,9 +1201,7 @@ void sendChannelOn(int channelIndex, bool silent) {
     logMessage(logBuf);
   }
 
-#ifndef DEBUG_MODE
   digitalWrite(HARDWARE_PINS[channelIndex], HIGH);
-#endif
 }
 
 /**
@@ -1119,9 +1218,7 @@ void sendChannelOff(int channelIndex, bool silent) {
     logMessage(logBuf);
   }
 
-#ifndef DEBUG_MODE
   digitalWrite(HARDWARE_PINS[channelIndex], LOW);
-#endif
 }
 
 /**
@@ -1242,7 +1339,6 @@ int startTestMode() {
 
   logMessage("Logic: Engaging Channels for 2 min test.");
 
-  sendChannelOnAll();
   currentState = TESTING;
   setLedPattern(TESTING);
   testSecondsRemaining = g_systemConfig.testModeDurationSeconds;
@@ -1259,7 +1355,6 @@ int startTestMode() {
  */
 void stopTestMode() {
   logMessage("Stopping test mode.");
-  sendChannelOffAll();
   currentState = READY;
   startTimersForState(READY); // Set WDT
   setLedPattern(READY);
@@ -1274,7 +1369,6 @@ void stopTestMode() {
  * Used by Button Press or Auto Countdown completion.
  */
 void enterLockedState(const char *source) {
-  // LOGGING VISUALS: Transition
   char logBuf[100];
   snprintf(logBuf, sizeof(logBuf), "%sLOCKED", LOG_PREFIX_STATE);
   logMessage(logBuf);
@@ -1289,9 +1383,6 @@ void enterLockedState(const char *source) {
   armFailsafeTimer();             // DEATH GRIP
   g_lastKeepAliveTime = millis(); // Arm keep-alive watchdog
   g_currentKeepAliveStrikes = 0;  // Reset strikes
-
-  // Engage hardware immediately
-  sendChannelOnAll();
 
   saveState(true); // Force save
 }
@@ -1325,8 +1416,6 @@ void abortSession(const char *source) {
     logMessage(logBuf);
     snprintf(logBuf, sizeof(logBuf), " Source: %s", source);
     logMessage(logBuf);
-
-    sendChannelOffAll();
 
     // Implement Abort Logic:
     sessionStreakCount = 0; // 1. Reset streak
@@ -1380,7 +1469,6 @@ void abortSession(const char *source) {
     // Aborting here returns to READY without penalty.
     snprintf(logBuf, sizeof(logBuf), "%s: Aborting session (ARMED).", source);
     logMessage(logBuf);
-    sendChannelOffAll();
     resetToReady(false); // Cancel arming (this disarms watchdog)
 
   } else if (currentState == TESTING) {
@@ -1412,7 +1500,6 @@ void completeSession() {
   if (previousState == LOCKED)
     disarmFailsafeTimer();
 
-  sendChannelOffAll();
   currentState = COMPLETED;
   startTimersForState(COMPLETED); // Reset WDT
   setLedPattern(COMPLETED);
@@ -1480,7 +1567,6 @@ void resetToReady(bool generateNewCode) {
 
   if (currentState == LOCKED)
     disarmFailsafeTimer();
-  sendChannelOffAll();
 
   currentState = READY;
   startTimersForState(READY);
@@ -2392,9 +2478,7 @@ void handleOneSecondTick() {
         if ((g_enabledChannelsMask >> i) & 1) {
           if (channelDelaysRemaining[i] > 0) {
             allDelaysZero = false;
-            if (--channelDelaysRemaining[i] == 0) {
-              sendChannelOn(i);
-            }
+            channelDelaysRemaining[i]--;
           }
         }
       }
