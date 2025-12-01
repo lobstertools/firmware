@@ -1,3 +1,16 @@
+/*
+ * =================================================================================
+ * Project:   Lobster Lock - Self-Bondage Session Manager
+ * File:      Session.h / Session.cpp
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Description:
+ * Core business logic and state machine. Manages session lifecycles (READY, 
+ * ARMED, LOCKED), timer countdowns, penalty enforcement, reboot recovery,
+ * and input event handling (Button presses).
+ * =================================================================================
+ */
 #include "Session.h"
 #include "Globals.h"
 #include "Hardware.h"

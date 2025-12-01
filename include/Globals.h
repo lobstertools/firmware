@@ -1,8 +1,15 @@
 /*
- * Globals.h
- * Declarations of shared global variables and objects.
+ * =================================================================================
+ * Project:   Lobster Lock - Self-Bondage Session Manager
+ * File:      Globals.h / Globals.cpp
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Description:
+ * Definitions of shared global state variables, synchronization primitives (Mutex),
+ * hardware object instances (Button, LED), and persistent configuration flags.
+ * =================================================================================
  */
-
 #ifndef GLOBALS_H
 #define GLOBALS_H
 

@@ -1,12 +1,15 @@
 /*
- * =================================================================
+ * =================================================================================
  * Project:   Lobster Lock - Self-Bondage Session Manager
+ * File:      main.cpp
  *
  * SPDX-License-Identifier: Apache-2.0
  *
  * Description:
- * Core firmware for the Lobster Lock ESP32 device.
- * =================================================================
+ * Application entry point. Handles system initialization (Phases 1-6), 
+ * orchestrates the main execution loop, manages critical health checks, 
+ * and ties together the Network, Hardware, and Session modules.
+ * =================================================================================
  */
 
 #include <Arduino.h>

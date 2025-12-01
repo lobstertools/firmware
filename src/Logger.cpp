@@ -1,3 +1,15 @@
+/*
+ * =================================================================================
+ * Project:   Lobster Lock - Self-Bondage Session Manager
+ * File:      Logger.h / Logger.cpp
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Description:
+ * Thread-safe logging system. Manages a ring buffer for storing logs in memory,
+ * allowing them to be retrieved via the Web API or printed to Serial.
+ * =================================================================================
+ */
 #include "Logger.h"
 #include "Globals.h"
 #include <Arduino.h>

@@ -1,6 +1,14 @@
 /*
- * Config.h
- * Shared configuration, constants, enums, and structs.
+ * =================================================================================
+ * Project:   Lobster Lock - Self-Bondage Session Manager
+ * File:      Config.h
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Description:
+ * Central configuration file. Defines hardware pin mappings, system constants,
+ * default settings, safety limits (thermal/timing), and compiler flags.
+ * =================================================================================
  */
 #ifndef CONFIG_H
 #define CONFIG_H

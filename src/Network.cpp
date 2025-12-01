@@ -1,3 +1,16 @@
+/*
+ * =================================================================================
+ * Project:   Lobster Lock - Self-Bondage Session Manager
+ * File:      Network.h / Network.cpp
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Description:
+ * Network management module. Handles Wi-Fi connection logic, mDNS advertising,
+ * and the BLE Provisioning fallback mechanism for setting credentials and 
+ * initial configuration.
+ * =================================================================================
+ */
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>

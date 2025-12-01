@@ -1,3 +1,16 @@
+/*
+ * =================================================================================
+ * Project:   Lobster Lock - Self-Bondage Session Manager
+ * File:      Hardware.h / Hardware.cpp
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Description:
+ * Low-level hardware abstraction layer. Manages GPIO control for channels,
+ * LED patterns, fail-safe ISRs (Death Grip), system health monitoring 
+ * (Stack/Heap/Temp), and hardware initialization.
+ * =================================================================================
+ */
 #include "esp_timer.h"
 #include <esp_task_wdt.h>
 
