@@ -6,7 +6,7 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Description:
- * Core business logic and state machine. Manages session lifecycles (READY, 
+ * Core business logic and state machine. Manages session lifecycles (READY,
  * ARMED, LOCKED), timer countdowns, penalty enforcement, reboot recovery,
  * and input event handling (Button presses).
  * =================================================================================

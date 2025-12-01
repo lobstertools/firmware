@@ -7,7 +7,7 @@
  *
  * Description:
  * Low-level hardware abstraction layer. Manages GPIO control for channels,
- * LED patterns, fail-safe ISRs (Death Grip), system health monitoring 
+ * LED patterns, fail-safe ISRs (Death Grip), system health monitoring
  * (Stack/Heap/Temp), and hardware initialization.
  * =================================================================================
  */
@@ -58,7 +58,6 @@ void initializeWatchdog() {
   esp_task_wdt_init(DEFAULT_WDT_TIMEOUT, true);
   esp_task_wdt_add(NULL);
 }
-
 
 /**
  * Initializes all channel pins as outputs.
@@ -329,7 +328,7 @@ void handleLongPress() {
  * Check for rapid crashes and enter safe mode if detected.
  */
 void checkBootLoop() {
-  
+
   bootPrefs.begin("boot", false);
   int crashes = bootPrefs.getInt("crashes", 0);
 
@@ -343,7 +342,6 @@ void checkBootLoop() {
     // (Note: Channels are initialized in setup before this)
 
     delay(5000);
-
     sendChannelOffAll();
 
     pinMode(STATUS_LED_PIN, OUTPUT);

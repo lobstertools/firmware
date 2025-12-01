@@ -6,8 +6,8 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Description:
- * Async HTTP Server implementation. Defines RESTful JSON endpoints for 
- * controlling the device (Arm/Abort), retrieving status/logs, and 
+ * Async HTTP Server implementation. Defines RESTful JSON endpoints for
+ * controlling the device (Arm/Abort), retrieving status/logs, and
  * configuring settings via a web client.
  * =================================================================================
  */

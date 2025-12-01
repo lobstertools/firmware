@@ -7,7 +7,7 @@
  *
  * Description:
  * Network management module. Handles Wi-Fi connection logic, mDNS advertising,
- * and the BLE Provisioning fallback mechanism for setting credentials and 
+ * and the BLE Provisioning fallback mechanism for setting credentials and
  * initial configuration.
  * =================================================================================
  */

@@ -7,7 +7,7 @@
  *
  * Description:
  * Low-level hardware abstraction layer. Manages GPIO control for channels,
- * LED patterns, fail-safe ISRs (Death Grip), system health monitoring 
+ * LED patterns, fail-safe ISRs (Death Grip), system health monitoring
  * (Stack/Heap/Temp), and hardware initialization.
  * =================================================================================
  */

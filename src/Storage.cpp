@@ -7,7 +7,7 @@
  *
  * Description:
  * NVS (Non-Volatile Storage) abstraction. Handles saving and loading session
- * state, WiFi credentials, and statistics to ESP32 Preferences to survive 
+ * state, WiFi credentials, and statistics to ESP32 Preferences to survive
  * power cycles and reboots.
  * =================================================================================
  */

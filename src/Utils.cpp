@@ -6,8 +6,8 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Description:
- * General utility functions. Includes string formatting, data conversion 
- * (Bytes to Int), unique reward code generation, checksum calculations, 
+ * General utility functions. Includes string formatting, data conversion
+ * (Bytes to Int), unique reward code generation, checksum calculations,
  * and state-to-string helpers.
  * =================================================================================
  */

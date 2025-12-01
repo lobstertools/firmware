@@ -6,8 +6,8 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Description:
- * Application entry point. Handles system initialization, 
- * orchestrates the main execution loop, manages critical health checks, 
+ * Application entry point. Handles system initialization,
+ * orchestrates the main execution loop, manages critical health checks,
  * and ties together the Network, Hardware, and Session modules.
  * =================================================================================
  */
@@ -164,7 +164,8 @@ void recoverSessionState() {
 void setupPeripherals() {
   // Setup Button
   unsigned long longPressMs = (unsigned long)g_systemConfig.longPressSeconds * 1000;
-  if (longPressMs < 1000) longPressMs = 1000;
+  if (longPressMs < 1000)
+    longPressMs = 1000;
 
   button.setPressMs(longPressMs);
   button.attachLongPressStart(handleLongPress);
@@ -185,7 +186,7 @@ void setupPeripherals() {
  */
 void processSessionLogic() {
   uint32_t pendingTicks = 0;
-  
+
   // Enter critical section to read/reset the volatile counter
   portENTER_CRITICAL(&timerMux);
   if (g_tickCounter > 0) {
@@ -204,7 +205,7 @@ void processSessionLogic() {
       }
       // Physics check: Ensure hardware matches software state
       enforceHardwareState();
-      
+
       xSemaphoreGiveRecursive(stateMutex);
     }
   }
