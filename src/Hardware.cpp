@@ -1,12 +1,18 @@
-#include "Hardware.h"
-#include "Globals.h"
-#include "Logger.h"
-#include "Utils.h"
 #include "esp_timer.h"
 #include <esp_task_wdt.h>
 
+#include "Globals.h"
+#include "Hardware.h"
+#include "Logger.h"
+#include "Session.h"
+#include "Utils.h"
+
 // --- Fail-Safe Timer Handle ---
 esp_timer_handle_t failsafeTimer = NULL;
+
+// =================================================================================
+// SECTION: INTERRUPT SERVICE ROUTINES (ISRs)
+// =================================================================================
 
 /**
  * Hardware Timer Callback for "Death Grip".
@@ -23,6 +29,10 @@ void IRAM_ATTR failsafe_timer_callback(void *arg) {
   // is exactly what we want for a "Failsafe" condition.
   esp_restart();
 }
+
+// =================================================================================
+// SECTION: INITIALIZATION
+// =================================================================================
 
 /**
  * Initializes all channel pins as outputs.
@@ -47,6 +57,10 @@ void initializeFailSafeTimer() {
   const esp_timer_create_args_t failsafe_timer_args = {.callback = &failsafe_timer_callback, .name = "failsafe_wdt"};
   esp_timer_create(&failsafe_timer_args, &failsafeTimer);
 }
+
+// =================================================================================
+// SECTION: CORE HARDWARE LOGIC
+// =================================================================================
 
 /**
  * Continuous safety enforcement & Anomaly detection in hardware state
@@ -140,6 +154,10 @@ bool enforceHardwareState() {
   return correctionApplied;
 }
 
+// =================================================================================
+// SECTION: CHANNEL CONTROL (LOW LEVEL)
+// =================================================================================
+
 /**
  * Turns a specific Channel channel ON (closes circuit).
  */
@@ -198,6 +216,10 @@ void sendChannelOffAll() {
   }
 }
 
+// =================================================================================
+// SECTION: FAILSAFE TIMER CONTROL
+// =================================================================================
+
 /**
  * Arms the independent hardware timer.
  */
@@ -226,6 +248,81 @@ void disarmFailsafeTimer() {
     return;
   esp_timer_stop(failsafeTimer);
   logMessage("Death Grip Timer DISARMED.");
+}
+
+// =================================================================================
+// SECTION: INPUT HANDLING (BUTTONS)
+// =================================================================================
+
+/**
+ * Immediate callback when button goes active (DOWN).
+ * Used for hardware state.
+ */
+void handlePress() { g_buttonPressStartTime = millis(); }
+
+/**
+ * DOUBLE PRESS: Universal Cancel/Abort.
+ * 1. If ARMED: Cancels arming (Returns to READY, no penalty).
+ * 2. If LOCKED: Triggers ABORT (Emergency Stop / Penalty).
+ */
+void handleDoublePress() {
+  if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(100)) == pdTRUE) {
+
+    logMessage(LOG_SEP_MAJOR);
+    logMessage("BUTTON: Double-Click");
+
+    abortSession("Button Double-Click");
+
+    logMessage(LOG_SEP_MINOR); // End Interaction Visual
+    xSemaphoreGiveRecursive(stateMutex);
+  }
+}
+
+/**
+ * LONG PRESS: Used to TRIGGER the session when ARMED.
+ */
+void handleLongPress() {
+  if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(100)) == pdTRUE) {
+
+    logMessage(LOG_SEP_MAJOR);
+    logMessage("BUTTON: Long Press");
+
+    triggerLock("Button Long Press");
+
+    logMessage(LOG_SEP_MINOR); // End Interaction Visual
+    xSemaphoreGiveRecursive(stateMutex);
+  }
+}
+
+// =================================================================================
+// SECTION: SYSTEM HEALTH & SAFETY
+// =================================================================================
+
+/**
+ * Check for rapid crashes and enter safe mode if detected.
+ */
+void checkBootLoop() {
+  bootPrefs.begin("boot", false);
+  int crashes = bootPrefs.getInt("crashes", 0);
+
+  // Use provisioned threshold
+  if (crashes >= g_systemConfig.bootLoopThreshold) {
+    Serial.println("CRITICAL: Boot Loop Detected! Entering Safe Mode.");
+
+    // Safe Mode: Delay startup, disarm everything.
+    // This gives the power rail time to stabilize or user time to factory
+    // reset.
+    // (Note: Channels are initialized in setup before this)
+
+    delay(5000);
+    pinMode(STATUS_LED_PIN, OUTPUT);
+    digitalWrite(STATUS_LED_PIN, HIGH);
+
+    delay(30000); // 30 Second penalty box before attempting start
+  }
+
+  bootPrefs.putInt("crashes", crashes + 1);
+  bootPrefs.end();
 }
 
 /**
@@ -292,6 +389,10 @@ void updateWatchdogTimeout(uint32_t seconds) {
   snprintf(logBuf, sizeof(logBuf), "WDT Timeout set to %u s", seconds);
   logMessage(logBuf);
 }
+
+// =================================================================================
+// SECTION: FEEDBACK (LEDS)
+// =================================================================================
 
 /**
  * Sets the JLed pattern based on the current session state.

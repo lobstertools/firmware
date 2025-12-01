@@ -3,31 +3,36 @@
 
 #include "Config.h"
 
-// Core Session Logic
+// =================================================================================
+// SECTION: LIFECYCLE & RECOVERY
+// =================================================================================
+void handleRebootState();
+void resetToReady(bool generateNewCode);
+
+// =================================================================================
+// SECTION: SESSION INITIATION
+// =================================================================================
 int startSession(unsigned long duration, unsigned long penalty, TriggerStrategy strategy, unsigned long *delays, bool hide);
+int startTestMode();
+
+// =================================================================================
+// SECTION: ACTIVE STATE TRANSITIONS
+// =================================================================================
+void triggerLock(const char *source);
+void enterLockedState(const char *source);
 void stopTestMode();
+
+// =================================================================================
+// SECTION: SESSION TERMINATION
+// =================================================================================
 void abortSession(const char *source);
 void completeSession();
 
-// Hardware Testing
-int startTestMode();
-
-// Session utilities
-void triggerLock(const char *source);
-void enterLockedState(const char *source);
-void resetToReady(bool generateNewCode);
-
-// Timer logic
+// =================================================================================
+// SECTION: PERIODIC LOGIC & WATCHDOGS
+// =================================================================================
 void startTimersForState(SessionState state);
 void handleOneSecondTick();
-
-// Session Watch dog & Reboot Recovery
 bool checkSessionKeepAliveWatchdog();
-void handleRebootState();
-
-// Button callbacks
-void handlePress();
-void handleLongPress();
-void handleDoublePress();
 
 #endif

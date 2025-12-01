@@ -7,33 +7,6 @@
 #include "Utils.h"
 
 /**
- * Check for rapid crashes and enter safe mode if detected.
- */
-void checkBootLoop() {
-  bootPrefs.begin("boot", false);
-  int crashes = bootPrefs.getInt("crashes", 0);
-
-  // Use provisioned threshold
-  if (crashes >= g_systemConfig.bootLoopThreshold) {
-    Serial.println("CRITICAL: Boot Loop Detected! Entering Safe Mode.");
-
-    // Safe Mode: Delay startup, disarm everything.
-    // This gives the power rail time to stabilize or user time to factory
-    // reset.
-    // (Note: Channels are initialized in setup before this)
-
-    delay(5000);
-    pinMode(STATUS_LED_PIN, OUTPUT);
-    digitalWrite(STATUS_LED_PIN, HIGH);
-
-    delay(30000); // 30 Second penalty box before attempting start
-  }
-
-  bootPrefs.putInt("crashes", crashes + 1);
-  bootPrefs.end();
-}
-
-/**
  * Loads the entire session state and config from NVS (Preferences)
  * Uses key-value pairs for robustness and flash longevity.
  * @return true if a valid session was loaded, false otherwise.

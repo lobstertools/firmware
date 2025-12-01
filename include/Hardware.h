@@ -4,25 +4,45 @@
 #include "Config.h"
 #include <Arduino.h>
 
-// Channel Control
-void initializeChannels();
+// =================================================================================
+// SECTION: CORE HARDWARE LOGIC
+// =================================================================================
 bool enforceHardwareState();
+
+// =================================================================================
+// SECTION: CHANNEL CONTROL (LOW LEVEL)
+// =================================================================================
+void initializeChannels();
 void sendChannelOn(int channelIndex, bool silent = false);
 void sendChannelOff(int channelIndex, bool silent = false);
 void sendChannelOnAll();
 void sendChannelOffAll();
 
-// Visuals
-void setLedPattern(SessionState state);
-
-// Failsafe / Death Grip
+// =================================================================================
+// SECTION: FAILSAFE TIMER (DEATH GRIP)
+// =================================================================================
 void initializeFailSafeTimer();
 void armFailsafeTimer();
 void disarmFailsafeTimer();
 
-// Health
+// =================================================================================
+// SECTION: SYSTEM HEALTH & SAFETY
+// =================================================================================
 void checkSystemHealth();
 void checkHeapHealth();
+void checkBootLoop();
 void updateWatchdogTimeout(uint32_t seconds);
+
+// =================================================================================
+// SECTION: FEEDBACK (LEDS)
+// =================================================================================
+void setLedPattern(SessionState state);
+
+// =================================================================================
+// SECTION: INPUT CALLBACKS
+// =================================================================================
+void handlePress();
+void handleLongPress();
+void handleDoublePress();
 
 #endif

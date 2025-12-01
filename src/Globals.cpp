@@ -5,7 +5,10 @@
 
 #include "Globals.h"
 
-// --- Globals ---
+// =================================================================================
+// SECTION: HARDWARE & SYSTEM OBJECTS
+// =================================================================================
+
 AsyncWebServer server(80);
 SystemConfig g_systemConfig = DEFAULT_SETTINGS;
 
@@ -27,12 +30,19 @@ jled::JLed statusLed = jled::JLed(STATUS_LED_PIN);
 SemaphoreHandle_t stateMutex = NULL;
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED; // Critical section for tick counter
 
+// =================================================================================
+// SECTION: STATE MANAGEMENT
+// =================================================================================
+
 SessionState currentState = READY;
 TriggerStrategy currentStrategy = STRAT_AUTO_COUNTDOWN;
 
 uint8_t g_enabledChannelsMask = 0x0F; // Default: 1111 (All enabled)
 
-// --- Global State & Timers ---
+// =================================================================================
+// SECTION: SESSION TIMERS & DELAYS
+// =================================================================================
+
 unsigned long lockSecondsRemaining = 0;
 unsigned long penaltySecondsRemaining = 0;
 unsigned long testSecondsRemaining = 0;
@@ -44,11 +54,18 @@ bool hideTimer = false;
 
 unsigned long channelDelaysRemaining[MAX_CHANNELS] = {0, 0, 0, 0};
 
-// --- Device and Sessing Configuration ---
+// =================================================================================
+// SECTION: FEATURE CONFIGURATION
+// =================================================================================
+
 bool enableStreaks = true;         // Default to true
 bool enablePaybackTime = true;     // Default to true
 bool enableRewardCode = true;      // Default to true
 uint32_t paybackTimeSeconds = 900; // Default to 900s (15min).
+
+// =================================================================================
+// SECTION: STATISTICS & HISTORY
+// =================================================================================
 
 // Persistent Session Counters (loaded from NVS)
 uint32_t sessionStreakCount = 0;
@@ -59,17 +76,28 @@ uint32_t totalLockedSessionSeconds = 0; // Total accumulated lock time
 
 Reward rewardHistory[REWARD_HISTORY_SIZE];
 
+// =================================================================================
+// SECTION: WATCHDOGS & INPUT TRACKING
+// =================================================================================
+
 volatile unsigned long g_buttonPressStartTime = 0;
 
 // --- Keep-Alive Watchdog (LOCKED/TESTING) ---
 unsigned long g_lastKeepAliveTime = 0; // For watchdog. 0 = disarmed.
 int g_currentKeepAliveStrikes = 0;     // Counter for missed calls
 
-// NVS (Preferences) objects
+// =================================================================================
+// SECTION: STORAGE (PREFERENCES)
+// =================================================================================
+
 Preferences wifiPreferences;   // Namespace: "wifi-creds"
 Preferences provisioningPrefs; // Namespace: "provisioning" (Hardware Config)
 Preferences sessionState;      // Namespace: "session" (Dynamic State)
 Preferences bootPrefs;         // Namespace: "boot" (Crash tracking)
+
+// =================================================================================
+// SECTION: NETWORK STATE
+// =================================================================================
 
 char g_wifiSSID[33] = {0};
 char g_wifiPass[65] = {0};

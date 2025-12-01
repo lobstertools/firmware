@@ -3,8 +3,10 @@
 
 #include <Arduino.h>
 
+// =================================================================================
+// SECTION: NVS STATE PERSISTENCE
+// =================================================================================
 bool loadState();
 void saveState(bool force = false);
-void checkBootLoop();
 
 #endif

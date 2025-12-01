@@ -8,6 +8,10 @@
 #include "Utils.h"
 #include "WebAPI.h"
 
+// =================================================================================
+// SECTION: HELPER FUNCTIONS
+// =================================================================================
+
 /**
  * Helper function to send a standardized JSON error response.
  */
@@ -21,6 +25,10 @@ void sendJsonError(AsyncWebServerRequest *request, int code, const String &messa
   // doc deleted automatically here
   request->send(code, "application/json", response);
 }
+
+// =================================================================================
+// SECTION: CORE SYSTEM HANDLERS (Root, Health, KeepAlive)
+// =================================================================================
 
 /**
  * Handler for GET /
@@ -82,6 +90,10 @@ void handleKeepAlive(AsyncWebServerRequest *request) {
   }
   request->send(200);
 }
+
+// =================================================================================
+// SECTION: SESSION CONTROL HANDLERS (Arm, Abort, Test)
+// =================================================================================
 
 /**
  * Handler for POST /arm (body)
@@ -256,35 +268,9 @@ void handleAbort(AsyncWebServerRequest *request) {
   request->send(200, "application/json", responseJson);
 }
 
-/**
- * Handler for GET /reward
- */
-void handleReward(AsyncWebServerRequest *request) {
-  // To be safe, we just take the lock for the whole operation here since it's
-  // read-only and fast enough.
-  if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(1000)) == pdTRUE) {
-    if (currentState == LOCKED || currentState == ABORTED || currentState == ARMED) {
-      xSemaphoreGiveRecursive(stateMutex);
-      sendJsonError(request, 403, "Reward is not yet available.");
-    } else {
-      std::unique_ptr<JsonDocument> doc(new JsonDocument());
-      JsonArray arr = (*doc).to<JsonArray>();
-      for (int i = 0; i < REWARD_HISTORY_SIZE; i++) {
-        if (strlen(rewardHistory[i].code) == REWARD_CODE_LENGTH) {
-          JsonObject reward = arr.add<JsonObject>();
-          reward["code"] = rewardHistory[i].code;
-          reward["checksum"] = rewardHistory[i].checksum;
-        }
-      }
-      String response;
-      serializeJson(*doc, response);
-      xSemaphoreGiveRecursive(stateMutex);
-      request->send(200, "application/json", response);
-    }
-  } else {
-    sendJsonError(request, 503, "System Busy");
-  }
-}
+// =================================================================================
+// SECTION: INFORMATION & STATUS HANDLERS
+// =================================================================================
 
 /**
  * Handler for GET /status
@@ -533,6 +519,40 @@ void handleLog(AsyncWebServerRequest *request) {
 }
 
 /**
+ * Handler for GET /reward
+ */
+void handleReward(AsyncWebServerRequest *request) {
+  // To be safe, we just take the lock for the whole operation here since it's
+  // read-only and fast enough.
+  if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(1000)) == pdTRUE) {
+    if (currentState == LOCKED || currentState == ABORTED || currentState == ARMED) {
+      xSemaphoreGiveRecursive(stateMutex);
+      sendJsonError(request, 403, "Reward is not yet available.");
+    } else {
+      std::unique_ptr<JsonDocument> doc(new JsonDocument());
+      JsonArray arr = (*doc).to<JsonArray>();
+      for (int i = 0; i < REWARD_HISTORY_SIZE; i++) {
+        if (strlen(rewardHistory[i].code) == REWARD_CODE_LENGTH) {
+          JsonObject reward = arr.add<JsonObject>();
+          reward["code"] = rewardHistory[i].code;
+          reward["checksum"] = rewardHistory[i].checksum;
+        }
+      }
+      String response;
+      serializeJson(*doc, response);
+      xSemaphoreGiveRecursive(stateMutex);
+      request->send(200, "application/json", response);
+    }
+  } else {
+    sendJsonError(request, 503, "System Busy");
+  }
+}
+
+// =================================================================================
+// SECTION: CONFIGURATION & FACTORY RESET
+// =================================================================================
+
+/**
  * Handler for POST /update-wifi (body)
  */
 void handleUpdateWifi(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
@@ -654,6 +674,10 @@ void handleFactoryReset(AsyncWebServerRequest *request) {
   delay(1000);
   ESP.restart();
 }
+
+// =================================================================================
+// SECTION: SERVER SETUP
+// =================================================================================
 
 /**
  * Sets up all API endpoints for the web server.

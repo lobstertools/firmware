@@ -15,11 +15,6 @@
 #define CRITICAL_WDT_TIMEOUT 5 // Tight for LOCKED state
 #define MAX_SAFE_TEMP_C 85.0   // Safety Threshold (85°C)
 
-// --- Logging Visuals ---
-#define LOG_SEP_MAJOR "=========================================================================="
-#define LOG_SEP_MINOR "--------------------------------------------------------------------------"
-#define LOG_PREFIX_STATE ">>> STATE CHANGE: "
-
 // --- Channel-Specific Configuration ---
 static const int HARDWARE_PINS[4] = {16, 17, 26, 27};
 #define MAX_CHANNELS 4

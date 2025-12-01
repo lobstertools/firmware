@@ -5,9 +5,107 @@
 #include "Storage.h"
 #include "Utils.h"
 
-// =================================================================
-// --- Session State Management (Core Logic) ---
-// =================================================================
+// =================================================================================
+// SECTION: LIFECYCLE & RECOVERY
+// =================================================================================
+
+/**
+ * Analyzes the loaded state after a reboot and performs
+ * the necessary transitions (e.g., aborting, resetting).
+ */
+void handleRebootState() {
+
+  switch (currentState) {
+  case LOCKED:
+  case ARMED:
+  case TESTING:
+    // These are active states. A reboot during them is an abort.
+    logMessage("Reboot detected during session. Aborting session...");
+    abortSession("Reboot");
+    break;
+
+  case COMPLETED:
+    // Session was finished. Reset to ready for a new one.
+    logMessage("Loaded COMPLETED state. Resetting to READY.");
+    resetToReady(true); // This saves the new state
+    break;
+
+  case READY:
+  case ABORTED:
+  default:
+    // These states are safe to resume.
+    // ABORTED will resume its penalty timer.
+    // The watchdog is NOT armed, per the "LOCKED only" rule.
+    logMessage("Resuming in-progress state.");
+    startTimersForState(currentState); // Resume timers
+    break;
+  }
+}
+
+/**
+ * Resets the device state to READY, generates a new reward code.
+ * Does NOT reset counters or payback.
+ */
+void resetToReady(bool generateNewCode) {
+  char logBuf[150];
+  snprintf(logBuf, sizeof(logBuf), "%sREADY", LOG_PREFIX_STATE);
+  logMessage(logBuf);
+
+  if (currentState == LOCKED)
+    disarmFailsafeTimer();
+
+  currentState = READY;
+  startTimersForState(READY);
+
+  setLedPattern(READY);
+
+  // Clear all timers and configs
+  lockSecondsRemaining = 0;
+  penaltySecondsRemaining = 0;
+  testSecondsRemaining = 0;
+  triggerTimeoutRemaining = 0;
+  g_lastKeepAliveTime = 0;       // Disarm watchdog
+  g_currentKeepAliveStrikes = 0; // Reset strikes
+  lockSecondsConfig = 0;
+  hideTimer = false;
+
+  for (int i = 0; i < MAX_CHANNELS; i++)
+    channelDelaysRemaining[i] = 0;
+
+  // Only generate new code if requested.
+  // If we abort a countdown, we generally want to keep the same code
+  // unless we specifically want to roll it.
+  if (generateNewCode) {
+    // Shift reward history
+    for (int i = REWARD_HISTORY_SIZE - 1; i > 0; i--) {
+      rewardHistory[i] = rewardHistory[i - 1];
+    }
+
+    // Generate new code with collision detection against the history we just
+    // shifted
+    generateUniqueSessionCode(rewardHistory[0].code, rewardHistory[0].checksum);
+
+    char codeSnippet[9];
+    strncpy(codeSnippet, rewardHistory[0].code, 8);
+    codeSnippet[8] = '\0';
+
+    snprintf(logBuf, sizeof(logBuf), " New Reward Code Generated");
+    logMessage(logBuf);
+    snprintf(logBuf, sizeof(logBuf), " %-20s : %s...", "Code Snippet", codeSnippet);
+    logMessage(logBuf);
+    snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Checksum", rewardHistory[0].checksum);
+    logMessage(logBuf);
+  } else {
+    logMessage(" > Preserving existing reward code.");
+  }
+
+  saveState(true); // Force save
+}
+
+// =================================================================================
+// SECTION: SESSION INITIATION
+// =================================================================================
+
 // NOTE: Functions in this section assume the caller (Loop or API)
 // HAS ALREADY LOCKED THE MUTEX unless otherwise noted.
 
@@ -115,18 +213,21 @@ int startTestMode() {
   return 200;
 }
 
+// =================================================================================
+// SECTION: ACTIVE STATE TRANSITIONS (Triggers & Locks)
+// =================================================================================
+
 /**
- * Stops the test mode and returns to READY.
+ * Logic to trigger the lock from a manual source (Button).
  */
-void stopTestMode() {
-  logMessage("Stopping test mode.");
-  currentState = READY;
-  startTimersForState(READY); // Set WDT
-  setLedPattern(READY);
-  testSecondsRemaining = 0;
-  g_lastKeepAliveTime = 0;       // Disarm watchdog
-  g_currentKeepAliveStrikes = 0; // Reset strikes
-  saveState(true);               // Force save
+void triggerLock(const char *source) {
+  if (currentState == ARMED) {
+    if (currentStrategy == STRAT_BUTTON_TRIGGER) {
+      enterLockedState(source);
+    }
+  } else if (currentState == TESTING) {
+    logMessage("Trigger ignored: Currently in Hardware Test.");
+  }
 }
 
 /**
@@ -153,16 +254,90 @@ void enterLockedState(const char *source) {
 }
 
 /**
- * Logic to trigger the lock from a manual source (Button).
+ * Stops the test mode and returns to READY.
  */
-void triggerLock(const char *source) {
-  if (currentState == ARMED) {
-    if (currentStrategy == STRAT_BUTTON_TRIGGER) {
-      enterLockedState(source);
+void stopTestMode() {
+  logMessage("Stopping test mode.");
+  currentState = READY;
+  startTimersForState(READY); // Set WDT
+  setLedPattern(READY);
+  testSecondsRemaining = 0;
+  g_lastKeepAliveTime = 0;       // Disarm watchdog
+  g_currentKeepAliveStrikes = 0; // Reset strikes
+  saveState(true);               // Force save
+}
+
+// =================================================================================
+// SECTION: SESSION TERMINATION (Complete & Abort)
+// =================================================================================
+
+/**
+ * Called when a session completes (either Lock timer OR Penalty timer ends).
+ * If coming from LOCKED: Increments success stats, clears payback.
+ * If coming from ABORTED: Transitions to COMPLETED but retains debt/stats.
+ */
+void completeSession() {
+  SessionState previousState = currentState;
+
+  // LOGGING VISUALS: Complete Block
+  char logBuf[100];
+  snprintf(logBuf, sizeof(logBuf), "%sCOMPLETED", LOG_PREFIX_STATE);
+  logMessage(logBuf);
+
+  if (previousState == LOCKED)
+    disarmFailsafeTimer();
+
+  currentState = COMPLETED;
+  startTimersForState(COMPLETED); // Reset WDT
+  setLedPattern(COMPLETED);
+
+  if (previousState == LOCKED) {
+    // --- SUCCESS PATH ---
+    // On successful completion of a LOCK, we clear debt and reward streaks.
+    if (paybackAccumulated > 0) {
+      logMessage(" > Valid session complete. Clearing accumulated payback debt.");
+      paybackAccumulated = 0;
     }
-  } else if (currentState == TESTING) {
-    logMessage("Trigger ignored: Currently in Hardware Test.");
+
+    completedSessions++;
+    if (enableStreaks) {
+      sessionStreakCount++;
+    }
+
+    // Log the new winning stats in aligned block
+    snprintf(logBuf, sizeof(logBuf), " %-20s : %u", "New Streak", sessionStreakCount);
+    logMessage(logBuf);
+    snprintf(logBuf, sizeof(logBuf), " %-20s : %u", "Total Completed", completedSessions);
+    logMessage(logBuf);
+  } else if (previousState == ABORTED) {
+    // --- PENALTY SERVED PATH ---
+    // The user finished the penalty box.
+    if (enablePaybackTime) {
+      logMessage(" > Penalty time served. Payback debt retained.");
+    } else {
+      logMessage(" > Penalty time served.");
+    }
   }
+
+  // Clear all timers
+  lockSecondsRemaining = 0;
+  penaltySecondsRemaining = 0;
+  testSecondsRemaining = 0;
+  triggerTimeoutRemaining = 0;
+  g_lastKeepAliveTime = 0;
+  g_currentKeepAliveStrikes = 0;
+
+  for (int i = 0; i < MAX_CHANNELS; i++)
+    channelDelaysRemaining[i] = 0;
+
+  // Log Lifetime Total
+  char timeBuf[64];
+  formatSeconds(totalLockedSessionSeconds, timeBuf, sizeof(timeBuf));
+
+  snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Lifetime Locked", timeBuf);
+  logMessage(logBuf);
+
+  saveState(true); // Force save
 }
 
 /**
@@ -247,134 +422,9 @@ void abortSession(const char *source) {
   }
 }
 
-/**
- * Called when a session completes (either Lock timer OR Penalty timer ends).
- * If coming from LOCKED: Increments success stats, clears payback.
- * If coming from ABORTED: Transitions to COMPLETED but retains debt/stats.
- */
-void completeSession() {
-  SessionState previousState = currentState;
-
-  // LOGGING VISUALS: Complete Block
-  char logBuf[100];
-  snprintf(logBuf, sizeof(logBuf), "%sCOMPLETED", LOG_PREFIX_STATE);
-  logMessage(logBuf);
-
-  if (previousState == LOCKED)
-    disarmFailsafeTimer();
-
-  currentState = COMPLETED;
-  startTimersForState(COMPLETED); // Reset WDT
-  setLedPattern(COMPLETED);
-
-  if (previousState == LOCKED) {
-    // --- SUCCESS PATH ---
-    // On successful completion of a LOCK, we clear debt and reward streaks.
-    if (paybackAccumulated > 0) {
-      logMessage(" > Valid session complete. Clearing accumulated payback debt.");
-      paybackAccumulated = 0;
-    }
-
-    completedSessions++;
-    if (enableStreaks) {
-      sessionStreakCount++;
-    }
-
-    // Log the new winning stats in aligned block
-    snprintf(logBuf, sizeof(logBuf), " %-20s : %u", "New Streak", sessionStreakCount);
-    logMessage(logBuf);
-    snprintf(logBuf, sizeof(logBuf), " %-20s : %u", "Total Completed", completedSessions);
-    logMessage(logBuf);
-  } else if (previousState == ABORTED) {
-    // --- PENALTY SERVED PATH ---
-    // The user finished the penalty box.
-    if (enablePaybackTime) {
-      logMessage(" > Penalty time served. Payback debt retained.");
-    } else {
-      logMessage(" > Penalty time served.");
-    }
-  }
-
-  // Clear all timers
-  lockSecondsRemaining = 0;
-  penaltySecondsRemaining = 0;
-  testSecondsRemaining = 0;
-  triggerTimeoutRemaining = 0;
-  g_lastKeepAliveTime = 0;
-  g_currentKeepAliveStrikes = 0;
-
-  for (int i = 0; i < MAX_CHANNELS; i++)
-    channelDelaysRemaining[i] = 0;
-
-  // Log Lifetime Total
-  char timeBuf[64];
-  formatSeconds(totalLockedSessionSeconds, timeBuf, sizeof(timeBuf));
-
-  snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Lifetime Locked", timeBuf);
-  logMessage(logBuf);
-
-  saveState(true); // Force save
-}
-
-/**
- * Resets the device state to READY, generates a new reward code.
- * Does NOT reset counters or payback.
- */
-void resetToReady(bool generateNewCode) {
-  char logBuf[150];
-  snprintf(logBuf, sizeof(logBuf), "%sREADY", LOG_PREFIX_STATE);
-  logMessage(logBuf);
-
-  if (currentState == LOCKED)
-    disarmFailsafeTimer();
-
-  currentState = READY;
-  startTimersForState(READY);
-
-  setLedPattern(READY);
-
-  // Clear all timers and configs
-  lockSecondsRemaining = 0;
-  penaltySecondsRemaining = 0;
-  testSecondsRemaining = 0;
-  triggerTimeoutRemaining = 0;
-  g_lastKeepAliveTime = 0;       // Disarm watchdog
-  g_currentKeepAliveStrikes = 0; // Reset strikes
-  lockSecondsConfig = 0;
-  hideTimer = false;
-
-  for (int i = 0; i < MAX_CHANNELS; i++)
-    channelDelaysRemaining[i] = 0;
-
-  // Only generate new code if requested.
-  // If we abort a countdown, we generally want to keep the same code
-  // unless we specifically want to roll it.
-  if (generateNewCode) {
-    // Shift reward history
-    for (int i = REWARD_HISTORY_SIZE - 1; i > 0; i--) {
-      rewardHistory[i] = rewardHistory[i - 1];
-    }
-
-    // Generate new code with collision detection against the history we just
-    // shifted
-    generateUniqueSessionCode(rewardHistory[0].code, rewardHistory[0].checksum);
-
-    char codeSnippet[9];
-    strncpy(codeSnippet, rewardHistory[0].code, 8);
-    codeSnippet[8] = '\0';
-
-    snprintf(logBuf, sizeof(logBuf), " New Reward Code Generated");
-    logMessage(logBuf);
-    snprintf(logBuf, sizeof(logBuf), " %-20s : %s...", "Code Snippet", codeSnippet);
-    logMessage(logBuf);
-    snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Checksum", rewardHistory[0].checksum);
-    logMessage(logBuf);
-  } else {
-    logMessage(" > Preserving existing reward code.");
-  }
-
-  saveState(true); // Force save
-}
+// =================================================================================
+// SECTION: PERIODIC LOGIC & WATCHDOGS
+// =================================================================================
 
 /**
  * Resets timers when entering a new state.
@@ -512,79 +562,6 @@ void handleOneSecondTick() {
   case COMPLETED:
   default:
     // Do nothing
-    break;
-  }
-}
-
-/**
- * Immediate callback when button goes active (DOWN).
- * Used for hardware state.
- */
-void handlePress() { g_buttonPressStartTime = millis(); }
-
-/**
- * DOUBLE PRESS: Universal Cancel/Abort.
- * 1. If ARMED: Cancels arming (Returns to READY, no penalty).
- * 2. If LOCKED: Triggers ABORT (Emergency Stop / Penalty).
- */
-void handleDoublePress() {
-  if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(100)) == pdTRUE) {
-
-    logMessage(LOG_SEP_MAJOR);
-    logMessage("BUTTON: Double-Click");
-
-    abortSession("Button Double-Click");
-
-    logMessage(LOG_SEP_MINOR); // End Interaction Visual
-    xSemaphoreGiveRecursive(stateMutex);
-  }
-}
-
-/**
- * LONG PRESS: Used to TRIGGER the session when ARMED.
- */
-void handleLongPress() {
-  if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(100)) == pdTRUE) {
-
-    logMessage(LOG_SEP_MAJOR);
-    logMessage("BUTTON: Long Press");
-
-    triggerLock("Button Long Press");
-
-    logMessage(LOG_SEP_MINOR); // End Interaction Visual
-    xSemaphoreGiveRecursive(stateMutex);
-  }
-}
-
-/**
- * Analyzes the loaded state after a reboot and performs
- * the necessary transitions (e.g., aborting, resetting).
- */
-void handleRebootState() {
-
-  switch (currentState) {
-  case LOCKED:
-  case ARMED:
-  case TESTING:
-    // These are active states. A reboot during them is an abort.
-    logMessage("Reboot detected during session. Aborting session...");
-    abortSession("Reboot");
-    break;
-
-  case COMPLETED:
-    // Session was finished. Reset to ready for a new one.
-    logMessage("Loaded COMPLETED state. Resetting to READY.");
-    resetToReady(true); // This saves the new state
-    break;
-
-  case READY:
-  case ABORTED:
-  default:
-    // These states are safe to resume.
-    // ABORTED will resume its penalty timer.
-    // The watchdog is NOT armed, per the "LOCKED only" rule.
-    logMessage("Resuming in-progress state.");
-    startTimersForState(currentState); // Resume timers
     break;
   }
 }
