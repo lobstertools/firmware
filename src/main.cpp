@@ -34,18 +34,13 @@ Ticker oneSecondMasterTicker;
 // Use a counter to track missed ticks (ISR Safe)
 volatile uint32_t g_tickCounter = 0;
 
-// Health Check Timers
-unsigned long g_lastHealthCheck = 0;
-unsigned long g_bootStartTime = 0;
-bool g_bootMarkedStable = false;
-
 // =================================================================
-// --- Helper Functions ---
+// --- Helper Functions: Diagnostics ---
 // =================================================================
 
 /**
  * Consolidated function to log all system statistics and configurations
- * on startup. Keeps setup() clean.
+ * on startup.
  */
 void printStartupDiagnostics() {
   char logBuf[150];
@@ -142,50 +137,10 @@ void printStartupDiagnostics() {
 }
 
 // =================================================================
-// --- Core Application Setup & Loop ---
+// --- Helper Functions: Initialization Phases ---
 // =================================================================
 
-/**
- * Main Arduino setup function. Runs once on boot.
- */
-void setup() {
-  Serial.begin(SERIAL_BAUD_RATE);
-  delay(1000); // Short delay to allow serial to catch up
-
-  // ----------------------------------------------------------------
-  // PHASE 1: CRITICAL HARDWARE & SAFETY
-  // ----------------------------------------------------------------
-
-  // 1. Mutex (Must exist before any threaded logic)
-  stateMutex = xSemaphoreCreateRecursiveMutex();
-  if (stateMutex == NULL) {
-    Serial.println("Critical Error: Could not create Mutex.");
-    ESP.restart();
-  }
-
-  // 2. Hardware Output Safety (Force Pins LOW immediately)
-  initializeChannels();
-
-  // 3. Boot Loop Detection
-  checkBootLoop();
-  g_bootStartTime = millis();
-
-  // ----------------------------------------------------------------
-  // PHASE 2: SYSTEM INFRASTRUCTURE
-  // ----------------------------------------------------------------
-
-  randomSeed(esp_random());
-  initializeFailSafeTimer();
-
-  // Hardware Watchdog
-  logMessage("Initializing hardware watchdog...");
-  esp_task_wdt_init(DEFAULT_WDT_TIMEOUT, true);
-  esp_task_wdt_add(NULL);
-
-  // ----------------------------------------------------------------
-  // PHASE 3: DATA & STATE RECOVERY
-  // ----------------------------------------------------------------
-
+void recoverSessionState() {
   // Load Preferences
   provisioningPrefs.begin("provisioning", true);
   g_enabledChannelsMask = provisioningPrefs.getUChar("chMask", 0x0F);
@@ -200,15 +155,12 @@ void setup() {
   } else {
     resetToReady(true);
   }
+}
 
-  // ----------------------------------------------------------------
-  // PHASE 4: PERIPHERAL CONFIGURATION
-  // ----------------------------------------------------------------
-
+void setupPeripherals() {
   // Setup Button
   unsigned long longPressMs = (unsigned long)g_systemConfig.longPressSeconds * 1000;
-  if (longPressMs < 1000)
-    longPressMs = 1000;
+  if (longPressMs < 1000) longPressMs = 1000;
 
   button.setPressMs(longPressMs);
   button.attachLongPressStart(handleLongPress);
@@ -217,18 +169,87 @@ void setup() {
 
   // Initial LED State
   setLedPattern(currentState);
+}
 
-  // ----------------------------------------------------------------
-  // PHASE 5: DIAGNOSTICS & LOGGING
-  // ----------------------------------------------------------------
+// =================================================================
+// --- Helper Functions: Loop Logic ---
+// =================================================================
+
+/**
+ * Handles the accumulated 1-second ticks from the timer interrupt.
+ * Validates hardware state and processes session logic.
+ */
+void processSessionLogic() {
+  uint32_t pendingTicks = 0;
+  
+  // Enter critical section to read/reset the volatile counter
+  portENTER_CRITICAL(&timerMux);
+  if (g_tickCounter > 0) {
+    pendingTicks = g_tickCounter;
+    g_tickCounter = 0;
+  }
+  portEXIT_CRITICAL(&timerMux);
+
+  // If time has passed, process the logic
+  if (pendingTicks > 0) {
+    // Attempt to take lock to process logic
+    if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(50)) == pdTRUE) {
+      while (pendingTicks > 0) {
+        handleOneSecondTick();
+        pendingTicks--;
+      }
+      // Physics check: Ensure hardware matches software state
+      enforceHardwareState();
+      
+      xSemaphoreGiveRecursive(stateMutex);
+    }
+  }
+}
+
+// =================================================================
+// --- Core Application Setup & Loop ---
+// =================================================================
+
+/**
+ * Main Arduino setup function. Runs once on boot.
+ */
+void setup() {
+  Serial.begin(SERIAL_BAUD_RATE);
+  delay(1000); // Short delay to allow serial to catch up
+
+  // 1. Hardware & Safety
+  stateMutex = xSemaphoreCreateRecursiveMutex();
+  if (stateMutex == NULL) {
+    Serial.println("Critical Error: Could not create Mutex.");
+    ESP.restart();
+  }
+
+  // 2. Hardware Output Safety (Force Pins LOW immediately)
+  initializeChannels();
+
+  // 3. Boot Loop Detection
+  checkBootLoop();
+
+  // 2. System Infrastructure
+  randomSeed(esp_random());
+  initializeFailSafeTimer();
+
+  // Hardware Watchdog
+  logMessage("Initializing hardware watchdog...");
+  esp_task_wdt_init(DEFAULT_WDT_TIMEOUT, true);
+  esp_task_wdt_add(NULL);
+
+  // 3. Data & State Recovery
+  recoverSessionState();
+
+  // 4. Peripherals (Buttons/LEDs)
+  setupPeripherals();
+
+  // 5. Diagnostics
   printStartupDiagnostics();
 
-  // ----------------------------------------------------------------
-  // PHASE 6: CONNECTIVITY & TASKS
-  // ----------------------------------------------------------------
-
-  // Network (Blocking until connected or Provisioning triggered)
-  waitForNetwork();
+  // 6. Connectivity & Tasks
+  connectWiFiOrProvision();
 
   // Master Timer (1 Second Tick)
   logMessage("Attaching master 1-second ticker.");
@@ -248,62 +269,22 @@ void setup() {
  * Main Arduino loop function. Runs continuously.
  */
 void loop() {
-  // 0. Check for WiFi Failure Fallback
-  if (g_triggerProvisioning) {
-    g_triggerProvisioning = false;
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_OFF);
-    logMessage("!!! Connection Failed. Entering BLE Provisioning Mode !!!");
-    startBLEProvisioning(); // Blocking + Restart
-  }
+  // 1. High Priority: Network Fallback & Watchdog
+  handleNetworkFallback();
+  esp_task_wdt_reset();
 
-  esp_task_wdt_reset(); // Feed the watchdog
-
-  // 1. Stable Boot Marking
-  if (!g_bootMarkedStable && (millis() - g_bootStartTime > g_systemConfig.stableBootTimeMs)) {
-    g_bootMarkedStable = true;
-    bootPrefs.begin("boot", false);
-    bootPrefs.putInt("crashes", 0);
-    bootPrefs.end();
-    logMessage("System stable. Boot loop counter reset.");
-  }
-
-  // 2. Health Checks (Every 60s)
-  if (millis() - g_lastHealthCheck > 60000) {
-    checkHeapHealth();
-    checkSystemHealth();
-    g_lastHealthCheck = millis();
-  }
-
-  // 3. Housekeeping (Logs & LEDs)
+  // 2. System Maintenance
+  markBootStability();
+  performPeriodicHealthChecks();
   processLogQueue();
 
+  // 3. User Feedback & Input
   if (xSemaphoreTakeRecursive(stateMutex, 0) == pdTRUE) {
     statusLed.Update();
+    button.tick();
     xSemaphoreGiveRecursive(stateMutex);
   }
 
-  // 4. Input Polling
-  button.tick();
-
-  // 5. Master Time Ticking (Accumulated)
-  uint32_t pendingTicks = 0;
-  portENTER_CRITICAL(&timerMux);
-  if (g_tickCounter > 0) {
-    pendingTicks = g_tickCounter;
-    g_tickCounter = 0;
-  }
-  portEXIT_CRITICAL(&timerMux);
-
-  if (pendingTicks > 0) {
-    // Attempt to take lock to process logic
-    if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(50)) == pdTRUE) {
-      while (pendingTicks > 0) {
-        handleOneSecondTick();
-        pendingTicks--;
-      }
-      enforceHardwareState();
-      xSemaphoreGiveRecursive(stateMutex);
-    }
-  }
+  // 4. Core Session Logic (Time-based)
+  processSessionLogic();
 }

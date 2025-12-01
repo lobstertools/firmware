@@ -292,7 +292,7 @@ void startBLEProvisioning() {
  * Setup function to wrap the wifi init logic.
  * If WiFi fails or credentials are missing, this falls through to BLE Provisioning (Blocking).
  */
-void waitForNetwork() {
+void connectWiFiOrProvision() {
   // Create software timer for reconnect logic
   wifiReconnectTimer = xTimerCreate("wifiTimer", pdMS_TO_TICKS(2000), pdFALSE, (void *)0, [](TimerHandle_t t) { connectToWiFi(); });
 
@@ -347,4 +347,24 @@ void waitForNetwork() {
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
   startBLEProvisioning(); // This function does not return
+}
+
+/**
+ * Checks if a fallback trigger (e.g. max retries exceeded) has occurred.
+ * Should be called periodically from the main loop.
+ */
+void handleNetworkFallback() {
+  if (g_triggerProvisioning) {
+    g_triggerProvisioning = false; // Clear flag
+
+    // Shut down WiFi to save power/conflicts
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+
+    logMessage("!!! Connection Failed. Entering BLE Provisioning Mode !!!");
+
+    // Enter blocking provisioning mode
+    // Note: This function ends with ESP.restart(), so we never return here.
+    startBLEProvisioning();
+  }
 }

@@ -20,6 +20,11 @@
 #include "Session.h"
 #include "Utils.h"
 
+// Health Check Timers
+unsigned long g_lastHealthCheck = 0;
+unsigned long g_bootStartTime = 0;
+bool g_bootMarkedStable = false;
+
 // --- Fail-Safe Timer Handle ---
 esp_timer_handle_t failsafeTimer = NULL;
 
@@ -315,6 +320,7 @@ void handleLongPress() {
  * Check for rapid crashes and enter safe mode if detected.
  */
 void checkBootLoop() {
+  
   bootPrefs.begin("boot", false);
   int crashes = bootPrefs.getInt("crashes", 0);
 
@@ -336,6 +342,26 @@ void checkBootLoop() {
 
   bootPrefs.putInt("crashes", crashes + 1);
   bootPrefs.end();
+
+  g_bootStartTime = millis();
+}
+
+void markBootStability() {
+  if (!g_bootMarkedStable && (millis() - g_bootStartTime > g_systemConfig.stableBootTimeMs)) {
+    g_bootMarkedStable = true;
+    bootPrefs.begin("boot", false);
+    bootPrefs.putInt("crashes", 0);
+    bootPrefs.end();
+    logMessage("System stable. Boot loop counter reset.");
+  }
+}
+
+void performPeriodicHealthChecks() {
+  if (millis() - g_lastHealthCheck > 60000) {
+    checkHeapHealth();
+    checkSystemHealth();
+    g_lastHealthCheck = millis();
+  }
 }
 
 /**
