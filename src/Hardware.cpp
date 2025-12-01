@@ -334,6 +334,12 @@ void checkBootLoop() {
     // (Note: Channels are initialized in setup before this)
 
     delay(5000);
+
+    // Force all channels low
+    for (int i = 0; i < MAX_CHANNELS; i++) {
+      digitalWrite(HARDWARE_PINS[i], LOW);
+    }
+
     pinMode(STATUS_LED_PIN, OUTPUT);
     digitalWrite(STATUS_LED_PIN, HIGH);
 
