@@ -70,7 +70,11 @@ void printStartupDiagnostics() {
 
   snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Status LED", "Enabled");
   logMessage(logBuf);
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Pin %d)", "Foot Pedal/Button", "Enabled", ONE_BUTTON_PIN);
+#ifdef DEBUG_MODE
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Pin %d) [NO/Debug]", "Foot Pedal/Button", "Enabled", ONE_BUTTON_PIN);
+#else
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Pin %d) [NC/FailSafe]", "Foot Pedal/Button", "Enabled", ONE_BUTTON_PIN);
+#endif
   logMessage(logBuf);
   snprintf(logBuf, sizeof(logBuf), " %-25s : %lu ms", "Long Press Time", longPressMs);
   logMessage(logBuf);
