@@ -47,11 +47,9 @@ void updateWatchdogTimeout(uint32_t seconds);
 // =================================================================================
 // SECTION: SYSTEM HEALTH & SAFETY
 // =================================================================================
-void checkSystemHealth();
-void checkHeapHealth();
+void performPeriodicHealthChecks();
 void checkBootLoop();
 void markBootStability();
-void performPeriodicHealthChecks();
 
 // =================================================================================
 // SECTION: FEEDBACK (LEDS)

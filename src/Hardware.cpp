@@ -38,10 +38,8 @@ esp_timer_handle_t failsafeTimer = NULL;
  * Forces a reboot to ensure pins go low.
  */
 void IRAM_ATTR failsafe_timer_callback(void *arg) {
-  // EMERGENCY: Force all channels LOW immediately
-  for (int i = 0; i < MAX_CHANNELS; i++) {
-    digitalWrite(HARDWARE_PINS[i], LOW);
-  }
+
+  sendChannelOffAll();
 
   // While technically not 100% ISR-safe (can panic), a panic reset
   // is exactly what we want for a "Failsafe" condition.
@@ -51,6 +49,16 @@ void IRAM_ATTR failsafe_timer_callback(void *arg) {
 // =================================================================================
 // SECTION: INITIALIZATION
 // =================================================================================
+
+/**
+ * Hardware Watchdog.
+ */
+void initializeWatchdog() {
+  logMessage("Initializing hardware watchdog...");
+  esp_task_wdt_init(DEFAULT_WDT_TIMEOUT, true);
+  esp_task_wdt_add(NULL);
+}
+
 
 /**
  * Initializes all channel pins as outputs.
@@ -67,25 +75,6 @@ void initializeChannels() {
     digitalWrite(HARDWARE_PINS[i], LOW); // Ensure circuit is open
   }
 }
-
-/**
- * Hardware Timer for "Death Grip".
- */
-void initializeFailSafeTimer() {
-  logMessage("Initializing Death Grip timer...");
-  const esp_timer_create_args_t failsafe_timer_args = {.callback = &failsafe_timer_callback, .name = "failsafe_wdt"};
-  esp_timer_create(&failsafe_timer_args, &failsafeTimer);
-}
-
-/**
- * Hardware Watchdog.
- */
-void initializeWatchdog() {
-  logMessage("Initializing hardware watchdog...");
-  esp_task_wdt_init(DEFAULT_WDT_TIMEOUT, true);
-  esp_task_wdt_add(NULL);
-}
-
 
 // =================================================================================
 // SECTION: CORE HARDWARE LOGIC
@@ -250,6 +239,15 @@ void sendChannelOffAll() {
 // =================================================================================
 
 /**
+ * Hardware Timer for "Death Grip".
+ */
+void initializeFailSafeTimer() {
+  logMessage("Initializing Death Grip Timer...");
+  const esp_timer_create_args_t failsafe_timer_args = {.callback = &failsafe_timer_callback, .name = "failsafe_wdt"};
+  esp_timer_create(&failsafe_timer_args, &failsafeTimer);
+}
+
+/**
  * Arms the independent hardware timer.
  */
 void armFailsafeTimer() {
@@ -346,10 +344,7 @@ void checkBootLoop() {
 
     delay(5000);
 
-    // Force all channels low
-    for (int i = 0; i < MAX_CHANNELS; i++) {
-      digitalWrite(HARDWARE_PINS[i], LOW);
-    }
+    sendChannelOffAll();
 
     pinMode(STATUS_LED_PIN, OUTPUT);
     digitalWrite(STATUS_LED_PIN, HIGH);
@@ -370,14 +365,6 @@ void markBootStability() {
     bootPrefs.putInt("crashes", 0);
     bootPrefs.end();
     logMessage("System stable. Boot loop counter reset.");
-  }
-}
-
-void performPeriodicHealthChecks() {
-  if (millis() - g_lastHealthCheck > 60000) {
-    checkHeapHealth();
-    checkSystemHealth();
-    g_lastHealthCheck = millis();
   }
 }
 
@@ -437,12 +424,25 @@ void checkSystemHealth() {
 }
 
 /**
+ * Executes non-blocking health checks every 60 seconds.
+ * Monitors Heap fragmentation, Stack watermarks, and Internal Temperature.
+ * If critical thresholds are breached, these sub-routines trigger emergency stops.
+ */
+void performPeriodicHealthChecks() {
+  if (millis() - g_lastHealthCheck > 60000) {
+    checkHeapHealth();
+    checkSystemHealth();
+    g_lastHealthCheck = millis();
+  }
+}
+
+/**
  * Dynamically update the Task Watchdog Timeout period.
  */
 void updateWatchdogTimeout(uint32_t seconds) {
   esp_task_wdt_init(seconds, true);
   char logBuf[50];
-  snprintf(logBuf, sizeof(logBuf), "WDT Timeout set to %u s", seconds);
+  snprintf(logBuf, sizeof(logBuf), "Hardware Watchdog Timeout set to %u s", seconds);
   logMessage(logBuf);
 }
 
