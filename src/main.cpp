@@ -6,7 +6,7 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Description:
- * Application entry point. Handles system initialization (Phases 1-6), 
+ * Application entry point. Handles system initialization, 
  * orchestrates the main execution loop, manages critical health checks, 
  * and ties together the Network, Hardware, and Session modules.
  * =================================================================================
