@@ -39,12 +39,17 @@ void armFailsafeTimer();
 void disarmFailsafeTimer();
 
 // =================================================================================
+// SECTION: WATCHDOG
+// =================================================================================
+void initializeWatchdog();
+void updateWatchdogTimeout(uint32_t seconds);
+
+// =================================================================================
 // SECTION: SYSTEM HEALTH & SAFETY
 // =================================================================================
 void checkSystemHealth();
 void checkHeapHealth();
 void checkBootLoop();
-void updateWatchdogTimeout(uint32_t seconds);
 void markBootStability();
 void performPeriodicHealthChecks();
 

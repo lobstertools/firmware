@@ -72,9 +72,20 @@ void initializeChannels() {
  * Hardware Timer for "Death Grip".
  */
 void initializeFailSafeTimer() {
+  logMessage("Initializing Death Grip timer...");
   const esp_timer_create_args_t failsafe_timer_args = {.callback = &failsafe_timer_callback, .name = "failsafe_wdt"};
   esp_timer_create(&failsafe_timer_args, &failsafeTimer);
 }
+
+/**
+ * Hardware Watchdog.
+ */
+void initializeWatchdog() {
+  logMessage("Initializing hardware watchdog...");
+  esp_task_wdt_init(DEFAULT_WDT_TIMEOUT, true);
+  esp_task_wdt_add(NULL);
+}
+
 
 // =================================================================================
 // SECTION: CORE HARDWARE LOGIC

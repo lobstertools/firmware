@@ -221,41 +221,35 @@ void setup() {
   Serial.begin(SERIAL_BAUD_RATE);
   delay(1000); // Short delay to allow serial to catch up
 
-  // 1. Hardware & Safety
+  // ------------------------------
+  // Hardware & Safety
+  // ------------------------------
   stateMutex = xSemaphoreCreateRecursiveMutex();
   if (stateMutex == NULL) {
     Serial.println("Critical Error: Could not create Mutex.");
     ESP.restart();
   }
 
-  // 2. Hardware Output Safety (Force Pins LOW immediately)
+  randomSeed(esp_random());
   initializeChannels();
-
-  // 3. Boot Loop Detection
+  initializeFailSafeTimer();
+  initializeWatchdog();
   checkBootLoop();
 
-  // 2. System Infrastructure
-  randomSeed(esp_random());
-  initializeFailSafeTimer();
-
-  // Hardware Watchdog
-  logMessage("Initializing hardware watchdog...");
-  esp_task_wdt_init(DEFAULT_WDT_TIMEOUT, true);
-  esp_task_wdt_add(NULL);
-
-  // 3. Data & State Recovery
+  // ------------------------------
+  // Data & State Recovery
+  // ------------------------------
   recoverSessionState();
-
-  // 4. Peripherals (Buttons/LEDs)
-  setupPeripherals();
-
-  // 5. Diagnostics
   printStartupDiagnostics();
 
-  // 6. Connectivity & Tasks
+  // ------------------------------
+  // Networking & BLE provisioning
+  // ------------------------------
   connectWiFiOrProvision();
 
+  // ------------------------------
   // Master Timer (1 Second Tick)
+  // ------------------------------
   logMessage("Attaching master 1-second ticker.");
   oneSecondMasterTicker.attach(1, []() {
     portENTER_CRITICAL_ISR(&timerMux);
@@ -263,8 +257,11 @@ void setup() {
     portEXIT_CRITICAL_ISR(&timerMux);
   });
 
-  // Web API
+  // ------------------------------
+  // Input and APIs
+  // ------------------------------
   setupWebServer();
+  setupPeripherals();
 
   logMessage("Device is operational.");
 }
