@@ -68,7 +68,7 @@ void printStartupDiagnostics() {
     logMessage(logBuf);
   }
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Status LED", "Enabled");
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Pin %d)", "Status LED", "Enabled", STATUS_LED_PIN);
   logMessage(logBuf);
 
   snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Pin %d)", "PCB Button", "Enabled", PCB_BUTTON_PIN);
@@ -83,6 +83,35 @@ void printStartupDiagnostics() {
 
   snprintf(logBuf, sizeof(logBuf), " %-25s : %lu ms", "Long Press Time", longPressMs);
   logMessage(logBuf);
+
+  // --- SECTION: SYSTEM CONFIG ---
+  logMessage(LOG_SEP_MINOR);
+  logMessage("[ SYSTEM CONFIG ]");
+  logMessage(LOG_SEP_MINOR);
+
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u s", "Lock Range", g_systemConfig.minLockSeconds, g_systemConfig.maxLockSeconds);
+  logMessage(logBuf);
+
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u s", "Penalty Range", g_systemConfig.minPenaltySeconds, g_systemConfig.maxPenaltySeconds);
+  logMessage(logBuf);
+
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u s", "Payback Range", g_systemConfig.minPaybackTimeSeconds, g_systemConfig.maxPaybackTimeSeconds);
+  logMessage(logBuf);
+
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Test Mode Duration", g_systemConfig.testModeDurationSeconds);
+  logMessage(logBuf);
+
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Failsafe Timeout", g_systemConfig.failsafeMaxLockSeconds);
+  logMessage(logBuf);
+
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u ms / %u", "Keep-Alive", g_systemConfig.keepAliveIntervalMs, g_systemConfig.keepAliveMaxStrikes);
+  logMessage(logBuf);
+
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u ms", "Boot Loop/Stable", g_systemConfig.bootLoopThreshold, g_systemConfig.stableBootTimeMs);
+  logMessage(logBuf);
+
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u s", "WiFi Retries/ArmedTO", g_systemConfig.wifiMaxRetries, g_systemConfig.armedTimeoutSeconds);
+  logMessage(logBuf);  
 
   // --- SECTION: DETERRENTS ---
   logMessage(LOG_SEP_MINOR);
