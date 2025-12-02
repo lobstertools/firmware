@@ -332,6 +332,7 @@ void setup() {
  * Main Arduino loop function. Runs continuously.
  */
 void loop() {
+
   // 1. High Priority: Network Fallback & Watchdog
   handleNetworkFallback();
   esp_task_wdt_reset();
