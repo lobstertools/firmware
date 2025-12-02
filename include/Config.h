@@ -65,7 +65,33 @@ struct SystemConfig {
   uint32_t armedTimeoutSeconds;
 };
 
-// Default values (used if NVS is empty)
+#ifdef DEBUG_MODE
+// ============================================================================
+// DEBUG / DEVELOPMENT DEFAULTS
+// Optimized for rapid iteration and testing short lifecycles.
+// ============================================================================
+static const SystemConfig DEFAULT_SETTINGS = {
+    1,      // longPressSeconds (1s for quick triggering)
+    10,     // minLockSeconds (10s minimum for quick lock cycles)
+    3600,   // maxLockSeconds (1 hour - allows testing longer ranges if needed)
+    10,     // minPenaltySeconds (10s penalty)
+    3600,   // maxPenaltySeconds 
+    10,     // minPaybackTimeSeconds (10s minimum debt)
+    600,    // maxPaybackTimeSeconds (10 min cap)
+    240,    // testModeDurationSeconds (4m hardware test)
+    600,    // failsafeMaxLockSeconds (10 min failsafe for safety during debug)
+    10000,  // keepAliveIntervalMs
+    4,      // keepAliveMaxStrikes
+    5,      // bootLoopThreshold 
+    30000,  // stableBootTimeMs (30s to consider boot stable)
+    3,      // wifiMaxRetries (Fail faster)
+    300     // armedTimeoutSeconds (5 min idle timeout)
+};
+
+#else
+// ============================================================================
+// PRODUCTION / RELEASE DEFAULTS
+// ============================================================================
 static const SystemConfig DEFAULT_SETTINGS = {
     3,      // longPressSeconds
     900,    // minLockSeconds (15 min)
@@ -78,10 +104,11 @@ static const SystemConfig DEFAULT_SETTINGS = {
     14400,  // failsafeMaxLockSeconds (4 hours)
     10000,  // keepAliveIntervalMs
     4,      // keepAliveMaxStrikes
-    5,      // bootLoopThreshold (Default)
-    120000, // stableBootTimeMs (Default 2 Minutes)
-    5,      // wifiMaxRetries (Default)
+    5,      // bootLoopThreshold
+    120000, // stableBootTimeMs (2 Minutes)
+    5,      // wifiMaxRetries
     1800    // armedTimeoutSeconds (30 Minutes)
 };
 
+#endif
 #endif
