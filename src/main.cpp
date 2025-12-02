@@ -276,7 +276,7 @@ void processSessionLogic() {
  */
 void setup() {
   Serial.begin(SERIAL_BAUD_RATE);
-  delay(1000); // Short delay to allow serial to catch up
+  delay(3000); // Short delay to allow serial to catch up
 
   // ------------------------------
   // Hardware & Safety
