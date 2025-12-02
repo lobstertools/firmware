@@ -287,9 +287,7 @@ void disarmFailsafeTimer() {
 void handlePress() { g_buttonPressStartTime = millis(); }
 
 /**
- * DOUBLE PRESS: Universal Cancel/Abort.
- * 1. If ARMED: Cancels arming (Returns to READY, no penalty).
- * 2. If LOCKED: Triggers ABORT (Emergency Stop / Penalty).
+ * DOUBLE PRESS: Used to TRIGGER the session when ARMED.
  */
 void handleDoublePress() {
   if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(100)) == pdTRUE) {
@@ -297,7 +295,7 @@ void handleDoublePress() {
     logMessage(LOG_SEP_MAJOR);
     logMessage("BUTTON: Double-Click");
 
-    abortSession("Button Double-Click");
+    triggerLock("Button Double-Click");
 
     logMessage(LOG_SEP_MINOR); // End Interaction Visual
     xSemaphoreGiveRecursive(stateMutex);
@@ -305,19 +303,22 @@ void handleDoublePress() {
 }
 
 /**
- * LONG PRESS: Used to TRIGGER the session when ARMED.
+ * LONG PRESS:  Universal Cancel/Abort.
+ * 1. If ARMED: Cancels arming (Returns to READY, no penalty).
+ * 2. If LOCKED: Triggers ABORT (Emergency Stop / Penalty).
  */
 void handleLongPress() {
   if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(100)) == pdTRUE) {
 
     logMessage(LOG_SEP_MAJOR);
-    logMessage("BUTTON: Long Press");
+    logMessage("BUTTON: Long-Press");
 
-    triggerLock("Button Long Press");
+    abortSession("Button Long-Press");
 
     logMessage(LOG_SEP_MINOR); // End Interaction Visual
     xSemaphoreGiveRecursive(stateMutex);
   }
+
 }
 
 // =================================================================================
