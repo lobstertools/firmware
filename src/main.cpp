@@ -56,6 +56,8 @@ void printStartupDiagnostics() {
   logMessage(logBuf);
   logMessage(LOG_SEP_MAJOR);
 
+  processLogQueue();
+
   // --- SECTION: HARDWARE & FEATURES ---
   logMessage(LOG_SEP_MINOR);
   logMessage("[ HARDWARE & FEATURES ]");
@@ -83,6 +85,8 @@ void printStartupDiagnostics() {
 
   snprintf(logBuf, sizeof(logBuf), " %-25s : %lu ms", "Long Press Time", longPressMs);
   logMessage(logBuf);
+
+  processLogQueue();
 
   // --- SECTION: SYSTEM CONFIG ---
   logMessage(LOG_SEP_MINOR);
@@ -113,6 +117,8 @@ void printStartupDiagnostics() {
   snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u s", "WiFi Retries/ArmedTO", g_systemConfig.wifiMaxRetries, g_systemConfig.armedTimeoutSeconds);
   logMessage(logBuf);  
 
+  processLogQueue();
+
   // --- SECTION: DETERRENTS ---
   logMessage(LOG_SEP_MINOR);
   logMessage("[ DETERRENT CONFIG ]");
@@ -130,6 +136,8 @@ void printStartupDiagnostics() {
   }
   snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Reward Code", enableRewardCode ? "Enabled" : "Disabled");
   logMessage(logBuf);
+
+  processLogQueue();
 
   // --- SECTION: STATISTICS ---
   logMessage(LOG_SEP_MINOR);
@@ -150,6 +158,8 @@ void printStartupDiagnostics() {
   formatSeconds(totalLockedSessionSeconds, tBuf1, sizeof(tBuf1));
   snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Lifetime Locked", tBuf1);
   logMessage(logBuf);
+
+  processLogQueue();
 
   // --- SECTION: CURRENT SESSION ---
   logMessage(LOG_SEP_MINOR);
@@ -172,6 +182,8 @@ void printStartupDiagnostics() {
   logMessage(logBuf);
 
   logMessage(LOG_SEP_MAJOR);
+
+  processLogQueue();
 }
 
 // =================================================================
