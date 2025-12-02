@@ -335,9 +335,17 @@ void handleStatus(AsyncWebServerRequest *request) {
     snapshot.payback = paybackAccumulated;
 
     // --- HARDWARE STATUS COLLECTION ---
-    // 1. Button Logic: "Instant Truth" check
-    // Active LOW: 0 = Pressed, 1 = Released
-    snapshot.isPressed = (digitalRead(ONE_BUTTON_PIN) == 0);
+    // 1. PCB Button (Active LOW)
+    bool pcbPressed = (digitalRead(PCB_BUTTON_PIN) == LOW);
+
+    // 2. External Button (Active HIGH / NC) - Only if defined
+    bool extPressed = false;
+    #ifdef EXT_BUTTON_PIN
+      extPressed = (digitalRead(EXT_BUTTON_PIN) == HIGH); 
+    #endif
+
+    // Logical OR: Is EITHER button triggering an event?
+    snapshot.isPressed = pcbPressed || extPressed;
 
     if (snapshot.isPressed) {
       snapshot.pressDuration = millis() - g_buttonPressStartTime;

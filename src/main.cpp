@@ -70,12 +70,17 @@ void printStartupDiagnostics() {
 
   snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Status LED", "Enabled");
   logMessage(logBuf);
-#ifdef DEBUG_MODE
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Pin %d) [NO/Debug]", "Foot Pedal/Button", "Enabled", ONE_BUTTON_PIN);
+
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Pin %d)", "PCB Button", "Enabled", PCB_BUTTON_PIN);
+  logMessage(logBuf);
+
+#ifdef EXT_BUTTON_PIN
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Pin %d) [NC/FailSafe]", "External Button", "Enabled", EXT_BUTTON_PIN);
 #else
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Pin %d) [NC/FailSafe]", "Foot Pedal/Button", "Enabled", ONE_BUTTON_PIN);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "External Button", "Disabled (Debug)");
 #endif
   logMessage(logBuf);
+
   snprintf(logBuf, sizeof(logBuf), " %-25s : %lu ms", "Long Press Time", longPressMs);
   logMessage(logBuf);
 
@@ -162,15 +167,25 @@ void recoverSessionState() {
 }
 
 void setupPeripherals() {
-  // Setup Button
+  // Setup Buttons
   unsigned long longPressMs = (unsigned long)g_systemConfig.longPressSeconds * 1000;
   if (longPressMs < 1000)
     longPressMs = 1000;
 
-  button.setPressMs(longPressMs);
-  button.attachLongPressStart(handleLongPress);
-  button.attachDoubleClick(handleDoublePress);
-  button.attachPress(handlePress); // For hardware test start time
+  // 1. PCB Button (Always Active)
+  pcbButton.setPressMs(longPressMs);
+  pcbButton.attachLongPressStart(handleLongPress);
+  pcbButton.attachDoubleClick(handleDoublePress);
+  pcbButton.attachPress(handlePress); // For hardware test start time
+
+  // 2. External Button (Only in Release Mode)
+#ifdef EXT_BUTTON_PIN
+  extButton.setPressMs(longPressMs);
+  extButton.attachLongPressStart(handleLongPress);
+  extButton.attachDoubleClick(handleDoublePress);
+  extButton.attachPress(handlePress); // For hardware test start time
+  logMessage("External Button Configured.");
+#endif
 
   // Initial LED State
   setLedPattern(currentState);
@@ -283,7 +298,15 @@ void loop() {
   // 3. User Feedback & Input
   if (xSemaphoreTakeRecursive(stateMutex, 0) == pdTRUE) {
     statusLed.Update();
-    button.tick();
+    
+    // Always tick the PCB button
+    pcbButton.tick();
+
+    // Tick the External button
+    #ifdef EXT_BUTTON_PIN
+      extButton.tick();
+    #endif
+
     xSemaphoreGiveRecursive(stateMutex);
   }
 

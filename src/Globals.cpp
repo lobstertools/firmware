@@ -20,15 +20,19 @@ AsyncWebServer server(80);
 SystemConfig g_systemConfig = DEFAULT_SETTINGS;
 
 // --- Button Configuration ---
-#ifdef DEBUG_MODE
-// Development: Uses the standard on-board Normally Open (NO) button.
-// Standard logic: Ground = Pressed.
-OneButton button(ONE_BUTTON_PIN, true, true);
-#else
+
+// 1. PCB Button: Always Present (GPIO 0 / Boot Button). Active LOW.
+OneButton pcbButton(PCB_BUTTON_PIN, true, true);
+
+// 2. External Button: Only in Release (defined in Config.h)
+#ifdef EXT_BUTTON_PIN
 // Production: Uses a Normally Closed (NC) abort switch.
-// Fail-safe logic: A physical press, wire break, or disconnected cable
-// creates an open circuit. This "open" state triggers the abort.
-OneButton button(ONE_BUTTON_PIN, false, true);
+// Active State = HIGH (Open Circuit).
+OneButton extButton(EXT_BUTTON_PIN, false, true);
+#else
+// Placeholder for Debug mode to prevent compilation errors, 
+// though it won't be ticked or attached.
+OneButton extButton(-1, true, true); 
 #endif
 
 jled::JLed statusLed = jled::JLed(STATUS_LED_PIN);
