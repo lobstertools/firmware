@@ -50,6 +50,7 @@ void sendJsonError(AsyncWebServerRequest *request, int code, const String &messa
 void handleRoot(AsyncWebServerRequest *request) {
   String html = "<html><head><title>" + String(DEVICE_NAME) + "</title></head><body>";
   html += "<h1>" + String(DEVICE_NAME) + " API</h1>";
+  html += "<h2>" + String(DEVICE_VERSION) + " API</h2>";
   html += "<ul>";
   html += "<li><b>GET /status</b> - Real-time metrics (lock timer, state).</li>";
   html += "<li><b>GET /details</b> - Device configuration & capabilities.</li>";
@@ -60,7 +61,7 @@ void handleRoot(AsyncWebServerRequest *request) {
   html += "<li><b>POST /start-test</b> - Run 2-min hardware test.</li>";
   html += "<li><b>POST /abort</b> - Emergency stop (triggers penalty).</li>";
   html += "<li><b>POST /keepalive</b> - Reset connection watchdog.</li>";
-  html += "<li><b>POST /update-wifi</b> - Update credentials (JSON).</li>";
+  html += "<li><b>POST /update-wifi</b> - Update credentials.</li>";
   html += "<li><b>POST /factory-reset</b> - Erase data and reset.</li>";
   html += "</ul></body></html>";
   request->send(200, "text/html", html);
