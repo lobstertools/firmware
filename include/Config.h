@@ -18,7 +18,7 @@
 
 // --- Device Name String ---
 #define DEVICE_NAME "LobsterLock-diymore-MOS"
- 
+
 // --- Hardware & Global Configuration ---
 #define SERIAL_BAUD_RATE 115200
 
@@ -30,16 +30,16 @@
 #define MAGIC_VALUE 0x3CADD1FF
 
 // --- Pin Definitions ---
-#define PCB_BUTTON_PIN 0       // Standard ESP32 Boot Button
+#define PCB_BUTTON_PIN 0 // Standard ESP32 Boot Button
 
 #ifdef DEBUG_MODE
-  // Development (Diymore Debug)
-  #define STATUS_LED_PIN 23
-  // EXT_BUTTON_PIN is purposefully undefined in Debug mode
+// Development (Diymore Debug)
+#define STATUS_LED_PIN 23
+// EXT_BUTTON_PIN is purposefully undefined in Debug mode
 #else
-  // Production (Diymore Release)
-  #define STATUS_LED_PIN 21
-  #define EXT_BUTTON_PIN 15    // External NC Switch
+// Production (Diymore Release)
+#define STATUS_LED_PIN 21
+#define EXT_BUTTON_PIN 15 // External NC Switch
 #endif
 
 // --- Channel-Specific Configuration ---
@@ -90,21 +90,21 @@ struct SystemConfig {
 // Optimized for rapid iteration and testing short lifecycles.
 // ============================================================================
 static const SystemConfig DEFAULT_SETTINGS = {
-    1,      // longPressSeconds (1s for quick triggering)
-    10,     // minLockSeconds (10s minimum for quick lock cycles)
-    3600,   // maxLockSeconds (1 hour - allows testing longer ranges if needed)
-    10,     // minPenaltySeconds (10s penalty)
-    3600,   // maxPenaltySeconds 
-    10,     // minPaybackTimeSeconds (10s minimum debt)
-    600,    // maxPaybackTimeSeconds (10 min cap)
-    240,    // testModeDurationSeconds (4m hardware test)
-    600,    // failsafeMaxLockSeconds (10 min failsafe for safety during debug)
-    10000,  // keepAliveIntervalMs
-    4,      // keepAliveMaxStrikes
-    5,      // bootLoopThreshold 
-    30000,  // stableBootTimeMs (30s to consider boot stable)
-    3,      // wifiMaxRetries (Fail faster)
-    300     // armedTimeoutSeconds (5 min idle timeout)
+    1,     // longPressSeconds (1s for quick triggering)
+    10,    // minLockSeconds (10s minimum for quick lock cycles)
+    3600,  // maxLockSeconds (1 hour - allows testing longer ranges if needed)
+    10,    // minPenaltySeconds (10s penalty)
+    3600,  // maxPenaltySeconds
+    10,    // minPaybackTimeSeconds (10s minimum debt)
+    600,   // maxPaybackTimeSeconds (10 min cap)
+    240,   // testModeDurationSeconds (4m hardware test)
+    600,   // failsafeMaxLockSeconds (10 min failsafe for safety during debug)
+    10000, // keepAliveIntervalMs
+    4,     // keepAliveMaxStrikes
+    5,     // bootLoopThreshold
+    30000, // stableBootTimeMs (30s to consider boot stable)
+    3,     // wifiMaxRetries (Fail faster)
+    300    // armedTimeoutSeconds (5 min idle timeout)
 };
 
 #else

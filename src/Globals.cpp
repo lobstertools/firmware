@@ -30,9 +30,9 @@ OneButton pcbButton(PCB_BUTTON_PIN, true, true);
 // Active State = HIGH (Open Circuit).
 OneButton extButton(EXT_BUTTON_PIN, false, true);
 #else
-// Placeholder for Debug mode to prevent compilation errors, 
+// Placeholder for Debug mode to prevent compilation errors,
 // though it won't be ticked or attached.
-OneButton extButton(-1, true, true); 
+OneButton extButton(-1, true, true);
 #endif
 
 jled::JLed statusLed = jled::JLed(STATUS_LED_PIN);

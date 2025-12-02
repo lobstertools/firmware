@@ -318,7 +318,6 @@ void handleLongPress() {
     logMessage(LOG_SEP_MINOR); // End Interaction Visual
     xSemaphoreGiveRecursive(stateMutex);
   }
-
 }
 
 // =================================================================================

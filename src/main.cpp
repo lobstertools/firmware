@@ -96,10 +96,12 @@ void printStartupDiagnostics() {
   snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u s", "Lock Range", g_systemConfig.minLockSeconds, g_systemConfig.maxLockSeconds);
   logMessage(logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u s", "Penalty Range", g_systemConfig.minPenaltySeconds, g_systemConfig.maxPenaltySeconds);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u s", "Penalty Range", g_systemConfig.minPenaltySeconds,
+           g_systemConfig.maxPenaltySeconds);
   logMessage(logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u s", "Payback Range", g_systemConfig.minPaybackTimeSeconds, g_systemConfig.maxPaybackTimeSeconds);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u s", "Payback Range", g_systemConfig.minPaybackTimeSeconds,
+           g_systemConfig.maxPaybackTimeSeconds);
   logMessage(logBuf);
 
   snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Test Mode Duration", g_systemConfig.testModeDurationSeconds);
@@ -108,14 +110,17 @@ void printStartupDiagnostics() {
   snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Failsafe Timeout", g_systemConfig.failsafeMaxLockSeconds);
   logMessage(logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %u ms / %u", "Keep-Alive", g_systemConfig.keepAliveIntervalMs, g_systemConfig.keepAliveMaxStrikes);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u ms / %u", "Keep-Alive", g_systemConfig.keepAliveIntervalMs,
+           g_systemConfig.keepAliveMaxStrikes);
   logMessage(logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u ms", "Boot Loop/Stable", g_systemConfig.bootLoopThreshold, g_systemConfig.stableBootTimeMs);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u ms", "Boot Loop/Stable", g_systemConfig.bootLoopThreshold,
+           g_systemConfig.stableBootTimeMs);
   logMessage(logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u s", "WiFi Retries/ArmedTO", g_systemConfig.wifiMaxRetries, g_systemConfig.armedTimeoutSeconds);
-  logMessage(logBuf);  
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u s", "WiFi Retries/ArmedTO", g_systemConfig.wifiMaxRetries,
+           g_systemConfig.armedTimeoutSeconds);
+  logMessage(logBuf);
 
   processLogQueue();
 
@@ -339,14 +344,14 @@ void loop() {
   // 3. User Feedback & Input
   if (xSemaphoreTakeRecursive(stateMutex, 0) == pdTRUE) {
     statusLed.Update();
-    
+
     // Always tick the PCB button
     pcbButton.tick();
 
-    // Tick the External button
-    #ifdef EXT_BUTTON_PIN
-      extButton.tick();
-    #endif
+// Tick the External button
+#ifdef EXT_BUTTON_PIN
+    extButton.tick();
+#endif
 
     xSemaphoreGiveRecursive(stateMutex);
   }

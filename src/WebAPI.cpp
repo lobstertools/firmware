@@ -341,9 +341,9 @@ void handleStatus(AsyncWebServerRequest *request) {
 
     // 2. External Button (Active HIGH / NC) - Only if defined
     bool extPressed = false;
-    #ifdef EXT_BUTTON_PIN
-      extPressed = (digitalRead(EXT_BUTTON_PIN) == HIGH); 
-    #endif
+#ifdef EXT_BUTTON_PIN
+    extPressed = (digitalRead(EXT_BUTTON_PIN) == HIGH);
+#endif
 
     // Logical OR: Is EITHER button triggering an event?
     snapshot.isPressed = pcbPressed || extPressed;
