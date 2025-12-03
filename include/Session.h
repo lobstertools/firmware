@@ -26,14 +26,14 @@ void resetToReady(bool generateNewCode);
 // SECTION: SESSION INITIATION
 // =================================================================================
 int startSession(unsigned long duration, unsigned long penalty, TriggerStrategy strategy, unsigned long *delays, bool hide);
-int startTestMode();
+int startTestSession();
 
 // =================================================================================
 // SECTION: ACTIVE STATE TRANSITIONS
 // =================================================================================
 void triggerLock(const char *source);
 void enterLockedState(const char *source);
-void stopTestMode();
+void stopTestSession();
 
 // =================================================================================
 // SECTION: SESSION TERMINATION

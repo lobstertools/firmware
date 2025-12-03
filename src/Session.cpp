@@ -19,7 +19,7 @@
 #include "Utils.h"
 
 // =================================================================================
-// SECTION: LIFECYCLE & RECOVERY
+// SECTION: LIFECYCLE, RECOVERY & UI WATCHDOG
 // =================================================================================
 
 /**
@@ -115,6 +115,26 @@ void resetToReady(bool generateNewCode) {
   saveState(true); // Force save
 }
 
+/**
+ * Arms the keep-alive watchdog for UI pings
+ */
+void armKeepAliveWatchdog() {
+  g_lastKeepAliveTime = millis(); // Arm keep-alive watchdog
+  g_currentKeepAliveStrikes = 0;  // Reset strikes
+
+  logKeyValue("Session", "Keep-Alive Watchdog Armed");
+}
+
+/**
+ * Disarms the keep-alive watchdog for UI pings
+ */
+void disarmKeepAliveWatchdog() {
+  g_lastKeepAliveTime = 0;       // Diarm keep-alive watchdog
+  g_currentKeepAliveStrikes = 0; // Reset strikes
+
+  logKeyValue("Session", "Keep-Alive Watchdog Disarmed");
+}
+
 // =================================================================================
 // SECTION: SESSION INITIATION
 // =================================================================================
@@ -205,10 +225,10 @@ int startSession(unsigned long duration, unsigned long penalty, TriggerStrategy 
 }
 
 /**
- * Starts the hardware test mode.
+ * Starts the hardware test session.
  * Returns: 200 (OK), 409 (Not Ready).
  */
-int startTestMode() {
+int startTestSession() {
   if (currentState != READY) {
     return 409;
   }
@@ -219,8 +239,8 @@ int startTestMode() {
   setLedPattern(TESTING);
   testSecondsRemaining = g_systemConfig.testModeDurationSeconds;
   startTimersForState(TESTING);
-  g_lastKeepAliveTime = millis(); // Arm keep-alive watchdog for test mode
-  g_currentKeepAliveStrikes = 0;  // Reset strikes
+  armKeepAliveWatchdog();
+
   saveState(true);
 
   return 200;
@@ -259,26 +279,23 @@ void enterLockedState(const char *source) {
 
   lockSecondsRemaining = lockSecondsConfig;
   startTimersForState(LOCKED);
-  armFailsafeTimer();             // DEATH GRIP
-  g_lastKeepAliveTime = millis(); // Arm keep-alive watchdog
-  g_currentKeepAliveStrikes = 0;  // Reset strikes
+  armFailsafeTimer();     // DEATH GRIP
+  armKeepAliveWatchdog(); // UI Ping
 
   saveState(true); // Force save
 }
 
 /**
- * Stops the test mode and returns to READY.
+ * Stops the test session and returns to READY.
  */
-void stopTestMode() {
 void stopTestSession() {
   logKeyValue("Session", "Stopping test session.");
   currentState = READY;
+  disarmKeepAliveWatchdog();
   startTimersForState(READY); // Set WDT
   setLedPattern(READY);
   testSecondsRemaining = 0;
-  g_lastKeepAliveTime = 0;       // Disarm watchdog
-  g_currentKeepAliveStrikes = 0; // Reset strikes
-  saveState(true);               // Force save
+  saveState(true); // Force save
 }
 
 // =================================================================================
@@ -298,8 +315,10 @@ void completeSession() {
   snprintf(logBuf, sizeof(logBuf), "%sCOMPLETED", LOG_PREFIX_STATE);
   logKeyValue("Session", logBuf);
 
-  if (previousState == LOCKED)
+  if (previousState == LOCKED) {
     disarmFailsafeTimer();
+    disarmKeepAliveWatchdog();
+  }
 
   currentState = COMPLETED;
   startTimersForState(COMPLETED); // Reset WDT
@@ -338,8 +357,6 @@ void completeSession() {
   penaltySecondsRemaining = 0;
   testSecondsRemaining = 0;
   triggerTimeoutRemaining = 0;
-  g_lastKeepAliveTime = 0;
-  g_currentKeepAliveStrikes = 0;
 
   for (int i = 0; i < MAX_CHANNELS; i++)
     channelDelaysRemaining[i] = 0;
@@ -364,6 +381,7 @@ void abortSession(const char *source) {
 
   if (currentState == LOCKED) {
     disarmFailsafeTimer();
+    disarmKeepAliveWatchdog();
 
     // LOGGING VISUALS: Abort Block
     snprintf(logBuf, sizeof(logBuf), "%sABORTED", LOG_PREFIX_STATE);
@@ -412,9 +430,7 @@ void abortSession(const char *source) {
       startTimersForState(COMPLETED);
     }
 
-    g_lastKeepAliveTime = 0;       // Disarm watchdog
-    g_currentKeepAliveStrikes = 0; // Reset strikes
-    saveState(true);               // Force save
+    saveState(true); // Force save
 
   } else if (currentState == ARMED) {
     // ARMED is a "Safety Off" state, but not yet "Point of No Return".

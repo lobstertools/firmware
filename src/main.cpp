@@ -104,7 +104,7 @@ void printStartupDiagnostics() {
            g_systemConfig.maxPaybackTimeSeconds);
   logMessage(logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Test Mode Duration", g_systemConfig.testModeDurationSeconds);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Test Session Duration", g_systemConfig.testModeDurationSeconds);
   logMessage(logBuf);
 
   snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Failsafe Timeout", g_systemConfig.failsafeMaxLockSeconds);

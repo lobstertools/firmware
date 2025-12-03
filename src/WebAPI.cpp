@@ -227,7 +227,7 @@ void handleStartTest(AsyncWebServerRequest *request) {
 
     logKeyValue("WebAPI", "/start-test");
 
-    int result = startTestMode();
+    int result = startTestSession();
 
     xSemaphoreGiveRecursive(stateMutex);
 
@@ -707,7 +707,7 @@ void setupWebServer() {
   // API: Arm/Start a session
   server.on("/arm", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, handleArm);
 
-  // Start a short test mode
+  // Start a short test session
   server.on("/start-test", HTTP_POST, handleStartTest);
 
   // Abort an active session
