@@ -96,9 +96,10 @@ bool enforceHardwareState() {
       lastPanicLog = millis();
     }
 
-    for (int i = 0; i < MAX_CHANNELS; i++)
-      digitalWrite(HARDWARE_PINS[i], LOW);
-    currentState = READY;
+    sendChannelOffAll();
+    delay(3000);
+    ESP.restart();
+
     return true;
   }
 
