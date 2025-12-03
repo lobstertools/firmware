@@ -456,10 +456,16 @@ void abortSession(const char *source) {
     snprintf(logBuf, sizeof(logBuf), "%s: Aborting test session.", source);
     logKeyValue("Session", logBuf);
     stopTestSession(); // Cancel test (this disarms watchdog)
+
   } else if (currentState == READY) {
-    completeSession();
-  }
-  else {
+    // External switch isn't connected, do nothing for now
+    currentState = VALIDATING;
+    extButtonSignalStartTime = 0;
+
+  } else if (currentState == VALIDATING) {
+    // External switch isn't connected, do nothing for now
+
+  } else {
     snprintf(logBuf, sizeof(logBuf), "%s: Abort ignored, device not in abortable state.", source);
     logKeyValue("Session", logBuf);
     return;

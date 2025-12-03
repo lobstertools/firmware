@@ -54,6 +54,8 @@ const char *stateToString(SessionState s) {
     return "completed";
   case TESTING:
     return "testing";
+  case VALIDATING:
+    return "validating";
   default:
     return "unknown";
   }

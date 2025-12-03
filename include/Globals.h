@@ -48,6 +48,7 @@ extern TriggerStrategy currentStrategy;
 // Bitmask for enabled channels (loaded from Provisioning NVS)
 // Bit 0 = Ch1, Bit 1 = Ch2, etc.
 extern uint8_t g_enabledChannelsMask;
+extern unsigned long extButtonSignalStartTime;
 
 // =================================================================================
 // SECTION: SESSION TIMERS & DELAYS

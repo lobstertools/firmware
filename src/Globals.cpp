@@ -45,10 +45,11 @@ portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED; // Critical section for ti
 // SECTION: STATE MANAGEMENT
 // =================================================================================
 
-SessionState currentState = READY;
+SessionState currentState = VALIDATING;
 TriggerStrategy currentStrategy = STRAT_AUTO_COUNTDOWN;
 
 uint8_t g_enabledChannelsMask = 0x0F; // Default: 1111 (All enabled)
+unsigned long extButtonSignalStartTime = 0;
 
 // =================================================================================
 // SECTION: SESSION TIMERS & DELAYS

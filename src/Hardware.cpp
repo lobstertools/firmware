@@ -455,6 +455,10 @@ void setLedPattern(SessionState state) {
   logKeyValue("System", logBuf);
 
   switch (state) {
+  case VALIDATING:
+    // Triple Flash Heartbeat - "System Initializing / Busy"
+    statusLed.Blink(100, 100).Repeat(3).DelayAfter(1000).Forever();
+    break;
   case READY:
     // Slow Breath - Waiting for session configuration
     statusLed.FadeOn(2000).FadeOff(2000).Forever();

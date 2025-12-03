@@ -46,8 +46,7 @@ void printStartupDiagnostics() {
   char logBuf[150];
   char tBuf1[50];
   char tBuf2[50];
-  unsigned long longPressMs = (unsigned long)g_systemConfig.longPressSeconds * 1000;
-
+  
   // --- STARTUP BANNER ---
   logMessage(LOG_SEP_MAJOR);
   snprintf(logBuf, sizeof(logBuf), " %s", DEVICE_NAME);
@@ -82,7 +81,10 @@ void printStartupDiagnostics() {
 #endif
   logMessage(logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %lu ms", "Long Press Time", longPressMs);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %lu s", "Long Press Time", g_systemConfig.longPressSeconds);
+  logMessage(logBuf);
+
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %lu ms", "External Button Threshold", g_systemConfig.extButtonDetectionSeconds);
   logMessage(logBuf);
 
   processLogQueue();
@@ -239,6 +241,15 @@ void setupPeripherals() {
   setLedPattern(currentState);
 }
 
+/**
+ * Set the current state to READY
+ */
+void moveToReady() {
+  currentState = READY;
+  setLedPattern(currentState); 
+  logKeyValue("System", "Device is operational.");
+}
+
 // =================================================================
 // --- Helper Functions: Loop Logic ---
 // =================================================================
@@ -326,9 +337,6 @@ void setup() {
   // ------------------------------
   setupWebServer();
   setupPeripherals();
-
-  logKeyValue("System", "Device is operational.");
-  logMessage(LOG_SEP_MAJOR);
 }
 
 /**
@@ -352,9 +360,33 @@ void loop() {
     // Always tick the PCB button
     pcbButton.tick();
 
-// Tick the External button
 #ifdef EXT_BUTTON_PIN
+    // Tick the External button
     extButton.tick();
+
+    if (currentState == VALIDATING) {
+        if (digitalRead(EXT_BUTTON_PIN) == LOW) {
+            // It is connected/safe. Start timing if we haven't already.
+            if (extButtonSignalStartTime == 0) {
+                extButtonSignalStartTime = millis();
+            }
+            
+            // If it has been safe for sufficient time, proceed
+            if (millis() - extButtonSignalStartTime > g_systemConfig.extButtonDetectionSeconds * 1000) {
+                logKeyValue("System", "Safety Pedal connection verified.");
+                extButtonSignalStartTime = 0; // Reset for next time
+                moveToReady();
+            }
+        } else {
+            // If it flickers HIGH (disconnected) reset the timer
+            extButtonSignalStartTime = 0;
+        }
+    }
+#else
+    // in DEBUG, transition to READY immediately
+    if (currentState == VALIDATING) {
+      moveToReady();
+    }
 #endif
 
     xSemaphoreGiveRecursive(stateMutex);

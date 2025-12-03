@@ -54,7 +54,7 @@ static const int HARDWARE_PINS[4] = {16, 17, 26, 27};
 // --- Enums & Structs ---
 
 // Main state machine enum.
-enum SessionState : uint8_t { READY, ARMED, LOCKED, ABORTED, COMPLETED, TESTING };
+enum SessionState : uint8_t { VALIDATING, READY, ARMED, LOCKED, ABORTED, COMPLETED, TESTING };
 
 // Trigger Strategy (How we move from ARMED -> LOCKED)
 enum TriggerStrategy : uint8_t { STRAT_AUTO_COUNTDOWN, STRAT_BUTTON_TRIGGER };
@@ -68,6 +68,7 @@ struct Reward {
 // --- SYTEM PREFERENCES ---
 struct SystemConfig {
   uint32_t longPressSeconds;
+  uint32_t extButtonDetectionSeconds;
   uint32_t minLockSeconds;
   uint32_t maxLockSeconds;
   uint32_t minPenaltySeconds;
@@ -91,6 +92,7 @@ struct SystemConfig {
 // ============================================================================
 static const SystemConfig DEFAULT_SETTINGS = {
     5,     // longPressSeconds
+    10,    // extButtonDetectionSeconds
     10,    // minLockSeconds (10s minimum for quick lock cycles)
     3600,  // maxLockSeconds (1 hour - allows testing longer ranges if needed)
     10,    // minPenaltySeconds (10s penalty)
@@ -113,6 +115,7 @@ static const SystemConfig DEFAULT_SETTINGS = {
 // ============================================================================
 static const SystemConfig DEFAULT_SETTINGS = {
     5,      // longPressSeconds
+    10,     // extButtonDetectionSeconds
     900,    // minLockSeconds (15 min)
     10800,  // maxLockSeconds (180 min)
     900,    // minPenaltySeconds (15 min)
