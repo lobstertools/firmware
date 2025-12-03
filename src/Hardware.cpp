@@ -461,7 +461,7 @@ void setLedPattern(SessionState state) {
     break;
   case READY:
     // Slow Breath - Waiting for session configuration
-    statusLed.FadeOn(2000).FadeOff(2000).Forever();
+    statusLed.Breathe(4000).Forever();
     break;
   case ARMED:
     // Fast Blink (2Hz) - Waiting for trigger or counting down
