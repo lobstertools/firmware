@@ -293,7 +293,7 @@ void handlePress() { g_buttonPressStartTime = millis(); }
 void handleDoublePress() {
   if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(100)) == pdTRUE) {
 
-    logKeyValue("System", "Double-Click detected");
+    logKeyValue("System", "Double-Click detected.");
 
     triggerLock("Button Double-Click");
 
@@ -309,7 +309,7 @@ void handleDoublePress() {
 void handleLongPress() {
   if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(100)) == pdTRUE) {
 
-    logKeyValue("System", "Long-Press detected");
+    logKeyValue("System", "Long-Press detected.");
 
     abortSession("Button Long-Press");
 

@@ -54,7 +54,6 @@ void printStartupDiagnostics() {
   logMessage(logBuf);
   snprintf(logBuf, sizeof(logBuf), " Version: %s", DEVICE_VERSION);
   logMessage(logBuf);
-  logMessage(LOG_SEP_MAJOR);
 
   processLogQueue();
 
@@ -223,6 +222,7 @@ void setupPeripherals() {
   pcbButton.attachLongPressStart(handleLongPress);
   pcbButton.attachDoubleClick(handleDoublePress);
   pcbButton.attachPress(handlePress); // For hardware test start time
+  logKeyValue("System", "PCB Button Configured.");
 
   // 2. External Button (Only in Release Mode)
 #ifdef EXT_BUTTON_PIN
@@ -230,7 +230,7 @@ void setupPeripherals() {
   extButton.attachLongPressStart(handleLongPress);
   extButton.attachDoubleClick(handleDoublePress);
   extButton.attachPress(handlePress); // For hardware test start time
-  logMessage("External Button Configured.");
+  logKeyValue("System", "External Button Configured.");
 #endif
 
   // Initial LED State
