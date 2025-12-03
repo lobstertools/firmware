@@ -229,7 +229,6 @@ void setupPeripherals() {
   extButton.setPressMs(longPressMs);
   extButton.setLongPressIntervalMs(longPressMs);
 
-  extButton.attachLongPressStart(handleLongPress);
   extButton.attachDoubleClick(handleDoublePress);
   extButton.attachDuringLongPress(handleLongPress);
   extButton.attachPress(handlePress);

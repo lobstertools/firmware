@@ -306,6 +306,7 @@ void stopTestSession() {
 
 /**
  * Called when a session completes (either Lock timer OR Penalty timer ends).
+ * If coming from READY: Move the device into the COMPLETED state for a reboot
  * If coming from LOCKED: Increments success stats, clears payback.
  * If coming from ABORTED: Transitions to COMPLETED but retains debt/stats.
  */
@@ -455,8 +456,10 @@ void abortSession(const char *source) {
     snprintf(logBuf, sizeof(logBuf), "%s: Aborting test session.", source);
     logKeyValue("Session", logBuf);
     stopTestSession(); // Cancel test (this disarms watchdog)
-
-  } else {
+  } else if (currentState == READY) {
+    completeSession();
+  }
+  else {
     snprintf(logBuf, sizeof(logBuf), "%s: Abort ignored, device not in abortable state.", source);
     logKeyValue("Session", logBuf);
     return;

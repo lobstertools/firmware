@@ -90,7 +90,7 @@ struct SystemConfig {
 // Optimized for rapid iteration and testing short lifecycles.
 // ============================================================================
 static const SystemConfig DEFAULT_SETTINGS = {
-    1,     // longPressSeconds (1s for quick triggering)
+    5,     // longPressSeconds
     10,    // minLockSeconds (10s minimum for quick lock cycles)
     3600,  // maxLockSeconds (1 hour - allows testing longer ranges if needed)
     10,    // minPenaltySeconds (10s penalty)
@@ -99,7 +99,7 @@ static const SystemConfig DEFAULT_SETTINGS = {
     600,   // maxPaybackTimeSeconds (10 min cap)
     240,   // testModeDurationSeconds (4m hardware test)
     600,   // failsafeMaxLockSeconds (10 min failsafe for safety during debug)
-    10000, // keepAliveIntervalMs
+    10000, // keepAliveIntervalMs (UI ping)
     4,     // keepAliveMaxStrikes
     5,     // bootLoopThreshold
     30000, // stableBootTimeMs (30s to consider boot stable)
@@ -112,7 +112,7 @@ static const SystemConfig DEFAULT_SETTINGS = {
 // PRODUCTION / RELEASE DEFAULTS
 // ============================================================================
 static const SystemConfig DEFAULT_SETTINGS = {
-    3,      // longPressSeconds
+    5,      // longPressSeconds
     900,    // minLockSeconds (15 min)
     10800,  // maxLockSeconds (180 min)
     900,    // minPenaltySeconds (15 min)
@@ -121,7 +121,7 @@ static const SystemConfig DEFAULT_SETTINGS = {
     2700,   // maxPaybackTimeSeconds (45 min)
     240,    // testModeDurationSeconds
     14400,  // failsafeMaxLockSeconds (4 hours)
-    10000,  // keepAliveIntervalMs
+    10000,  // keepAliveIntervalMs (UI ping)
     4,      // keepAliveMaxStrikes
     5,      // bootLoopThreshold
     120000, // stableBootTimeMs (2 Minutes)
