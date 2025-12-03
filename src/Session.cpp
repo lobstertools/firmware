@@ -22,10 +22,7 @@
 // SECTION: LIFECYCLE, RECOVERY & UI WATCHDOG
 // =================================================================================
 
-/**
- * Analyzes the loaded state after a reboot and performs
- * the necessary transitions (e.g., aborting, resetting).
- */
+//
 void handleRebootState() {
 
   switch (currentState) {
@@ -38,17 +35,21 @@ void handleRebootState() {
     break;
 
   case COMPLETED:
-    // Session was finished. Reset to ready for a new one.
-    logKeyValue("Session", "Loaded COMPLETED state. Resetting to READY.");
-    resetToReady(true); // This saves the new state
+    // Session was finished. Reset, but ensure we validate hardware before allowing new lock.
+    logKeyValue("Session", "Loaded COMPLETED state. Resetting to VALIDATING.");
+    resetToReady(true); 
+    currentState = VALIDATING;
     break;
 
   case READY:
+    // If we load READY, we must assume hardware needs to be re-verified.
+    logKeyValue("Session", "Loaded READY state. Forcing hardware validation.");
+    currentState = VALIDATING; // Force Validating
+    break;
+
   case ABORTED:
   default:
-    // These states are safe to resume.
-    // ABORTED will resume its penalty timer.
-    // The watchdog is NOT armed, per the "LOCKED only" rule.
+    // ABORTED is the only state safe to resume immediately (you are in the penalty box).
     logKeyValue("Session", "Resuming in-progress state.");
     startTimersForState(currentState); // Resume timers
     break;

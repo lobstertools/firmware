@@ -210,6 +210,7 @@ void recoverSessionState() {
     handleRebootState();
   } else {
     resetToReady(true);
+    currentState = VALIDATING;
   }
 }
 
