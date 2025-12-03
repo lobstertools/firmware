@@ -233,7 +233,9 @@ int startTestSession() {
     return 409;
   }
 
-  logKeyValue("Session", "Engaging Hardware Test.");
+  char logBuf[150];
+  snprintf(logBuf, sizeof(logBuf), "%sTESTING", LOG_PREFIX_STATE);
+  logKeyValue("Session", logBuf);
 
   currentState = TESTING;
   setLedPattern(TESTING);
@@ -361,14 +363,24 @@ void completeSession() {
   for (int i = 0; i < MAX_CHANNELS; i++)
     channelDelaysRemaining[i] = 0;
 
-  // Log Lifetime Total
-  char timeBuf[64];
-  formatSeconds(totalLockedSessionSeconds, timeBuf, sizeof(timeBuf));
+  saveState(true); // Force save
 
-  snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Lifetime Locked", timeBuf);
+  // --- SECTION: STATISTICS ---
+  char tBuf1[50];
+  snprintf(logBuf, sizeof(logBuf), "Streak Count: %u", sessionStreakCount);
+  logKeyValue("Session", logBuf);
+  snprintf(logBuf, sizeof(logBuf), "Completed Sessions: %u", completedSessions);
+  logKeyValue("Session", logBuf);
+  snprintf(logBuf, sizeof(logBuf), "Aborted Sessions: %u", abortedSessions);
   logKeyValue("Session", logBuf);
 
-  saveState(true); // Force save
+  formatSeconds(paybackAccumulated, tBuf1, sizeof(tBuf1));
+  snprintf(logBuf, sizeof(logBuf), "Accumulated Debt: %s", tBuf1);
+  logKeyValue("Session", logBuf);
+
+  formatSeconds(totalLockedSessionSeconds, tBuf1, sizeof(tBuf1));
+  snprintf(logBuf, sizeof(logBuf), "Lifetime Locked: %s", tBuf1);
+  logKeyValue("Session", logBuf);
 }
 
 /**

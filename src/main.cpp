@@ -329,6 +329,7 @@ void setup() {
   setupPeripherals();
 
   logKeyValue("System", "Device is operational.");
+  logMessage(LOG_SEP_MAJOR);
 }
 
 /**
