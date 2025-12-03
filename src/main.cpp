@@ -227,9 +227,12 @@ void setupPeripherals() {
   // 2. External Button (Only in Release Mode)
 #ifdef EXT_BUTTON_PIN
   extButton.setPressMs(longPressMs);
+  extButton.setLongPressIntervalMs(longPressMs);
+
   extButton.attachLongPressStart(handleLongPress);
   extButton.attachDoubleClick(handleDoublePress);
-  extButton.attachPress(handlePress); // For hardware test start time
+  extButton.attachDuringLongPress(handleLongPress);
+  extButton.attachPress(handlePress);
   logKeyValue("System", "External Button Configured.");
 #endif
 
