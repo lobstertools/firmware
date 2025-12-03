@@ -37,7 +37,7 @@ void handleRebootState() {
   case COMPLETED:
     // Session was finished. Reset, but ensure we validate hardware before allowing new lock.
     logKeyValue("Session", "Loaded COMPLETED state. Resetting to VALIDATING.");
-    resetToReady(true); 
+    resetToReady(true);
     currentState = VALIDATING;
     break;
 
@@ -202,7 +202,7 @@ int startSession(unsigned long duration, unsigned long penalty, TriggerStrategy 
 
   // Enter ARMED state
   currentState = ARMED;
-  
+
   // Setup based on strategy
   if (currentStrategy == STRAT_BUTTON_TRIGGER) {
     // Wait for Button: Set Timeout
@@ -273,7 +273,7 @@ void enterLockedState(const char *source) {
   logKeyValue("Session", logBuf);
 
   currentState = LOCKED;
-  
+
   lockSecondsRemaining = lockSecondsConfig;
   startTimersForState(LOCKED);
   armFailsafeTimer();     // DEATH GRIP
@@ -319,7 +319,7 @@ void completeSession() {
 
   currentState = COMPLETED;
   startTimersForState(COMPLETED); // Reset WDT
-  
+
   if (previousState == LOCKED) {
     // --- SUCCESS PATH ---
     // On successful completion of a LOCK, we clear debt and reward streaks.
@@ -419,7 +419,7 @@ void abortSession(const char *source) {
     if (enableRewardCode) {
       // Standard behavior: Penalty Box
       currentState = ABORTED;
-      
+
       lockSecondsRemaining = 0;
       penaltySecondsRemaining = penaltySecondsConfig;
       startTimersForState(ABORTED);
@@ -428,7 +428,7 @@ void abortSession(const char *source) {
       logKeyValue("Session", "Reward Code disabled. Skipping penalty. Transitioning to COMPLETED.");
 
       currentState = COMPLETED;
-      
+
       lockSecondsRemaining = 0;
       penaltySecondsRemaining = 0;
       startTimersForState(COMPLETED);

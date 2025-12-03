@@ -96,7 +96,7 @@ bool enforceHardwareState() {
   static SessionState lastEnforcedState = (SessionState)-1; // Initialize to invalid to force first update
 
   if (currentState != lastEnforcedState) {
-    setLedPattern(currentState); 
+    setLedPattern(currentState);
     lastEnforcedState = currentState;
   }
 
