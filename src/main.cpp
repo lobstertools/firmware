@@ -236,9 +236,6 @@ void setupPeripherals() {
   extButton.attachPress(handlePress);
   logKeyValue("System", "External Button Configured.");
 #endif
-
-  // Initial LED State
-  setLedPattern(currentState);
 }
 
 /**
@@ -246,7 +243,6 @@ void setupPeripherals() {
  */
 void moveToReady() {
   currentState = READY;
-  setLedPattern(currentState);
   logKeyValue("System", "Device is operational.");
 }
 

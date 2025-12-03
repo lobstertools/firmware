@@ -88,7 +88,21 @@ void initializeChannels() {
 bool enforceHardwareState() {
   bool correctionApplied = false;
 
+  // ------------------------------------------------------------
+  // 0. STATUS LED & STATE CHANGE DETECTION
+  // ------------------------------------------------------------
+  // Track state history to update LEDs immediately upon transition,
+  // even if the physical pin mask (relays) does not change.
+  static SessionState lastEnforcedState = (SessionState)-1; // Initialize to invalid to force first update
+
+  if (currentState != lastEnforcedState) {
+    setLedPattern(currentState); 
+    lastEnforcedState = currentState;
+  }
+
+  // ------------------------------------------------------------
   // 1. SAFETY: Detect Memory Corruption
+  // ------------------------------------------------------------
   if (currentState > TESTING) {
     static unsigned long lastPanicLog = 0;
     if (millis() - lastPanicLog > 1000) {
@@ -103,7 +117,9 @@ bool enforceHardwareState() {
     return true;
   }
 
+  // ------------------------------------------------------------
   // 2. CALCULATE TARGET MASK
+  // ------------------------------------------------------------
   uint8_t targetMask = 0;
 
   for (int i = 0; i < MAX_CHANNELS; i++) {
@@ -138,11 +154,15 @@ bool enforceHardwareState() {
     }
   }
 
-  // 3. DETECT LOGIC CHANGES
+  // ------------------------------------------------------------
+  // 3. DETECT LOGIC CHANGES (For Logging Purposes)
+  // ------------------------------------------------------------
   static uint8_t lastTargetMask = 0;
   bool logicHasChanged = (targetMask != lastTargetMask);
 
+  // ------------------------------------------------------------
   // 4. ENFORCE HARDWARE
+  // ------------------------------------------------------------
   for (int i = 0; i < MAX_CHANNELS; i++) {
     int pin = HARDWARE_PINS[i];
     int expectedLevel = (targetMask >> i) & 1 ? HIGH : LOW;

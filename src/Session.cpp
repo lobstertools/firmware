@@ -70,8 +70,6 @@ void resetToReady(bool generateNewCode) {
   currentState = READY;
   startTimersForState(READY);
 
-  setLedPattern(READY);
-
   // Clear all timers and configs
   lockSecondsRemaining = 0;
   penaltySecondsRemaining = 0;
@@ -203,8 +201,7 @@ int startSession(unsigned long duration, unsigned long penalty, TriggerStrategy 
 
   // Enter ARMED state
   currentState = ARMED;
-  setLedPattern(ARMED);
-
+  
   // Setup based on strategy
   if (currentStrategy == STRAT_BUTTON_TRIGGER) {
     // Wait for Button: Set Timeout
@@ -237,7 +234,6 @@ int startTestSession() {
   logKeyValue("Session", logBuf);
 
   currentState = TESTING;
-  setLedPattern(TESTING);
   testSecondsRemaining = g_systemConfig.testModeDurationSeconds;
   startTimersForState(TESTING);
   armKeepAliveWatchdog();
@@ -276,8 +272,7 @@ void enterLockedState(const char *source) {
   logKeyValue("Session", logBuf);
 
   currentState = LOCKED;
-  setLedPattern(LOCKED);
-
+  
   lockSecondsRemaining = lockSecondsConfig;
   startTimersForState(LOCKED);
   armFailsafeTimer();     // DEATH GRIP
@@ -294,7 +289,6 @@ void stopTestSession() {
   currentState = READY;
   disarmKeepAliveWatchdog();
   startTimersForState(READY); // Set WDT
-  setLedPattern(READY);
   testSecondsRemaining = 0;
   saveState(true); // Force save
 }
@@ -324,8 +318,7 @@ void completeSession() {
 
   currentState = COMPLETED;
   startTimersForState(COMPLETED); // Reset WDT
-  setLedPattern(COMPLETED);
-
+  
   if (previousState == LOCKED) {
     // --- SUCCESS PATH ---
     // On successful completion of a LOCK, we clear debt and reward streaks.
@@ -425,8 +418,7 @@ void abortSession(const char *source) {
     if (enableRewardCode) {
       // Standard behavior: Penalty Box
       currentState = ABORTED;
-      setLedPattern(ABORTED);
-
+      
       lockSecondsRemaining = 0;
       penaltySecondsRemaining = penaltySecondsConfig;
       startTimersForState(ABORTED);
@@ -435,8 +427,7 @@ void abortSession(const char *source) {
       logKeyValue("Session", "Reward Code disabled. Skipping penalty. Transitioning to COMPLETED.");
 
       currentState = COMPLETED;
-      setLedPattern(COMPLETED);
-
+      
       lockSecondsRemaining = 0;
       penaltySecondsRemaining = 0;
       startTimersForState(COMPLETED);
