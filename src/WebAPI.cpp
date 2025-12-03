@@ -94,8 +94,8 @@ void handleKeepAlive(AsyncWebServerRequest *request) {
       // Log if we are recovering from missed checks
       if (g_currentKeepAliveStrikes > 0) {
         char logBuf[100];
-        snprintf(logBuf, sizeof(logBuf), "Keep-Alive Watchdog: Signal received. Resetting %d strikes.", g_currentKeepAliveStrikes);
-        logMessage(logBuf);
+        snprintf(logBuf, sizeof(logBuf), "Keep-Alive Watchdog Signal received. Resetting %d strikes.", g_currentKeepAliveStrikes);
+        logKeyValue("Session", logBuf);
       }
 
       g_currentKeepAliveStrikes = 0; // Reset strike counter
@@ -133,7 +133,7 @@ void handleArm(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t
   if (error) {
     char logBuf[100];
     snprintf(logBuf, sizeof(logBuf), "Failed to parse /arm JSON: %s", error.c_str());
-    logMessage(logBuf);
+    logKeyValue("WebAPI", logBuf);
     sendJsonError(request, 400, "Invalid JSON body.");
     return;
   }
@@ -192,12 +192,10 @@ void handleArm(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t
   // We lock briefly ONLY to update the state machine.
   if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(1000)) == pdTRUE) {
 
-    logMessage(LOG_SEP_MAJOR);
-    logMessage("API REQUEST: /arm");
+    logKeyValue("WebAPI", "/arm");
 
     int result = startSession(durationSeconds, penaltySeconds, requestedStrat, tempDelays, newHideTimer);
 
-    logMessage(LOG_SEP_MINOR);           // End Interaction Visual
     xSemaphoreGiveRecursive(stateMutex); // RELEASE LOCK
 
     // Handle Result
@@ -227,12 +225,10 @@ void handleStartTest(AsyncWebServerRequest *request) {
 
   if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(1000)) == pdTRUE) {
 
-    logMessage(LOG_SEP_MAJOR);
-    logMessage("API REQUEST: /start-test");
+    logKeyValue("WebAPI", "/start-test");
 
     int result = startTestMode();
 
-    logMessage(LOG_SEP_MINOR); // End Interaction Visual
     xSemaphoreGiveRecursive(stateMutex);
 
     // Handle Result
@@ -263,12 +259,9 @@ void handleAbort(AsyncWebServerRequest *request) {
       return;
     }
 
-    logMessage(LOG_SEP_MAJOR);
-    logMessage("API REQUEST: /abort");
+    logKeyValue("WebAPI", "/abort");
 
     abortSession("API Request");
-
-    logMessage(LOG_SEP_MINOR); // End Interaction Visual
 
     std::unique_ptr<JsonDocument> doc(new JsonDocument());
     (*doc)["status"] = (currentState == ABORTED) ? "aborted" : (currentState == COMPLETED ? "completed" : "ready");
@@ -586,9 +579,6 @@ void handleUpdateWifi(AsyncWebServerRequest *request, uint8_t *data, size_t len,
 
   DeserializationError error = deserializeJson(*doc, (const char *)data, len);
   if (error) {
-    char logBuf[100];
-    snprintf(logBuf, sizeof(logBuf), "Failed to parse /update-wifi JSON: %s", error.c_str());
-    logMessage(logBuf);
     sendJsonError(request, 400, "Invalid JSON body.");
     return;
   }
@@ -606,20 +596,19 @@ void handleUpdateWifi(AsyncWebServerRequest *request, uint8_t *data, size_t len,
     // State is already checked in the on() handler, but as a safeguard:
     if (currentState != READY) {
       xSemaphoreGiveRecursive(stateMutex);
-      logMessage("API: /update-wifi failed. Device is not in READY state.");
       sendJsonError(request, 409, "Device must be in READY state to update Wi-Fi.");
       return;
     }
 
-    logMessage("API: /update-wifi received. Saving new credentials to NVS.");
+    logKeyValue("WebAPI", "/update-wifi");
 
     // Save new credentials to NVS
-    wifiPreferences.begin("wifi-creds", false); // Open read/write
+    wifiPreferences.begin("wifi-creds", false);
     wifiPreferences.putString("ssid", ssid);
     wifiPreferences.putString("pass", pass);
-    wifiPreferences.end(); // Commit changes
+    wifiPreferences.end();
 
-    logMessage("New Wi-Fi credentials saved.");
+    logKeyValue("Prefs", "New Wi-Fi credentials saved.");
 
     xSemaphoreGiveRecursive(stateMutex);
   } else {
@@ -645,38 +634,37 @@ void handleFactoryReset(AsyncWebServerRequest *request) {
     // Do not allow forgetting during an active session
     if (currentState != READY && currentState != COMPLETED) {
       xSemaphoreGiveRecursive(stateMutex);
-      logMessage("API: /factory-reset failed. Device is currently in an active "
-                 "session.");
       sendJsonError(request, 409,
                     "Device is in an active session. Cannot reset while "
                     "locked, in countdown, or in penalty.");
       return;
     }
 
-    logMessage("API: /factory-reset received. Erasing credentials and session data.");
+    logKeyValue("WebAPI", "/factory-reset");
 
     // Erase Wi-Fi
     wifiPreferences.begin("wifi-creds", false);
     wifiPreferences.clear();
     wifiPreferences.end();
-
-    logMessage("Wi-Fi credentials erased.");
+    logKeyValue("Prefs", "Wi-Fi credentials erased.");
 
     // Erase all session state and counters
     sessionState.begin("session", false);
     sessionState.clear();
     sessionState.end();
-    logMessage("Session state and config erased.");
+    logKeyValue("Prefs", "Session state, statistics and config erased.");
 
     // Erase all device provisioning settings
     provisioningPrefs.begin("provisioning", false);
     provisioningPrefs.clear();
     provisioningPrefs.end();
+    logKeyValue("Prefs", "Provisioning settings erased.");
 
     // Clear boot loop stats
     bootPrefs.begin("boot", false);
     bootPrefs.clear();
     bootPrefs.end();
+    logKeyValue("Prefs", "Boot loop statistics erased.");
 
     xSemaphoreGiveRecursive(stateMutex);
   } else {
@@ -745,5 +733,5 @@ void setupWebServer() {
 
   server.begin();
 
-  logMessage("HTTP server started.");
+  logKeyValue("WebAPI", "HTTP server started.");
 }

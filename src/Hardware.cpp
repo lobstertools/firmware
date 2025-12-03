@@ -54,7 +54,7 @@ void IRAM_ATTR failsafe_timer_callback(void *arg) {
  * Hardware Watchdog.
  */
 void initializeWatchdog() {
-  logMessage("Initializing hardware watchdog...");
+  logKeyValue("System", "Initializing Hardware Watchdog...");
   esp_task_wdt_init(DEFAULT_WDT_TIMEOUT, true);
   esp_task_wdt_add(NULL);
 }
@@ -66,7 +66,7 @@ void initializeWatchdog() {
  * init.
  */
 void initializeChannels() {
-  logMessage("Initializing Channels: Setting all 4 to Output LOW (Safe State)");
+  logKeyValue("System", "Initializing Channels, Setting all 4 to Output LOW (Safe State)");
 
   // Iterate through all physical pins defined in hardware config
   for (int i = 0; i < MAX_CHANNELS; i++) {
@@ -92,7 +92,7 @@ bool enforceHardwareState() {
   if (currentState > TESTING) {
     static unsigned long lastPanicLog = 0;
     if (millis() - lastPanicLog > 1000) {
-      logMessage("CRITICAL: Invalid State Enum! Failsafe Triggered.");
+      logKeyValue("System", "CRITICAL: Invalid State Enum! Failsafe Triggered.");
       lastPanicLog = millis();
     }
 
@@ -157,12 +157,12 @@ bool enforceHardwareState() {
       if (logicHasChanged) {
         char logBuf[64];
         snprintf(logBuf, sizeof(logBuf), "State Update: Ch%d set to %s", i + 1, expectedLevel ? "HIGH" : "LOW");
-        logMessage(logBuf);
+        logKeyValue("System", logBuf);
       } else {
         // CRITICAL ANOMALY (Glitch or Interference)
         char logBuf[100];
         snprintf(logBuf, sizeof(logBuf), "CRITICAL ANOMALY: Ch%d drifted to %s! Corrected.", i + 1, currentLevel ? "HIGH" : "LOW");
-        logMessage(logBuf);
+        logKeyValue("System", logBuf);
       }
     }
   }
@@ -190,7 +190,7 @@ void sendChannelOn(int channelIndex, bool silent) {
   if (!silent) {
     char logBuf[50];
     snprintf(logBuf, sizeof(logBuf), "Channel %d: ON ", channelIndex + 1);
-    logMessage(logBuf);
+    logKeyValue("System", logBuf);
   }
 
   digitalWrite(HARDWARE_PINS[channelIndex], HIGH);
@@ -207,7 +207,7 @@ void sendChannelOff(int channelIndex, bool silent) {
   if (!silent) {
     char logBuf[50];
     snprintf(logBuf, sizeof(logBuf), "Channel %d: OFF", channelIndex + 1);
-    logMessage(logBuf);
+    logKeyValue("System", logBuf);
   }
 
   digitalWrite(HARDWARE_PINS[channelIndex], LOW);
@@ -217,7 +217,7 @@ void sendChannelOff(int channelIndex, bool silent) {
  * Turns all Channel channels ON.
  */
 void sendChannelOnAll() {
-  logMessage("Channels: ON (All Enabled)");
+  logKeyValue("System", "All Enabled Channels ON");
   for (int i = 0; i < MAX_CHANNELS; i++) {
     sendChannelOn(i, true);
   }
@@ -227,7 +227,7 @@ void sendChannelOnAll() {
  * Turns all Channel channels OFF.
  */
 void sendChannelOffAll() {
-  logMessage("Channels: OFF (All)");
+  logKeyValue("System", "All Enabled Channels OFF");
   for (int i = 0; i < MAX_CHANNELS; i++) {
     sendChannelOff(i, true);
   }
@@ -241,7 +241,7 @@ void sendChannelOffAll() {
  * Hardware Timer for "Death Grip".
  */
 void initializeFailSafeTimer() {
-  logMessage("Initializing Death Grip Timer...");
+  logKeyValue("System", "Initializing Death Grip Timer...");
   const esp_timer_create_args_t failsafe_timer_args = {.callback = &failsafe_timer_callback, .name = "failsafe_wdt"};
   esp_timer_create(&failsafe_timer_args, &failsafeTimer);
 }
@@ -263,7 +263,7 @@ void armFailsafeTimer() {
 
   char logBuf[100];
   snprintf(logBuf, sizeof(logBuf), "Death Grip Timer ARMED: %s", timeStr);
-  logMessage(logBuf);
+  logKeyValue("System", logBuf);
 }
 
 /**
@@ -273,7 +273,7 @@ void disarmFailsafeTimer() {
   if (failsafeTimer == NULL)
     return;
   esp_timer_stop(failsafeTimer);
-  logMessage("Death Grip Timer DISARMED.");
+  logKeyValue("System", "Death Grip Timer DISARMED.");
 }
 
 // =================================================================================
@@ -292,12 +292,10 @@ void handlePress() { g_buttonPressStartTime = millis(); }
 void handleDoublePress() {
   if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(100)) == pdTRUE) {
 
-    logMessage(LOG_SEP_MAJOR);
-    logMessage("BUTTON: Double-Click");
+    logKeyValue("System", "Double-Click detected");
 
     triggerLock("Button Double-Click");
 
-    logMessage(LOG_SEP_MINOR); // End Interaction Visual
     xSemaphoreGiveRecursive(stateMutex);
   }
 }
@@ -310,12 +308,10 @@ void handleDoublePress() {
 void handleLongPress() {
   if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(100)) == pdTRUE) {
 
-    logMessage(LOG_SEP_MAJOR);
-    logMessage("BUTTON: Long-Press");
+    logKeyValue("System", "Long-Press detected");
 
     abortSession("Button Long-Press");
 
-    logMessage(LOG_SEP_MINOR); // End Interaction Visual
     xSemaphoreGiveRecursive(stateMutex);
   }
 }
@@ -362,7 +358,7 @@ void markBootStability() {
     bootPrefs.begin("boot", false);
     bootPrefs.putInt("crashes", 0);
     bootPrefs.end();
-    logMessage("System stable. Boot loop counter reset.");
+    logKeyValue("System", "System stable. Boot loop counter reset.");
   }
 }
 
@@ -375,12 +371,12 @@ void checkHeapHealth() {
 
   // If fragmentation is high (plenty of free mem but no big blocks)
   if (largestBlock < 8192 && freeMem > 20000) {
-    logMessage("WARNING: Heap fragmentation detected!");
+    logKeyValue("System", "WARNING: Heap fragmentation detected!");
   }
 
   // Critical low memory
   if (freeMem < 10000) {
-    logMessage("CRITICAL: Low Heap! Executing failsafe.");
+    logKeyValue("System", "CRITICAL: Low Heap! Executing failsafe.");
     sendChannelOffAll();
   }
 }
@@ -400,7 +396,7 @@ void checkSystemHealth() {
   }
 
   if (loopStack < 512 || (asyncHandle != NULL && asyncStack < 512)) {
-    logMessage("CRITICAL: Stack near overflow! Emergency Stop.");
+    logKeyValue("System", "CRITICAL: Stack near overflow! Emergency Stop.");
     sendChannelOffAll();
     // Force a restart as memory corruption is likely
     ESP.restart();
@@ -415,7 +411,7 @@ void checkSystemHealth() {
     // Log the critical event
     char logBuf[100];
     snprintf(logBuf, sizeof(logBuf), "CRITICAL: Overheating detected (%.1f C)! Emergency Stop.", currentTemp);
-    logMessage(logBuf);
+    logKeyValue("System", logBuf);
 
     sendChannelOffAll();
   }
@@ -441,7 +437,7 @@ void updateWatchdogTimeout(uint32_t seconds) {
   esp_task_wdt_init(seconds, true);
   char logBuf[50];
   snprintf(logBuf, sizeof(logBuf), "Hardware Watchdog Timeout set to %u s", seconds);
-  logMessage(logBuf);
+  logKeyValue("System", logBuf);
 }
 
 // =================================================================================
@@ -455,7 +451,7 @@ void updateWatchdogTimeout(uint32_t seconds) {
 void setLedPattern(SessionState state) {
   char logBuf[50];
   snprintf(logBuf, sizeof(logBuf), "Setting LED pattern for: %s", stateToString(state));
-  logMessage(logBuf);
+  logKeyValue("System", logBuf);
 
   switch (state) {
   case READY:

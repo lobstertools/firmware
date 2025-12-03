@@ -24,6 +24,7 @@
 // SECTION: CORE LOGGING FUNCTIONS
 // =================================================================================
 void logMessage(const char *message);
+void logKeyValue(const char *key, const char *value);
 void processLogQueue();
 
 // =================================================================================

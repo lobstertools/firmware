@@ -312,7 +312,7 @@ void setup() {
   // ------------------------------
   // Master Timer (1 Second Tick)
   // ------------------------------
-  logMessage("Attaching master 1-second ticker.");
+  logKeyValue("Session", "Attaching master 1-second ticker.");
   oneSecondMasterTicker.attach(1, []() {
     portENTER_CRITICAL_ISR(&timerMux);
     g_tickCounter++;
@@ -325,7 +325,7 @@ void setup() {
   setupWebServer();
   setupPeripherals();
 
-  logMessage("Device is operational.");
+  logKeyValue("System", "Device is operational.");
 }
 
 /**

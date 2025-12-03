@@ -63,6 +63,23 @@ void logMessage(const char *message) {
 }
 
 /**
+ * Helper: Formats a Key/Value pair and sends it to logMessage.
+ * Format: " Key : Value"
+ */
+void logKeyValue(const char *key, const char *value) {
+  char tempBuf[MAX_LOG_ENTRY_LENGTH];
+
+  // Format the string:
+  // 1. Leading space for indentation
+  // 2. Key padded to 8 chars
+  // 3. Separator and Value
+  snprintf(tempBuf, MAX_LOG_ENTRY_LENGTH, " %-8s : %s", key, value);
+
+  // Pass to the thread-safe core logger
+  logMessage(tempBuf);
+}
+
+/**
  * Called in main loop to drain log queue safely to Serial port.
  * Allows printing without blocking critical sections.
  * Drains up to 10 messages per call to prevent lag/dropped logs.

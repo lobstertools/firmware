@@ -67,7 +67,7 @@ void connectToWiFi() {
   if (WiFi.status() == WL_CONNECTED)
     return;
 
-  logMessage("WiFi: Connecting...");
+  logKeyValue("Network", "Connecting...");
   WiFi.mode(WIFI_STA);
   WiFi.begin(g_wifiSSID, g_wifiPass);
 }
@@ -79,8 +79,8 @@ void WiFiEvent(WiFiEvent_t event) {
   switch (event) {
   case ARDUINO_EVENT_WIFI_STA_GOT_IP: {
     char logBuf[64];
-    snprintf(logBuf, sizeof(logBuf), "WiFi: Connected. IP: %s", WiFi.localIP().toString().c_str());
-    logMessage(logBuf);
+    snprintf(logBuf, sizeof(logBuf), "Connected. IP: %s", WiFi.localIP().toString().c_str());
+    logKeyValue("Network", logBuf);
 
     g_wifiRetries = 0; // Reset counter on success
     if (wifiReconnectTimer != NULL) {
@@ -91,7 +91,7 @@ void WiFiEvent(WiFiEvent_t event) {
   case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
     // Check if we have exceeded max retries
     if (g_wifiRetries >= g_systemConfig.wifiMaxRetries) {
-      logMessage("WiFi: Max retries exceeded. Falling back to BLE Provisioning...");
+      logKeyValue("Network", "Max retries exceeded. Falling back to BLE Provisioning...");
 
       // Stop any pending reconnect timers
       if (wifiReconnectTimer != NULL) {
@@ -102,8 +102,8 @@ void WiFiEvent(WiFiEvent_t event) {
       g_triggerProvisioning = true;
     } else {
       char logBuf[64];
-      snprintf(logBuf, sizeof(logBuf), "WiFi: Disconnected (Attempt %d/%d). Retrying...", g_wifiRetries + 1, g_systemConfig.wifiMaxRetries);
-      logMessage(logBuf);
+      snprintf(logBuf, sizeof(logBuf), "Disconnected (Attempt %d/%d). Retrying...", g_wifiRetries + 1, g_systemConfig.wifiMaxRetries);
+      logKeyValue("Network", logBuf);
 
       g_wifiRetries++;
       // Wait 2 seconds before retrying
@@ -121,7 +121,7 @@ void WiFiEvent(WiFiEvent_t event) {
  * Starts the mDNS service to advertise 'lobster-lock.local'
  */
 void startMDNS() {
-  logMessage("Starting mDNS advertiser...");
+  logKeyValue("Network", "Starting mDNS advertiser...");
   uint8_t mac[6];
   esp_efuse_mac_get_default(mac);
   char uniqueHostname[30];
@@ -129,7 +129,7 @@ void startMDNS() {
 
   // Set the unique hostname (e.g., lobster-lock-AABBCC.local)
   if (!MDNS.begin(uniqueHostname)) {
-    logMessage("ERROR: Failed to set up mDNS responder!");
+    logKeyValue("Network", "Failed to set up mDNS responder!");
     return;
   }
   // Announce the service your NodeJS app will look for
@@ -138,7 +138,7 @@ void startMDNS() {
 
   char logBuf[64];
   snprintf(logBuf, sizeof(logBuf), "mDNS active: %s.local", uniqueHostname);
-  logMessage(logBuf);
+  logKeyValue("Network", logBuf);
 }
 
 // =================================================================================
@@ -164,13 +164,13 @@ class ProvisioningCallbacks : public BLECharacteristicCallbacks {
       wifiPreferences.begin("wifi-creds", false);
       wifiPreferences.putString("ssid", value.c_str());
       wifiPreferences.end();
-      logMessage("BLE: Received SSID");
+      logKeyValue("BLE", "Received SSID");
     } else if (uuid == PROV_PASS_CHAR_UUID) {
       std::string value(data, data + len);
       wifiPreferences.begin("wifi-creds", false);
       wifiPreferences.putString("pass", value.c_str());
       wifiPreferences.end();
-      logMessage("BLE: Received Password");
+      logKeyValue("BLE", "Received Password");
       g_credentialsReceived = true; // Trigger restart
     }
 
@@ -179,17 +179,17 @@ class ProvisioningCallbacks : public BLECharacteristicCallbacks {
       sessionState.begin("session", false);
       sessionState.putBool("enableCode", (bool)data[0]);
       sessionState.end();
-      logMessage("BLE: Received Enable Reward Code");
+      logKeyValue("BLE", "Received Enable Reward Code");
     } else if (uuid == PROV_ENABLE_STREAKS_CHAR_UUID) {
       sessionState.begin("session", false);
       sessionState.putBool("enableStreaks", (bool)data[0]);
       sessionState.end();
-      logMessage("BLE: Received Enable Streaks");
+      logKeyValue("BLE", "Received Enable Streaks");
     } else if (uuid == PROV_ENABLE_PAYBACK_TIME_CHAR_UUID) {
       sessionState.begin("session", false);
       sessionState.putBool("enablePayback", (bool)data[0]);
       sessionState.end();
-      logMessage("BLE: Received Enable Payback Time");
+      logKeyValue("BLE", "Received Enable Payback Time");
     } else if (uuid == PROV_PAYBACK_TIME_CHAR_UUID) {
       sessionState.begin("session", false);
       uint32_t val = bytesToUint32(data);
@@ -200,7 +200,7 @@ class ProvisioningCallbacks : public BLECharacteristicCallbacks {
         val = g_systemConfig.maxPaybackTimeSeconds;
       sessionState.putUInt("paybackSeconds", val);
       sessionState.end();
-      logMessage("BLE: Received Payback Time");
+      logKeyValue("BLE", "Received Payback Time");
     }
 
     // --- 3. Hardware Config (Channel Mask) ---
@@ -221,7 +221,7 @@ class ProvisioningCallbacks : public BLECharacteristicCallbacks {
       provisioningPrefs.putUChar("chMask", currentMask);
       provisioningPrefs.end();
       g_enabledChannelsMask = currentMask; // Update runtime global
-      logMessage("BLE: Updated Channel Mask");
+      logKeyValue("BLE", "Updated Channel Mask");
     }
   }
 };
@@ -231,7 +231,7 @@ class ProvisioningCallbacks : public BLECharacteristicCallbacks {
  * This function DOES NOT RETURN. It waits for credentials and reboots.
  */
 void startBLEProvisioning() {
-  logMessage("Starting BLE Provisioning Mode...");
+  logKeyValue("BLE", "Starting Provisioning Mode...");
 
   // Set a "pairing" pulse pattern
   statusLed.FadeOn(500).FadeOff(500).Forever();
@@ -273,7 +273,7 @@ void startBLEProvisioning() {
     processLogQueue();
 
     if (g_credentialsReceived) {
-      logMessage("Credentials received. Restarting to connect...");
+      logKeyValue("BLE", "Wifi Credentials received. Restarting to connect to WiFi...");
       delay(1000);
       ESP.restart();
     }
@@ -298,7 +298,7 @@ void connectWiFiOrProvision() {
 
   // 1. Load Credentials
   if (!wifiPreferences.begin("wifi-creds", true)) {
-    logMessage("NVS Warning: 'wifi-creds' namespace not found (First boot?)");
+    logKeyValue("Prefs", "'wifi-creds' namespace not found (First boot?)");
   }
   String ssidTemp = wifiPreferences.getString("ssid", "");
   String passTemp = wifiPreferences.getString("pass", "");
@@ -309,18 +309,18 @@ void connectWiFiOrProvision() {
 
   // 2. Decide: Connect or Provision
   if (strlen(g_wifiSSID) > 0) {
-    logMessage("Found Wi-Fi credentials. Registering events.");
+    logKeyValue("Network", "Found Wi-Fi credentials. Registering events.");
     g_wifiCredentialsExist = true;
     WiFi.onEvent(WiFiEvent);
     connectToWiFi();
   } else {
-    logMessage("No Wi-Fi credentials found.");
+    logKeyValue("Network", "No Wi-Fi credentials found.");
     // Fallthrough to BLE Provisioning below
   }
 
   // 3. Wait for IP (Blocking with Timeout)
   if (g_wifiCredentialsExist) {
-    logMessage("Boot: Waiting for IP address...");
+    logKeyValue("Network", "Waiting for IP address...");
     unsigned long wifiWaitStart = millis();
 
     WiFi.setSleep(false); // Stay awake
@@ -336,14 +336,14 @@ void connectWiFiOrProvision() {
       startMDNS();
       return; // Success! Return to main setup.
     } else {
-      logMessage("Boot: WiFi connection timed out.");
+      logKeyValue("Network", "WiFi connection timed out.");
       // Fallthrough to BLE Provisioning below
     }
   }
 
   // 4. Fallback: Blocking BLE Provisioning
   // If we reach here, we either had no creds, or timed out.
-  logMessage("Entering BLE Provisioning Fallback.");
+  logKeyValue("BLE", "Entering BLE Provisioning Fallback.");
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
   startBLEProvisioning(); // This function does not return
@@ -361,7 +361,7 @@ void handleNetworkFallback() {
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
 
-    logMessage("!!! Connection Failed. Entering BLE Provisioning Mode !!!");
+    logKeyValue("Network", "!!! Connection Failed. Entering BLE Provisioning Mode !!!");
 
     // Enter blocking provisioning mode
     // Note: This function ends with ESP.restart(), so we never return here.

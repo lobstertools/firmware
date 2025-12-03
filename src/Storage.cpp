@@ -36,7 +36,7 @@ bool loadState() {
     return false; // Report failure
   }
 
-  logMessage("Valid session data found in NVS.");
+  logKeyValue("Prefs", "Valid session data found in NVS.");
 
   // Load all values from NVS, providing a default for each
   currentState = (SessionState)sessionState.getUChar("state", (uint8_t)READY);
@@ -82,7 +82,7 @@ void saveState(bool force) {
 
   char logBuf[100];
   snprintf(logBuf, sizeof(logBuf), "Saving state to NVS: %s", stateToString(currentState));
-  logMessage(logBuf);
+  logKeyValue("Prefs", logBuf);
 
   esp_task_wdt_reset(); // Feed before potentially slow commit
 

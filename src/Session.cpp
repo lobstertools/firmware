@@ -33,13 +33,13 @@ void handleRebootState() {
   case ARMED:
   case TESTING:
     // These are active states. A reboot during them is an abort.
-    logMessage("Reboot detected during session. Aborting session...");
+    logKeyValue("Session", "Reboot detected during session. Aborting session...");
     abortSession("Reboot");
     break;
 
   case COMPLETED:
     // Session was finished. Reset to ready for a new one.
-    logMessage("Loaded COMPLETED state. Resetting to READY.");
+    logKeyValue("Session", "Loaded COMPLETED state. Resetting to READY.");
     resetToReady(true); // This saves the new state
     break;
 
@@ -49,7 +49,7 @@ void handleRebootState() {
     // These states are safe to resume.
     // ABORTED will resume its penalty timer.
     // The watchdog is NOT armed, per the "LOCKED only" rule.
-    logMessage("Resuming in-progress state.");
+    logKeyValue("Session", "Resuming in-progress state.");
     startTimersForState(currentState); // Resume timers
     break;
   }
@@ -62,7 +62,7 @@ void handleRebootState() {
 void resetToReady(bool generateNewCode) {
   char logBuf[150];
   snprintf(logBuf, sizeof(logBuf), "%sREADY", LOG_PREFIX_STATE);
-  logMessage(logBuf);
+  logKeyValue("Session", logBuf);
 
   if (currentState == LOCKED)
     disarmFailsafeTimer();
@@ -102,14 +102,14 @@ void resetToReady(bool generateNewCode) {
     strncpy(codeSnippet, rewardHistory[0].code, 8);
     codeSnippet[8] = '\0';
 
-    snprintf(logBuf, sizeof(logBuf), " New Reward Code Generated");
-    logMessage(logBuf);
+    snprintf(logBuf, sizeof(logBuf), "New Reward Code Generated");
+    logKeyValue("Session", logBuf);
     snprintf(logBuf, sizeof(logBuf), " %-20s : %s...", "Code Snippet", codeSnippet);
-    logMessage(logBuf);
+    logKeyValue("Session", logBuf);
     snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Checksum", rewardHistory[0].checksum);
-    logMessage(logBuf);
+    logKeyValue("Session", logBuf);
   } else {
-    logMessage(" > Preserving existing reward code.");
+    logKeyValue("Session", "Preserving existing reward code.");
   }
 
   saveState(true); // Force save
@@ -158,7 +158,7 @@ int startSession(unsigned long duration, unsigned long penalty, TriggerStrategy 
   // Apply any pending payback time from previous sessions
   unsigned long paybackInSeconds = paybackAccumulated;
   if (paybackInSeconds > 0) {
-    logMessage("Applying pending payback time to this session.");
+    logKeyValue("Session", "Applying pending payback time to this session.");
   }
 
   // Save configs
@@ -168,19 +168,19 @@ int startSession(unsigned long duration, unsigned long penalty, TriggerStrategy 
   // LOGGING VISUALS: Arming Block
   char logBuf[256];
   snprintf(logBuf, sizeof(logBuf), "%sARMED", LOG_PREFIX_STATE);
-  logMessage(logBuf);
+  logKeyValue("Session", logBuf);
 
   snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Strategy",
            (currentStrategy == STRAT_BUTTON_TRIGGER ? "Manual Button" : "Auto Countdown"));
-  logMessage(logBuf);
+  logKeyValue("Session", logBuf);
 
   char timeStr[64];
   formatSeconds(duration, timeStr, sizeof(timeStr));
   snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Lock Time", timeStr);
-  logMessage(logBuf);
+  logKeyValue("Session", logBuf);
 
   snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Visibility", (hideTimer ? "Hidden" : "Visible"));
-  logMessage(logBuf);
+  logKeyValue("Session", logBuf);
 
   // Enter ARMED state
   currentState = ARMED;
@@ -190,10 +190,10 @@ int startSession(unsigned long duration, unsigned long penalty, TriggerStrategy 
   if (currentStrategy == STRAT_BUTTON_TRIGGER) {
     // Wait for Button: Set Timeout
     triggerTimeoutRemaining = g_systemConfig.armedTimeoutSeconds;
-    logMessage("   -> Waiting for Manual Trigger.");
+    logKeyValue("Session", "Waiting for Manual Trigger.");
   } else {
     // Auto: Timers start ticking immediately in handleOneSecondTick
-    logMessage("   -> Auto Sequence Started.");
+    logKeyValue("Session", "Auto Sequence Started.");
   }
 
   startTimersForState(ARMED);
@@ -213,7 +213,7 @@ int startTestMode() {
     return 409;
   }
 
-  logMessage("Logic: Engaging Channels for 2 min test.");
+  logKeyValue("Session", "Engaging Hardware Test.");
 
   currentState = TESTING;
   setLedPattern(TESTING);
@@ -239,7 +239,7 @@ void triggerLock(const char *source) {
       enterLockedState(source);
     }
   } else if (currentState == TESTING) {
-    logMessage("Trigger ignored: Currently in Hardware Test.");
+    logKeyValue("Session", "Trigger ignored: Currently in Hardware Test.");
   }
 }
 
@@ -250,9 +250,9 @@ void triggerLock(const char *source) {
 void enterLockedState(const char *source) {
   char logBuf[100];
   snprintf(logBuf, sizeof(logBuf), "%sLOCKED", LOG_PREFIX_STATE);
-  logMessage(logBuf);
+  logKeyValue("Session", logBuf);
   snprintf(logBuf, sizeof(logBuf), " Source: %s", source);
-  logMessage(logBuf);
+  logKeyValue("Session", logBuf);
 
   currentState = LOCKED;
   setLedPattern(LOCKED);
@@ -270,7 +270,8 @@ void enterLockedState(const char *source) {
  * Stops the test mode and returns to READY.
  */
 void stopTestMode() {
-  logMessage("Stopping test mode.");
+void stopTestSession() {
+  logKeyValue("Session", "Stopping test session.");
   currentState = READY;
   startTimersForState(READY); // Set WDT
   setLedPattern(READY);
@@ -295,7 +296,7 @@ void completeSession() {
   // LOGGING VISUALS: Complete Block
   char logBuf[100];
   snprintf(logBuf, sizeof(logBuf), "%sCOMPLETED", LOG_PREFIX_STATE);
-  logMessage(logBuf);
+  logKeyValue("Session", logBuf);
 
   if (previousState == LOCKED)
     disarmFailsafeTimer();
@@ -308,7 +309,7 @@ void completeSession() {
     // --- SUCCESS PATH ---
     // On successful completion of a LOCK, we clear debt and reward streaks.
     if (paybackAccumulated > 0) {
-      logMessage(" > Valid session complete. Clearing accumulated payback debt.");
+      logKeyValue("Session", "Valid session complete. Clearing accumulated payback debt.");
       paybackAccumulated = 0;
     }
 
@@ -319,16 +320,16 @@ void completeSession() {
 
     // Log the new winning stats in aligned block
     snprintf(logBuf, sizeof(logBuf), " %-20s : %u", "New Streak", sessionStreakCount);
-    logMessage(logBuf);
+    logKeyValue("Session", logBuf);
     snprintf(logBuf, sizeof(logBuf), " %-20s : %u", "Total Completed", completedSessions);
-    logMessage(logBuf);
+    logKeyValue("Session", logBuf);
   } else if (previousState == ABORTED) {
     // --- PENALTY SERVED PATH ---
     // The user finished the penalty box.
     if (enablePaybackTime) {
-      logMessage(" > Penalty time served. Payback debt retained.");
+      logKeyValue("Session", "Penalty time served. Payback debt retained.");
     } else {
-      logMessage(" > Penalty time served.");
+      logKeyValue("Session", "Penalty time served.");
     }
   }
 
@@ -348,7 +349,7 @@ void completeSession() {
   formatSeconds(totalLockedSessionSeconds, timeBuf, sizeof(timeBuf));
 
   snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Lifetime Locked", timeBuf);
-  logMessage(logBuf);
+  logKeyValue("Session", logBuf);
 
   saveState(true); // Force save
 }
@@ -366,9 +367,9 @@ void abortSession(const char *source) {
 
     // LOGGING VISUALS: Abort Block
     snprintf(logBuf, sizeof(logBuf), "%sABORTED", LOG_PREFIX_STATE);
-    logMessage(logBuf);
+    logKeyValue("Session", logBuf);
     snprintf(logBuf, sizeof(logBuf), " Source: %s", source);
-    logMessage(logBuf);
+    logKeyValue("Session", logBuf);
 
     // Implement Abort Logic:
     sessionStreakCount = 0; // 1. Reset streak
@@ -383,11 +384,11 @@ void abortSession(const char *source) {
 
       // Log formatted payback stats
       snprintf(logBuf, sizeof(logBuf), " %-20s : +%u s", "Payback Added", paybackTimeSeconds);
-      logMessage(logBuf);
+      logKeyValue("Session", logBuf);
       snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Total Debt", timeStr);
-      logMessage(logBuf);
+      logKeyValue("Session", logBuf);
     } else {
-      logMessage(" Payback: Disabled (No time added)");
+      logKeyValue("Session", "Disabled (No time added)");
     }
 
     // 4. Handle Reward Code / Penalty
@@ -401,8 +402,7 @@ void abortSession(const char *source) {
       startTimersForState(ABORTED);
     } else {
       // New behavior: No Reward Code = No Penalty Box
-      logMessage(" Reward Code disabled. Skipping penalty. Transitioning to "
-                 "COMPLETED.");
+      logKeyValue("Session", "Reward Code disabled. Skipping penalty. Transitioning to COMPLETED.");
 
       currentState = COMPLETED;
       setLedPattern(COMPLETED);
@@ -420,17 +420,17 @@ void abortSession(const char *source) {
     // ARMED is a "Safety Off" state, but not yet "Point of No Return".
     // Aborting here returns to READY without penalty.
     snprintf(logBuf, sizeof(logBuf), "%s: Aborting session (ARMED).", source);
-    logMessage(logBuf);
+    logKeyValue("Session", logBuf);
     resetToReady(false); // Cancel arming (this disarms watchdog)
 
   } else if (currentState == TESTING) {
-    snprintf(logBuf, sizeof(logBuf), "%s: Aborting test mode.", source);
-    logMessage(logBuf);
-    stopTestMode(); // Cancel test (this disarms watchdog)
+    snprintf(logBuf, sizeof(logBuf), "%s: Aborting test session.", source);
+    logKeyValue("Session", logBuf);
+    stopTestSession(); // Cancel test (this disarms watchdog)
 
   } else {
     snprintf(logBuf, sizeof(logBuf), "%s: Abort ignored, device not in abortable state.", source);
-    logMessage(logBuf);
+    logKeyValue("Session", logBuf);
     return;
   }
 }
@@ -451,13 +451,13 @@ void startTimersForState(SessionState state) {
   }
 
   if (state == ARMED) {
-    logMessage("Starting arming logic.");
+    logKeyValue("Session", "Starting arming logic.");
   } else if (state == LOCKED) {
-    logMessage("Starting lock logic.");
+    logKeyValue("Session", "Starting lock logic.");
   } else if (state == ABORTED) {
-    logMessage("Starting penalty logic.");
+    logKeyValue("Session", "Starting penalty logic.");
   } else if (state == TESTING) {
-    logMessage("Starting test logic.");
+    logKeyValue("Session", "Starting test logic.");
   }
   g_currentKeepAliveStrikes = 0; // Reset strikes on state change
 }
@@ -484,15 +484,15 @@ bool checkSessionKeepAliveWatchdog() {
 
     // Uses Configured Strike Count
     if (g_currentKeepAliveStrikes >= g_systemConfig.keepAliveMaxStrikes) {
-      snprintf(logBuf, sizeof(logBuf), "Keep-Alive Watchdog: Strike %d/%d! ABORTING.", g_currentKeepAliveStrikes,
+      snprintf(logBuf, sizeof(logBuf), "Keep Alive Watchdog: Strike %d/%d! ABORTING.", g_currentKeepAliveStrikes,
                g_systemConfig.keepAliveMaxStrikes);
-      logMessage(logBuf);
+      logKeyValue("Session", logBuf);
       abortSession("Watchdog Strikeout");
       return true; // Signal that we aborted
     } else {
-      snprintf(logBuf, sizeof(logBuf), "Keep-Alive Watchdog: Missed check. Strike %d/%d", g_currentKeepAliveStrikes,
+      snprintf(logBuf, sizeof(logBuf), "Keep-Alive Watchdog Missed check. Strike %d/%d", g_currentKeepAliveStrikes,
                g_systemConfig.keepAliveMaxStrikes);
-      logMessage(logBuf);
+      logKeyValue("Session", logBuf);
     }
   }
   return false;
@@ -533,7 +533,7 @@ void handleOneSecondTick() {
       if (triggerTimeoutRemaining > 0) {
         triggerTimeoutRemaining--;
       } else {
-        logMessage("Armed Timeout: Button not pressed in time. Aborting.");
+        logKeyValue("Session", "Armed Timeout: Button not pressed in time. Aborting.");
         abortSession("Arm Timeout");
       }
     }
@@ -567,8 +567,8 @@ void handleOneSecondTick() {
     }
     // Decrement test timer
     if (testSecondsRemaining > 0 && --testSecondsRemaining == 0) {
-      logMessage("Test mode timer expired.");
-      stopTestMode(); // Timer finished
+      logKeyValue("Session", "Test session done.");
+      stopTestSession(); // Timer finished
     }
     break;
   case READY:
