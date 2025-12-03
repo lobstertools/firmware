@@ -190,16 +190,16 @@ int startSession(unsigned long duration, unsigned long penalty, TriggerStrategy 
   snprintf(logBuf, sizeof(logBuf), "%sARMED", LOG_PREFIX_STATE);
   logKeyValue("Session", logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Strategy",
+  snprintf(logBuf, sizeof(logBuf), "Strategy: %s",
            (currentStrategy == STRAT_BUTTON_TRIGGER ? "Manual Button" : "Auto Countdown"));
   logKeyValue("Session", logBuf);
 
   char timeStr[64];
   formatSeconds(duration, timeStr, sizeof(timeStr));
-  snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Lock Time", timeStr);
+  snprintf(logBuf, sizeof(logBuf), "Lock Time: %s", timeStr);
   logKeyValue("Session", logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Visibility", (hideTimer ? "Hidden" : "Visible"));
+  snprintf(logBuf, sizeof(logBuf), "Timer: %s", (hideTimer ? "Hidden" : "Visible"));
   logKeyValue("Session", logBuf);
 
   // Enter ARMED state
