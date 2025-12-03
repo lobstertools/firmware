@@ -54,7 +54,6 @@ void printStartupDiagnostics() {
   logMessage(logBuf);
   snprintf(logBuf, sizeof(logBuf), " Version: %s", DEVICE_VERSION);
   logMessage(logBuf);
-  logMessage(LOG_SEP_MAJOR);
 
   processLogQueue();
 
