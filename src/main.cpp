@@ -46,7 +46,7 @@ void printStartupDiagnostics() {
   char logBuf[150];
   char tBuf1[50];
   char tBuf2[50];
-  
+
   // --- STARTUP BANNER ---
   logMessage(LOG_SEP_MAJOR);
   snprintf(logBuf, sizeof(logBuf), " %s", DEVICE_NAME);
@@ -246,7 +246,7 @@ void setupPeripherals() {
  */
 void moveToReady() {
   currentState = READY;
-  setLedPattern(currentState); 
+  setLedPattern(currentState);
   logKeyValue("System", "Device is operational.");
 }
 
@@ -365,22 +365,22 @@ void loop() {
     extButton.tick();
 
     if (currentState == VALIDATING) {
-        if (digitalRead(EXT_BUTTON_PIN) == LOW) {
-            // It is connected/safe. Start timing if we haven't already.
-            if (extButtonSignalStartTime == 0) {
-                extButtonSignalStartTime = millis();
-            }
-            
-            // If it has been safe for sufficient time, proceed
-            if (millis() - extButtonSignalStartTime > g_systemConfig.extButtonDetectionSeconds * 1000) {
-                logKeyValue("System", "Safety Pedal connection verified.");
-                extButtonSignalStartTime = 0; // Reset for next time
-                moveToReady();
-            }
-        } else {
-            // If it flickers HIGH (disconnected) reset the timer
-            extButtonSignalStartTime = 0;
+      if (digitalRead(EXT_BUTTON_PIN) == LOW) {
+        // It is connected/safe. Start timing if we haven't already.
+        if (extButtonSignalStartTime == 0) {
+          extButtonSignalStartTime = millis();
         }
+
+        // If it has been safe for sufficient time, proceed
+        if (millis() - extButtonSignalStartTime > g_systemConfig.extButtonDetectionSeconds * 1000) {
+          logKeyValue("System", "Safety Pedal connection verified.");
+          extButtonSignalStartTime = 0; // Reset for next time
+          moveToReady();
+        }
+      } else {
+        // If it flickers HIGH (disconnected) reset the timer
+        extButtonSignalStartTime = 0;
+      }
     }
 #else
     // in DEBUG, transition to READY immediately

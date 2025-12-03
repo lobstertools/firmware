@@ -190,8 +190,7 @@ int startSession(unsigned long duration, unsigned long penalty, TriggerStrategy 
   snprintf(logBuf, sizeof(logBuf), "%sARMED", LOG_PREFIX_STATE);
   logKeyValue("Session", logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), "Strategy: %s",
-           (currentStrategy == STRAT_BUTTON_TRIGGER ? "Manual Button" : "Auto Countdown"));
+  snprintf(logBuf, sizeof(logBuf), "Strategy: %s", (currentStrategy == STRAT_BUTTON_TRIGGER ? "Manual Button" : "Auto Countdown"));
   logKeyValue("Session", logBuf);
 
   char timeStr[64];
