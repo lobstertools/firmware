@@ -21,6 +21,8 @@
 #include "Logger.h"
 #include "Network.h"
 #include "Utils.h"
+#include "Session.h"
+#include "Hardware.h"
 
 // =================================================================================
 // SECTION: CONSTANTS & UUIDS
@@ -387,9 +389,32 @@ void connectWiFiOrProvision() {
 
 void handleNetworkFallback() {
   if (g_triggerProvisioning) {
+    
+    // If WiFi fails, we treat it like a Keep-Alive failure.
+    // 1. Abort the session (Records the stats, applies penalty, saves to NVS).
+    // 2. Unlock hardware (User is free).
+    // 3. Enter Provisioning (Device is effectively disabled until fixed).    
+    if (g_currentState == LOCKED || g_currentState == ARMED || g_currentState == TESTING) {
+      logKeyValue("Network", "Critical: WiFi Stack Failure during session.");
+      
+      processLogQueue();
+
+      // Trigger the logic abort (State -> ABORTED/COMPLETED)
+      // This ensures the failure is recorded in stats and penalties are armed.
+      abortSession("WiFi Connection Lost");
+      
+      // Force Hardware Unlock immediately (Safety)
+      // We call this explicitly because the blocking call below prevents 
+      // the main loop's 'enforceHardwareState' from running.
+      sendChannelOffAll();
+    }
+
+    // 3. Clear flag and enter blocking BLE mode
     g_triggerProvisioning = false;
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
+    
+    // This function blocks forever until credentials are provided + Reboot.
     startBLEProvisioning();
   }
 }
