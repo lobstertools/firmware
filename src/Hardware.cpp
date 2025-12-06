@@ -39,8 +39,6 @@ esp_timer_handle_t failsafeTimer = NULL;
  */
 void IRAM_ATTR failsafe_timer_callback(void *arg) {
 
-  Serial.println("!!CRITICAL!! Death Grip Timer Callback. Unlocking all channels.");
-
   for (int i = 0; i < MAX_CHANNELS; i++) {
     digitalWrite(HARDWARE_PINS[i], LOW);
   }
