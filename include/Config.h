@@ -156,7 +156,7 @@ static const SystemDefaults DEFAULT_SYSTEM_DEFS = {
 
 static const SessionLimits DEFAULT_SESSION_LIMITS = {
     10,   // minLockDuration
-    3600, // maxLockDuration
+    240,  // maxLockDuration
     10,   // minRewardPenaltyDuration
     3600, // maxRewardPenaltyDuration
     10,   // minPaybackTime
