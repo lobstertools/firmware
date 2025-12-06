@@ -18,11 +18,11 @@
 #include <esp_task_wdt.h>
 
 #include "Globals.h"
+#include "Hardware.h"
 #include "Logger.h"
 #include "Network.h"
-#include "Utils.h"
 #include "Session.h"
-#include "Hardware.h"
+#include "Utils.h"
 
 // =================================================================================
 // SECTION: CONSTANTS & UUIDS
@@ -385,10 +385,10 @@ void connectWiFiOrProvision() {
     }
 
     if (g_currentState == LOCKED || g_currentState == ARMED || g_currentState == TESTING) {
-      // Just return. The main loop will run, buttons will work, 
-      // and the "Network Fallback" in loop() will catch it later 
+      // Just return. The main loop will run, buttons will work,
+      // and the "Network Fallback" in loop() will catch it later
       // (triggering the Runtime Abort logic you already wrote).
-      return; 
+      return;
       logKeyValue("Network", "Startup WiFi Failed. Skipping BLE to preserve Session Safety.");
       g_triggerProvisioning = true;
       return;
@@ -403,22 +403,22 @@ void connectWiFiOrProvision() {
 
 void handleNetworkFallback() {
   if (g_triggerProvisioning) {
-    
+
     // If WiFi fails, we treat it like a Keep-Alive failure.
     // 1. Abort the session (Records the stats, applies penalty, saves to NVS).
     // 2. Unlock hardware (User is free).
-    // 3. Enter Provisioning (Device is effectively disabled until fixed).    
+    // 3. Enter Provisioning (Device is effectively disabled until fixed).
     if (g_currentState == LOCKED || g_currentState == ARMED || g_currentState == TESTING) {
       logKeyValue("Network", "Critical: WiFi Stack Failure during session.");
-      
+
       processLogQueue();
 
       // Trigger the logic abort (State -> ABORTED/COMPLETED)
       // This ensures the failure is recorded in stats and penalties are armed.
       abortSession("WiFi Connection Lost");
-      
+
       // Force Hardware Unlock immediately (Safety)
-      // We call this explicitly because the blocking call below prevents 
+      // We call this explicitly because the blocking call below prevents
       // the main loop's 'enforceHardwareState' from running.
       sendChannelOffAll();
     }
@@ -427,7 +427,7 @@ void handleNetworkFallback() {
     g_triggerProvisioning = false;
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
-    
+
     // This function blocks forever until credentials are provided + Reboot.
     startBLEProvisioning();
   }

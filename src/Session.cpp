@@ -164,22 +164,20 @@ int startSession(unsigned long duration, unsigned long penalty, TriggerStrategy 
     logKeyValue("Session", "Applying pending payback time to this session.");
   }
 
-  unsigned long safetyLimit = g_systemDefaults.failsafeMaxLock - 300; 
-  
+  unsigned long safetyLimit = g_systemDefaults.failsafeMaxLock - 300;
+
   if (duration + paybackInSeconds > safetyLimit) {
-      if (duration >= safetyLimit) {
-          char errorLogBuf[128];
-          snprintf(errorLogBuf, sizeof(errorLogBuf), 
-                   "Start Failed: Duration %lu s exceeds safety limit (%lu s)", 
-                   duration, safetyLimit);
-          logKeyValue("Session", errorLogBuf);
-          return 400; // Error
-      }
-      // Cap the payback applied to this specific session.
-      // The user will work off as much debt as safe, remaining debt stays in stats.
-      paybackInSeconds = safetyLimit - duration;
-      
-      logKeyValue("Session", "Payback clamped to prevent Failsafe trigger.");
+    if (duration >= safetyLimit) {
+      char errorLogBuf[128];
+      snprintf(errorLogBuf, sizeof(errorLogBuf), "Start Failed: Duration %lu s exceeds safety limit (%lu s)", duration, safetyLimit);
+      logKeyValue("Session", errorLogBuf);
+      return 400; // Error
+    }
+    // Cap the payback applied to this specific session.
+    // The user will work off as much debt as safe, remaining debt stays in stats.
+    paybackInSeconds = safetyLimit - duration;
+
+    logKeyValue("Session", "Payback clamped to prevent Failsafe trigger.");
   }
 
   // 4. Populate Session Timers (The authoritative counters)
