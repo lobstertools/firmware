@@ -39,10 +39,11 @@ esp_timer_handle_t failsafeTimer = NULL;
  */
 void IRAM_ATTR failsafe_timer_callback(void *arg) {
 
-  logKeyValue("System", "!!CRITICAL!! Death Grip Timer Callback. Unlocking all channels.");
-  sendChannelOffAll();
+  Serial.println("!!CRITICAL!! Death Grip Timer Callback. Unlocking all channels.");
 
-  processLogQueue();
+  for (int i = 0; i < MAX_CHANNELS; i++) {
+    digitalWrite(HARDWARE_PINS[i], LOW);
+  }
 
   // While technically not 100% ISR-safe (can panic), a panic reset
   // is exactly what we want for a "Failsafe" condition.
