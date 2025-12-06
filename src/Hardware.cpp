@@ -1,7 +1,7 @@
 /*
  * =================================================================================
  * Project:   Lobster Lock - Self-Bondage Session Manager
- * File:      Hardware.h / Hardware.cpp
+ * File:      Hardware.cpp
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -93,17 +93,17 @@ bool enforceHardwareState() {
   // ------------------------------------------------------------
   // Track state history to update LEDs immediately upon transition,
   // even if the physical pin mask (relays) does not change.
-  static SessionState lastEnforcedState = (SessionState)-1; // Initialize to invalid to force first update
+  static DeviceState lastEnforcedState = (DeviceState)-1; // Initialize to invalid to force first update
 
-  if (currentState != lastEnforcedState) {
-    setLedPattern(currentState);
-    lastEnforcedState = currentState;
+  if (g_currentState != lastEnforcedState) {
+    setLedPattern();
+    lastEnforcedState = g_currentState;
   }
 
   // ------------------------------------------------------------
   // 1. SAFETY: Detect Memory Corruption
   // ------------------------------------------------------------
-  if (currentState > TESTING) {
+  if (g_currentState > TESTING) {
     static unsigned long lastPanicLog = 0;
     if (millis() - lastPanicLog > 1000) {
       logKeyValue("System", "CRITICAL: Invalid State Enum! Failsafe Triggered.");
@@ -127,15 +127,16 @@ bool enforceHardwareState() {
     bool shouldBeHigh = false;
 
     if (isEnabled) {
-      switch (currentState) {
+      switch (g_currentState) {
       case LOCKED:
       case TESTING:
         shouldBeHigh = true;
         break;
 
       case ARMED:
-        // In countdown, pin is high only if delay has elapsed
-        if (currentStrategy == STRAT_AUTO_COUNTDOWN && channelDelaysRemaining[i] == 0) {
+        // In countdown, pin is high only if delay has elapsed.
+        // Check Active Config for strategy and Session Timers for delays.
+        if (g_activeSessionConfig.triggerStrategy == STRAT_AUTO_COUNTDOWN && g_sessionTimers.channelDelays[i] == 0) {
           shouldBeHigh = true;
         }
         break;
@@ -274,13 +275,12 @@ void armFailsafeTimer() {
   if (failsafeTimer == NULL)
     return;
 
-  // Start one-shot timer. FAILSAFE_MAX_LOCK_SECONDS converted to microseconds.
-  // This is completely independent of the main FreeRTOS tasks.
-  uint64_t timeout_us = (uint64_t)g_systemConfig.failsafeMaxLockSeconds * 1000000ULL;
+  // Start one-shot timer. Converted to microseconds.
+  uint64_t timeout_us = (uint64_t)g_systemDefaults.failsafeMaxLock * 1000000ULL;
   esp_timer_start_once(failsafeTimer, timeout_us);
 
   char timeStr[64];
-  formatSeconds(g_systemConfig.failsafeMaxLockSeconds, timeStr, sizeof(timeStr));
+  formatSeconds(g_systemDefaults.failsafeMaxLock, timeStr, sizeof(timeStr));
 
   char logBuf[100];
   snprintf(logBuf, sizeof(logBuf), "Death Grip Timer ARMED: %s", timeStr);
@@ -349,15 +349,12 @@ void checkBootLoop() {
   bootPrefs.begin("boot", false);
   int crashes = bootPrefs.getInt("crashes", 0);
 
-  // Use provisioned threshold
-  if (crashes >= g_systemConfig.bootLoopThreshold) {
+  // Use system default threshold
+  if (crashes >= g_systemDefaults.bootLoopThreshold) {
     Serial.println("CRITICAL: Boot Loop Detected! Entering Safe Mode.");
 
     // Safe Mode: Delay startup, disarm everything.
-    // This gives the power rail time to stabilize or user time to factory
-    // reset.
-    // (Note: Channels are initialized in setup before this)
-
+    // This gives the power rail time to stabilize or user time to factory reset.
     delay(5000);
     sendChannelOffAll();
 
@@ -374,7 +371,8 @@ void checkBootLoop() {
 }
 
 void markBootStability() {
-  if (!g_bootMarkedStable && (millis() - g_bootStartTime > g_systemConfig.stableBootTimeMs)) {
+  // Use system default for stable time
+  if (!g_bootMarkedStable && (millis() - g_bootStartTime > g_systemDefaults.stableBootTime)) {
     g_bootMarkedStable = true;
     bootPrefs.begin("boot", false);
     bootPrefs.putInt("crashes", 0);
@@ -403,7 +401,7 @@ void checkHeapHealth() {
 }
 
 /**
- * Monitor stack usage and internal tempeature
+ * Monitor stack usage and internal temperature
  * and emergency stop if overflow is imminent or overheating.
  */
 void checkSystemHealth() {
@@ -440,8 +438,6 @@ void checkSystemHealth() {
 
 /**
  * Executes non-blocking health checks every 60 seconds.
- * Monitors Heap fragmentation, Stack watermarks, and Internal Temperature.
- * If critical thresholds are breached, these sub-routines trigger emergency stops.
  */
 void performPeriodicHealthChecks() {
   if (millis() - g_lastHealthCheck > 60000) {
@@ -467,14 +463,13 @@ void updateWatchdogTimeout(uint32_t seconds) {
 
 /**
  * Sets the JLed pattern based on the current session state.
- * This is called every time the state changes.
  */
-void setLedPattern(SessionState state) {
+void setLedPattern() {
   char logBuf[50];
-  snprintf(logBuf, sizeof(logBuf), "Setting LED pattern for: %s", stateToString(state));
+  snprintf(logBuf, sizeof(logBuf), "Setting LED pattern for: %s", stateToString(g_currentState));
   logKeyValue("System", logBuf);
 
-  switch (state) {
+  switch (g_currentState) {
   case VALIDATING:
     // Triple Flash Heartbeat - "System Initializing / Busy"
     statusLed.Blink(100, 100).Repeat(3).DelayAfter(1000).Forever();

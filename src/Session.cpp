@@ -1,7 +1,7 @@
 /*
  * =================================================================================
  * Project:   Lobster Lock - Self-Bondage Session Manager
- * File:      Session.h / Session.cpp
+ * File:      Session.cpp
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -19,13 +19,12 @@
 #include "Utils.h"
 
 // =================================================================================
-// SECTION: LIFECYCLE, RECOVERY & UI WATCHDOG
+// SECTION: LIFECYCLE and RECOVERY 
 // =================================================================================
 
-//
 void handleRebootState() {
 
-  switch (currentState) {
+  switch (g_currentState) {
   case LOCKED:
   case ARMED:
   case TESTING:
@@ -38,20 +37,19 @@ void handleRebootState() {
     // Session was finished. Reset, but ensure we validate hardware before allowing new lock.
     logKeyValue("Session", "Loaded COMPLETED state. Resetting to VALIDATING.");
     resetToReady(true);
-    currentState = VALIDATING;
+    g_currentState = VALIDATING;
     break;
 
   case READY:
     // If we load READY, we must assume hardware needs to be re-verified.
     logKeyValue("Session", "Loaded READY state. Forcing hardware validation.");
-    currentState = VALIDATING; // Force Validating
+    g_currentState = VALIDATING; // Force Validating
     break;
 
   case ABORTED:
   default:
     // ABORTED is the only state safe to resume immediately (you are in the penalty box).
     logKeyValue("Session", "Resuming in-progress state.");
-    startTimersForState(currentState); // Resume timers
     break;
   }
 }
@@ -65,36 +63,36 @@ void resetToReady(bool generateNewCode) {
   snprintf(logBuf, sizeof(logBuf), "%sREADY", LOG_PREFIX_STATE);
   logKeyValue("Session", logBuf);
 
-  if (currentState == LOCKED)
-    disarmFailsafeTimer();
+  g_currentState = READY;
+  
+  // Timers are configured based on the new READY state (Disarms everything)
+  setTimersForCurrentState();
 
-  currentState = READY;
-  startTimersForState(READY);
+  // Clear all timers using the new structure
+  g_sessionTimers.lockDuration = 0;
+  g_sessionTimers.penaltyDuration = 0;
+  g_sessionTimers.lockRemaining = 0;
+  g_sessionTimers.penaltyRemaining = 0;
+  g_sessionTimers.testRemaining = 0;
+  g_sessionTimers.triggerTimeout = 0;
 
-  // Clear all timers and configs
-  lockSecondsRemaining = 0;
-  penaltySecondsRemaining = 0;
-  testSecondsRemaining = 0;
-  triggerTimeoutRemaining = 0;
-  g_lastKeepAliveTime = 0;       // Disarm watchdog
-  g_currentKeepAliveStrikes = 0; // Reset strikes
-  lockSecondsConfig = 0;
-  hideTimer = false;
+  // Reset Active Config flags
+  g_activeSessionConfig.hideTimer = false;
 
-  for (int i = 0; i < MAX_CHANNELS; i++)
-    channelDelaysRemaining[i] = 0;
+  // Clear Active Channel Delays in Active Config AND Live Timers
+  for (int i = 0; i < MAX_CHANNELS; i++) {
+    g_activeSessionConfig.channelDelays[i] = 0;
+    g_sessionTimers.channelDelays[i] = 0;
+  }
 
   // Only generate new code if requested.
-  // If we abort a countdown, we generally want to keep the same code
-  // unless we specifically want to roll it.
   if (generateNewCode) {
     // Shift reward history
     for (int i = REWARD_HISTORY_SIZE - 1; i > 0; i--) {
       rewardHistory[i] = rewardHistory[i - 1];
     }
 
-    // Generate new code with collision detection against the history we just
-    // shifted
+    // Generate new code
     generateUniqueSessionCode(rewardHistory[0].code, rewardHistory[0].checksum);
 
     char codeSnippet[9];
@@ -105,8 +103,6 @@ void resetToReady(bool generateNewCode) {
     logKeyValue("Session", logBuf);
     snprintf(logBuf, sizeof(logBuf), " %-20s : %s...", "Code Snippet", codeSnippet);
     logKeyValue("Session", logBuf);
-    snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Checksum", rewardHistory[0].checksum);
-    logKeyValue("Session", logBuf);
   } else {
     logKeyValue("Session", "Preserving existing reward code.");
   }
@@ -114,107 +110,102 @@ void resetToReady(bool generateNewCode) {
   saveState(true); // Force save
 }
 
-/**
- * Arms the keep-alive watchdog for UI pings
- */
-void armKeepAliveWatchdog() {
-  g_lastKeepAliveTime = millis(); // Arm keep-alive watchdog
-  g_currentKeepAliveStrikes = 0;  // Reset strikes
-
-  logKeyValue("Session", "Keep-Alive Watchdog Armed");
-}
-
-/**
- * Disarms the keep-alive watchdog for UI pings
- */
-void disarmKeepAliveWatchdog() {
-  g_lastKeepAliveTime = 0;       // Diarm keep-alive watchdog
-  g_currentKeepAliveStrikes = 0; // Reset strikes
-
-  logKeyValue("Session", "Keep-Alive Watchdog Disarmed");
-}
-
 // =================================================================================
 // SECTION: SESSION INITIATION
 // =================================================================================
 
-// NOTE: Functions in this section assume the caller (Loop or API)
-// HAS ALREADY LOCKED THE MUTEX unless otherwise noted.
-
 /**
  * Validates configuration and starts a new session in ARMED state.
- * Returns HTTP-style error codes: 200 (OK), 409 (Not Ready), 400 (Invalid
- * Config).
+ * @param duration: The base lock time requested (Calculated by WebAPI)
+ * @param penalty: The penalty time (Provided via WebAPI from Global Config)
+ * @param strategy: Auto or Manual
+ * @param delays: Array of channel delays
+ * @param hide: Visibility flag
  */
 int startSession(unsigned long duration, unsigned long penalty, TriggerStrategy strategy, unsigned long *delays, bool hide) {
   // State check
-  if (currentState != READY) {
+  if (g_currentState != READY) {
     return 409;
   }
 
-  // Validate ranges against System Config
-  unsigned long minLockSec = g_systemConfig.minLockSeconds;
-  unsigned long maxLockSec = g_systemConfig.maxLockSeconds;
-  unsigned long minPenaltySec = g_systemConfig.minPenaltySeconds;
-  unsigned long maxPenaltySec = g_systemConfig.maxPenaltySeconds;
-
-  if (duration < minLockSec || duration > maxLockSec)
+  // 1. Validate ranges against SESSION LIMITS
+  if (duration < g_sessionLimits.minLockDuration || duration > g_sessionLimits.maxLockDuration)
     return 400;
 
   // Only enforce penalty range if Reward Code is enabled
-  if (enableRewardCode) {
-    if (penalty < minPenaltySec || penalty > maxPenaltySec)
+  if (g_deterrentConfig.enableRewardCode) {
+    if (penalty < g_sessionLimits.minRewardPenaltyDuration || penalty > g_sessionLimits.maxRewardPenaltyDuration)
       return 400;
   }
 
-  // Apply configuration
+  // 2. Populate Active Configuration (Intent & Logic)
+  // Note: Metadata (durationType, min, max) is handled by WebAPI. We just handle logic here.
   for (int i = 0; i < MAX_CHANNELS; i++)
-    channelDelaysRemaining[i] = delays[i];
+    g_activeSessionConfig.channelDelays[i] = delays[i];
 
-  hideTimer = hide;
-  currentStrategy = strategy;
+  g_activeSessionConfig.hideTimer = hide;
+  g_activeSessionConfig.triggerStrategy = strategy;
 
-  // Apply any pending payback time from previous sessions
-  unsigned long paybackInSeconds = paybackAccumulated;
+  // 3. Apply Payback Debt
+  unsigned long paybackInSeconds = g_sessionStats.paybackAccumulated;
   if (paybackInSeconds > 0) {
     logKeyValue("Session", "Applying pending payback time to this session.");
   }
 
-  // Save configs
-  lockSecondsConfig = duration + paybackInSeconds;
-  penaltySecondsConfig = penalty;
+  // 4. Populate Session Timers (The authoritative counters)
+  g_sessionTimers.lockDuration = duration + paybackInSeconds;
+  g_sessionTimers.penaltyDuration = penalty;
+
+  // Reset counters
+  g_sessionTimers.lockRemaining = 0; // Will be set on Lock transition
+  g_sessionTimers.penaltyRemaining = 0;
+
+  // Initialize the live countdown timers from the config
+  for (int i = 0; i < MAX_CHANNELS; i++) {
+    g_sessionTimers.channelDelays[i] = g_activeSessionConfig.channelDelays[i];
+  }
 
   // LOGGING VISUALS: Arming Block
   char logBuf[256];
   snprintf(logBuf, sizeof(logBuf), "%sARMED", LOG_PREFIX_STATE);
   logKeyValue("Session", logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), "Strategy: %s", (currentStrategy == STRAT_BUTTON_TRIGGER ? "Manual Button" : "Auto Countdown"));
+  snprintf(logBuf, sizeof(logBuf), "Strategy: %s",
+           (g_activeSessionConfig.triggerStrategy == STRAT_BUTTON_TRIGGER ? "Manual Button" : "Auto Countdown"));
   logKeyValue("Session", logBuf);
 
   char timeStr[64];
-  formatSeconds(duration, timeStr, sizeof(timeStr));
-  snprintf(logBuf, sizeof(logBuf), "Lock Time: %s", timeStr);
+  formatSeconds(g_sessionTimers.lockDuration, timeStr, sizeof(timeStr));
+  snprintf(logBuf, sizeof(logBuf), "Total Lock Time: %s", timeStr);
   logKeyValue("Session", logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), "Timer: %s", (hideTimer ? "Hidden" : "Visible"));
+  snprintf(logBuf, sizeof(logBuf), "Timer: %s", (g_activeSessionConfig.hideTimer ? "Hidden" : "Visible"));
   logKeyValue("Session", logBuf);
 
-  // Enter ARMED state
-  currentState = ARMED;
+  // --- NEW: Log Configured Delays ---
+  char delayLogBuf[128] = "Configured Delays: ";
+  for (int i = 0; i < MAX_CHANNELS; i++) {
+    char tmp[20];
+    snprintf(tmp, sizeof(tmp), "[%d]%lu ", i + 1, g_activeSessionConfig.channelDelays[i]);
+    strncat(delayLogBuf, tmp, sizeof(delayLogBuf) - strlen(delayLogBuf) - 1);
+  }
+  logKeyValue("Session", delayLogBuf);
+  // ----------------------------------
 
   // Setup based on strategy
-  if (currentStrategy == STRAT_BUTTON_TRIGGER) {
-    // Wait for Button: Set Timeout
-    triggerTimeoutRemaining = g_systemConfig.armedTimeoutSeconds;
+  if (g_activeSessionConfig.triggerStrategy == STRAT_BUTTON_TRIGGER) {
+    // Wait for Button: Set Timeout using SYSTEM DEFAULT
+    g_sessionTimers.triggerTimeout = g_systemDefaults.armedTimeoutSeconds;
     logKeyValue("Session", "Waiting for Manual Trigger.");
   } else {
     // Auto: Timers start ticking immediately in handleOneSecondTick
     logKeyValue("Session", "Auto Sequence Started.");
   }
 
-  startTimersForState(ARMED);
-  // NOTE: Watchdog is NOT armed here, only when LOCKED (or in TEST)
+  // Enter ARMED state
+  g_currentState = ARMED;
+
+  setTimersForCurrentState();
 
   saveState(true);
 
@@ -223,10 +214,9 @@ int startSession(unsigned long duration, unsigned long penalty, TriggerStrategy 
 
 /**
  * Starts the hardware test session.
- * Returns: 200 (OK), 409 (Not Ready).
  */
 int startTestSession() {
-  if (currentState != READY) {
+  if (g_currentState != READY) {
     return 409;
   }
 
@@ -234,10 +224,11 @@ int startTestSession() {
   snprintf(logBuf, sizeof(logBuf), "%sTESTING", LOG_PREFIX_STATE);
   logKeyValue("Session", logBuf);
 
-  currentState = TESTING;
-  testSecondsRemaining = g_systemConfig.testModeDurationSeconds;
-  startTimersForState(TESTING);
-  armKeepAliveWatchdog();
+  g_sessionTimers.testRemaining = g_systemDefaults.testModeDuration;
+
+  g_currentState = TESTING;
+
+  setTimersForCurrentState(); // Handles Watchdog arming
 
   saveState(true);
 
@@ -252,11 +243,11 @@ int startTestSession() {
  * Logic to trigger the lock from a manual source (Button).
  */
 void triggerLock(const char *source) {
-  if (currentState == ARMED) {
-    if (currentStrategy == STRAT_BUTTON_TRIGGER) {
+  if (g_currentState == ARMED) {
+    if (g_activeSessionConfig.triggerStrategy == STRAT_BUTTON_TRIGGER) {
       enterLockedState(source);
     }
-  } else if (currentState == TESTING) {
+  } else if (g_currentState == TESTING) {
     logKeyValue("Session", "Trigger ignored: Currently in Hardware Test.");
   }
 }
@@ -269,17 +260,16 @@ void enterLockedState(const char *source) {
   char logBuf[100];
   snprintf(logBuf, sizeof(logBuf), "%sLOCKED", LOG_PREFIX_STATE);
   logKeyValue("Session", logBuf);
-  snprintf(logBuf, sizeof(logBuf), " Source: %s", source);
+  snprintf(logBuf, sizeof(logBuf), "Source: %s", source);
   logKeyValue("Session", logBuf);
 
-  currentState = LOCKED;
+  g_currentState = LOCKED;
+  g_sessionTimers.lockRemaining = g_sessionTimers.lockDuration;
 
-  lockSecondsRemaining = lockSecondsConfig;
-  startTimersForState(LOCKED);
-  armFailsafeTimer();     // DEATH GRIP
-  armKeepAliveWatchdog(); // UI Ping
+  // This will Arms Failsafe & KeepAlive because state is LOCKED
+  setTimersForCurrentState();
 
-  saveState(true); // Force save
+  saveState(true);
 }
 
 /**
@@ -287,11 +277,13 @@ void enterLockedState(const char *source) {
  */
 void stopTestSession() {
   logKeyValue("Session", "Stopping test session.");
-  currentState = READY;
-  disarmKeepAliveWatchdog();
-  startTimersForState(READY); // Set WDT
-  testSecondsRemaining = 0;
-  saveState(true); // Force save
+  g_currentState = READY;
+  
+  g_sessionTimers.testRemaining = 0;
+  
+  setTimersForCurrentState(); // Disarms watchdogs
+
+  saveState(true);
 }
 
 // =================================================================================
@@ -300,48 +292,44 @@ void stopTestSession() {
 
 /**
  * Called when a session completes (either Lock timer OR Penalty timer ends).
- * If coming from READY: Move the device into the COMPLETED state for a reboot
- * If coming from LOCKED: Increments success stats, clears payback.
- * If coming from ABORTED: Transitions to COMPLETED but retains debt/stats.
  */
 void completeSession() {
-  SessionState previousState = currentState;
+  DeviceState previousState = g_currentState;
 
   // LOGGING VISUALS: Complete Block
   char logBuf[100];
   snprintf(logBuf, sizeof(logBuf), "%sCOMPLETED", LOG_PREFIX_STATE);
   logKeyValue("Session", logBuf);
 
-  if (previousState == LOCKED) {
-    disarmFailsafeTimer();
-    disarmKeepAliveWatchdog();
-  }
-
-  currentState = COMPLETED;
-  startTimersForState(COMPLETED); // Reset WDT
+  g_currentState = COMPLETED;
+  
+  // Update timers based on COMPLETED state (Disarms Failsafe/Watchdogs)
+  setTimersForCurrentState();
 
   if (previousState == LOCKED) {
     // --- SUCCESS PATH ---
     // On successful completion of a LOCK, we clear debt and reward streaks.
-    if (paybackAccumulated > 0) {
+    if (g_sessionStats.paybackAccumulated > 0) {
       logKeyValue("Session", "Valid session complete. Clearing accumulated payback debt.");
-      paybackAccumulated = 0;
+      g_sessionStats.paybackAccumulated = 0;
     }
 
-    completedSessions++;
-    if (enableStreaks) {
-      sessionStreakCount++;
+    g_sessionStats.completed++;
+
+    // Check Deterrent Config
+    if (g_deterrentConfig.enableStreaks) {
+      g_sessionStats.streaks++;
     }
 
     // Log the new winning stats in aligned block
-    snprintf(logBuf, sizeof(logBuf), " %-20s : %u", "New Streak", sessionStreakCount);
+    snprintf(logBuf, sizeof(logBuf), " %-20s : %u", "New Streak", g_sessionStats.streaks);
     logKeyValue("Session", logBuf);
-    snprintf(logBuf, sizeof(logBuf), " %-20s : %u", "Total Completed", completedSessions);
+    snprintf(logBuf, sizeof(logBuf), " %-20s : %u", "Total Completed", g_sessionStats.completed);
     logKeyValue("Session", logBuf);
   } else if (previousState == ABORTED) {
     // --- PENALTY SERVED PATH ---
     // The user finished the penalty box.
-    if (enablePaybackTime) {
+    if (g_deterrentConfig.enablePaybackTime) {
       logKeyValue("Session", "Penalty time served. Payback debt retained.");
     } else {
       logKeyValue("Session", "Penalty time served.");
@@ -349,65 +337,68 @@ void completeSession() {
   }
 
   // Clear all timers
-  lockSecondsRemaining = 0;
-  penaltySecondsRemaining = 0;
-  testSecondsRemaining = 0;
-  triggerTimeoutRemaining = 0;
+  g_sessionTimers.lockRemaining = 0;
+  g_sessionTimers.penaltyRemaining = 0;
+  g_sessionTimers.testRemaining = 0;
+  g_sessionTimers.triggerTimeout = 0;
 
-  for (int i = 0; i < MAX_CHANNELS; i++)
-    channelDelaysRemaining[i] = 0;
+  // Clear delays in config AND timers
+  for (int i = 0; i < MAX_CHANNELS; i++) {
+    g_activeSessionConfig.channelDelays[i] = 0;
+    g_sessionTimers.channelDelays[i] = 0;
+  }
 
-  saveState(true); // Force save
+  saveState(true);
 
-  // --- SECTION: STATISTICS ---
   char tBuf1[50];
-  snprintf(logBuf, sizeof(logBuf), "Streak Count: %u", sessionStreakCount);
-  logKeyValue("Session", logBuf);
-  snprintf(logBuf, sizeof(logBuf), "Completed Sessions: %u", completedSessions);
-  logKeyValue("Session", logBuf);
-  snprintf(logBuf, sizeof(logBuf), "Aborted Sessions: %u", abortedSessions);
-  logKeyValue("Session", logBuf);
 
-  formatSeconds(paybackAccumulated, tBuf1, sizeof(tBuf1));
+  if (g_deterrentConfig.enableStreaks) {
+    snprintf(logBuf, sizeof(logBuf), "Streak Count: %u", g_sessionStats.streaks);
+    logKeyValue("Session", logBuf);
+    snprintf(logBuf, sizeof(logBuf), "Completed Sessions: %u", g_sessionStats.completed);
+    logKeyValue("Session", logBuf);
+    snprintf(logBuf, sizeof(logBuf), "Aborted Sessions: %u", g_sessionStats.aborted);
+    logKeyValue("Session", logBuf);
+  }
+
+  formatSeconds(g_sessionStats.paybackAccumulated, tBuf1, sizeof(tBuf1));
   snprintf(logBuf, sizeof(logBuf), "Accumulated Debt: %s", tBuf1);
   logKeyValue("Session", logBuf);
 
-  formatSeconds(totalLockedSessionSeconds, tBuf1, sizeof(tBuf1));
+  formatSeconds(g_sessionStats.totalLockedTime, tBuf1, sizeof(tBuf1));
   snprintf(logBuf, sizeof(logBuf), "Lifetime Locked: %s", tBuf1);
   logKeyValue("Session", logBuf);
 }
 
 /**
  * Aborts an active session (LOCKED, ARMED, or TESTING).
- * Implements payback logic, resets streak, and starts the reward penalty timer.
- * If Reward Code is disabled, skips penalty and goes to COMPLETED.
  */
 void abortSession(const char *source) {
   char logBuf[100];
 
-  if (currentState == LOCKED) {
-    disarmFailsafeTimer();
-    disarmKeepAliveWatchdog();
-
+  if (g_currentState == LOCKED) {
+    
     // LOGGING VISUALS: Abort Block
     snprintf(logBuf, sizeof(logBuf), "%sABORTED", LOG_PREFIX_STATE);
     logKeyValue("Session", logBuf);
-    snprintf(logBuf, sizeof(logBuf), " Source: %s", source);
+    snprintf(logBuf, sizeof(logBuf), "Source: %s", source);
     logKeyValue("Session", logBuf);
 
-    // Implement Abort Logic:
-    sessionStreakCount = 0; // 1. Reset streak
-    abortedSessions++;      // 2. Increment counter
+    if (g_deterrentConfig.enableStreaks) {
+      g_sessionStats.streaks = 0; // 1. Reset streak
+      g_sessionStats.aborted++;   // 2. Increment counter
+    }
 
-    if (enablePaybackTime) { // 3. Add payback
-      paybackAccumulated += paybackTimeSeconds;
+    // 3. Add Payback (if enabled)
+    if (g_deterrentConfig.enablePaybackTime) {
+      g_sessionStats.paybackAccumulated += g_deterrentConfig.paybackTime;
 
       // Use helper to format payback time
       char timeStr[64];
-      formatSeconds(paybackAccumulated, timeStr, sizeof(timeStr));
+      formatSeconds(g_sessionStats.paybackAccumulated, timeStr, sizeof(timeStr));
 
       // Log formatted payback stats
-      snprintf(logBuf, sizeof(logBuf), " %-20s : +%u s", "Payback Added", paybackTimeSeconds);
+      snprintf(logBuf, sizeof(logBuf), " %-20s : +%u s", "Payback Added", g_deterrentConfig.paybackTime);
       logKeyValue("Session", logBuf);
       snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Total Debt", timeStr);
       logKeyValue("Session", logBuf);
@@ -416,46 +407,44 @@ void abortSession(const char *source) {
     }
 
     // 4. Handle Reward Code / Penalty
-    if (enableRewardCode) {
-      // Standard behavior: Penalty Box
-      currentState = ABORTED;
-
-      lockSecondsRemaining = 0;
-      penaltySecondsRemaining = penaltySecondsConfig;
-      startTimersForState(ABORTED);
+    if (g_deterrentConfig.enableRewardCode) {
+      // Penalty Box
+      g_currentState = ABORTED;
+      g_sessionTimers.lockRemaining = 0;
+      g_sessionTimers.penaltyRemaining = g_sessionTimers.penaltyDuration; // Use stored penalty duration
+      
+      // Update Timers (Disarm Failsafe/KA, set Watchdog to Critical for Penalty)
+      setTimersForCurrentState();
     } else {
-      // New behavior: No Reward Code = No Penalty Box
+      // No Reward Code = No Penalty Box
       logKeyValue("Session", "Reward Code disabled. Skipping penalty. Transitioning to COMPLETED.");
 
-      currentState = COMPLETED;
+      g_currentState = COMPLETED;
+      g_sessionTimers.lockRemaining = 0;
+      g_sessionTimers.penaltyRemaining = 0;
 
-      lockSecondsRemaining = 0;
-      penaltySecondsRemaining = 0;
-      startTimersForState(COMPLETED);
+      // Update Timers (Disarm everything)
+      setTimersForCurrentState();
     }
 
-    saveState(true); // Force save
+    saveState(true);
 
-  } else if (currentState == ARMED) {
-    // ARMED is a "Safety Off" state, but not yet "Point of No Return".
-    // Aborting here returns to READY without penalty.
+  } else if (g_currentState == ARMED) {
     snprintf(logBuf, sizeof(logBuf), "%s: Aborting session (ARMED).", source);
     logKeyValue("Session", logBuf);
-    resetToReady(false); // Cancel arming (this disarms watchdog)
+    resetToReady(false);
 
-  } else if (currentState == TESTING) {
+  } else if (g_currentState == TESTING) {
     snprintf(logBuf, sizeof(logBuf), "%s: Aborting test session.", source);
     logKeyValue("Session", logBuf);
-    stopTestSession(); // Cancel test (this disarms watchdog)
+    stopTestSession();
 
-  } else if (currentState == READY) {
-    // External switch isn't connected, do nothing for now
-    currentState = VALIDATING;
+  } else if (g_currentState == READY) {
+    g_currentState = VALIDATING;
     extButtonSignalStartTime = 0;
 
-  } else if (currentState == VALIDATING) {
-    // External switch isn't connected, do nothing for now
-
+  } else if (g_currentState == VALIDATING) {
+    // Do nothing
   } else {
     snprintf(logBuf, sizeof(logBuf), "%s: Abort ignored, device not in abortable state.", source);
     logKeyValue("Session", logBuf);
@@ -468,58 +457,84 @@ void abortSession(const char *source) {
 // =================================================================================
 
 /**
- * Resets timers when entering a new state.
+ * Arms the keep-alive watchdog for UI pings
  */
-void startTimersForState(SessionState state) {
-  // Adjust Watchdog based on state
-  if (state == LOCKED || state == ABORTED || state == TESTING) {
-    updateWatchdogTimeout(CRITICAL_WDT_TIMEOUT); // Tight loop check
+void armKeepAliveWatchdog() {
+  g_lastKeepAliveTime = millis(); // Arm keep-alive watchdog
+  g_currentKeepAliveStrikes = 0;  // Reset strikes
+
+  logKeyValue("Session", "Keep-Alive UI Watchdog ARMED");
+}
+
+/**
+ * Disarms the keep-alive watchdog for UI pings
+ */
+void disarmKeepAliveWatchdog() {
+  g_lastKeepAliveTime = 0;       // Disarm keep-alive watchdog
+  g_currentKeepAliveStrikes = 0; // Reset strikes
+
+  logKeyValue("Session", "Keep-Alive UI Watchdog DISARMED");
+}
+
+/**
+ * Centralized logic to configure hardware timers and safety watchdogs 
+ * based on the active state.
+ */
+void setTimersForCurrentState() {
+  // 1. Hardware Task Watchdog (ESP WDT)
+  // CRITICAL states (Active Lock or Penalty) require aggressive watchdog
+  if (g_currentState == LOCKED || g_currentState == ABORTED || g_currentState == TESTING) {
+    updateWatchdogTimeout(CRITICAL_WDT_TIMEOUT);
   } else {
-    updateWatchdogTimeout(DEFAULT_WDT_TIMEOUT); // Loose loop check (network delays)
+    updateWatchdogTimeout(DEFAULT_WDT_TIMEOUT);
   }
 
-  if (state == ARMED) {
-    logKeyValue("Session", "Starting arming logic.");
-  } else if (state == LOCKED) {
-    logKeyValue("Session", "Starting lock logic.");
-  } else if (state == ABORTED) {
-    logKeyValue("Session", "Starting penalty logic.");
-  } else if (state == TESTING) {
-    logKeyValue("Session", "Starting test logic.");
+  // 2. Failsafe (Death Grip) Timer
+  // Only ARMED when physically locked.
+  if (g_currentState == LOCKED || g_currentState == TESTING) {
+    armFailsafeTimer();
+  } else {
+    disarmFailsafeTimer();
   }
-  g_currentKeepAliveStrikes = 0; // Reset strikes on state change
+
+  // 3. Keep-Alive (UI) Watchdog
+  // Only ARMED when session is active (LOCKED) or testing.
+  if (g_currentState == LOCKED || g_currentState == TESTING) {
+    armKeepAliveWatchdog();
+  } else {
+    disarmKeepAliveWatchdog();
+  }
+  
+  g_currentKeepAliveStrikes = 0; // Reset strike counter on any state change
 }
 
 /**
  * Helper to check the Keep-Alive Watchdog.
  * Returns true if the session was aborted.
  */
-bool checkSessionKeepAliveWatchdog() {
-  // Check if watchdog is armed
+bool checkKeepAliveWatchdog() {
   if (g_lastKeepAliveTime == 0)
     return false;
 
   unsigned long elapsed = millis() - g_lastKeepAliveTime;
 
-  // Integer division finds how many 10s intervals have passed
-  // Uses Configured Interval
-  int calculatedStrikes = elapsed / g_systemConfig.keepAliveIntervalMs;
+  // Use SYSTEM DEFAULT for interval
+  int calculatedStrikes = elapsed / g_systemDefaults.keepAliveInterval;
 
-  // Only log/act if the strike count has increased
   if (calculatedStrikes > g_currentKeepAliveStrikes) {
     g_currentKeepAliveStrikes = calculatedStrikes;
     char logBuf[100];
 
-    // Uses Configured Strike Count
-    if (g_currentKeepAliveStrikes >= g_systemConfig.keepAliveMaxStrikes) {
-      snprintf(logBuf, sizeof(logBuf), "Keep Alive Watchdog: Strike %d/%d! ABORTING.", g_currentKeepAliveStrikes,
-               g_systemConfig.keepAliveMaxStrikes);
+    // Use SYSTEM DEFAULT for tolerance
+    if (g_currentKeepAliveStrikes >= g_systemDefaults.keepAliveMaxStrikes) {
+      snprintf(logBuf, sizeof(logBuf), "Keep-Alive UI Watchdog: Strike %d/%d! ABORTING.", g_currentKeepAliveStrikes,
+               g_systemDefaults.keepAliveMaxStrikes);
       logKeyValue("Session", logBuf);
-      abortSession("Watchdog Strikeout");
-      return true; // Signal that we aborted
+      abortSession("UI Watchdog Strikeout");
+      return true;
     } else {
-      snprintf(logBuf, sizeof(logBuf), "Keep-Alive Watchdog Missed check. Strike %d/%d", g_currentKeepAliveStrikes,
-               g_systemConfig.keepAliveMaxStrikes);
+      snprintf(logBuf, sizeof(logBuf), "Keep-Alive UI Watchdog Missed check. Strike %d/%d", g_currentKeepAliveStrikes,
+               g_systemDefaults.keepAliveMaxStrikes);
       logKeyValue("Session", logBuf);
     }
   }
@@ -528,38 +543,38 @@ bool checkSessionKeepAliveWatchdog() {
 
 /**
  * This is the main state-machine handler, called 1x/sec from loop().
- * It safely updates all timers and handles state transitions.
  */
 void handleOneSecondTick() {
-  switch (currentState) {
+  switch (g_currentState) {
   case ARMED: {
-    if (currentStrategy == STRAT_AUTO_COUNTDOWN) {
+    if (g_activeSessionConfig.triggerStrategy == STRAT_AUTO_COUNTDOWN) {
       // STRATEGY: Auto Countdown
-      // Decrement active channels immediately
       bool allDelaysZero = true;
+      char debugDelayStr[64] = "Delays: ";
 
-      // Decrement all active channel delays
       for (size_t i = 0; i < MAX_CHANNELS; i++) {
-        // Check if enabled in mask
-        if ((g_enabledChannelsMask >> i) & 1) {
-          if (channelDelaysRemaining[i] > 0) {
-            allDelaysZero = false;
-            channelDelaysRemaining[i]--;
-          }
+        // Log delay status (Check SESSION TIMERS)
+        char tmp[16];
+        snprintf(tmp, sizeof(tmp), "[%d]%lu ", (int)i+1, g_sessionTimers.channelDelays[i]);
+        strncat(debugDelayStr, tmp, sizeof(debugDelayStr) - strlen(debugDelayStr) - 1);
+
+        // If a delay is configured in the session, we respect it regardless
+        // of whether the physical channel is currently enabled.
+        if (g_sessionTimers.channelDelays[i] > 0) {
+          allDelaysZero = false;
+          g_sessionTimers.channelDelays[i]--;
         }
       }
 
-      // If all delays are done, transition to LOCKED
+      logKeyValue("Session", debugDelayStr);
+
       if (allDelaysZero) {
-        // Using shared logic function to transition
         enterLockedState("Auto Sequence");
       }
-    } else if (currentStrategy == STRAT_BUTTON_TRIGGER) {
+    } else if (g_activeSessionConfig.triggerStrategy == STRAT_BUTTON_TRIGGER) {
       // STRATEGY: Wait for Button
-      // Channels do NOT tick down here. We just wait for the button event.
-      // Check for timeout.
-      if (triggerTimeoutRemaining > 0) {
-        triggerTimeoutRemaining--;
+      if (g_sessionTimers.triggerTimeout > 0) {
+        g_sessionTimers.triggerTimeout--;
       } else {
         logKeyValue("Session", "Armed Timeout: Button not pressed in time. Aborting.");
         abortSession("Arm Timeout");
@@ -568,41 +583,38 @@ void handleOneSecondTick() {
     break;
   }
   case LOCKED:
-    // --- Keep-Alive Session Watchdog Check ---
-    if (checkSessionKeepAliveWatchdog()) {
-      return; // Aborted inside helper
+    if (checkKeepAliveWatchdog()) {
+      return;
     }
-    // Decrement lock timer
-    if (lockSecondsRemaining > 0) {
-      // Increment total locked time only when session is active
-      totalLockedSessionSeconds++;
 
-      if (--lockSecondsRemaining == 0) {
-        completeSession(); // Timer finished
+    // Decrement lock timer
+    if (g_sessionTimers.lockRemaining > 0) {
+      // Increment total locked time in STATS
+      g_sessionStats.totalLockedTime++;
+
+      if (--g_sessionTimers.lockRemaining == 0) {
+        completeSession();
       }
     }
     break;
   case ABORTED:
     // Decrement penalty timer
-    if (penaltySecondsRemaining > 0 && --penaltySecondsRemaining == 0) {
-      completeSession(); // Timer finished
+    if (g_sessionTimers.penaltyRemaining > 0 && --g_sessionTimers.penaltyRemaining == 0) {
+      completeSession();
     }
     break;
   case TESTING:
-    // --- Keep-Alive Watchdog Check ---
-    if (checkSessionKeepAliveWatchdog()) {
-      return; // Aborted inside helper
+    if (checkKeepAliveWatchdog()) {
+      return;
     }
-    // Decrement test timer
-    if (testSecondsRemaining > 0 && --testSecondsRemaining == 0) {
+    if (g_sessionTimers.testRemaining > 0 && --g_sessionTimers.testRemaining == 0) {
       logKeyValue("Session", "Test session done.");
-      stopTestSession(); // Timer finished
+      stopTestSession();
     }
     break;
   case READY:
   case COMPLETED:
   default:
-    // Do nothing
     break;
   }
 }

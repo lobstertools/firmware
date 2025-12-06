@@ -54,10 +54,13 @@ static const int HARDWARE_PINS[4] = {16, 17, 26, 27};
 // --- Enums & Structs ---
 
 // Main state machine enum.
-enum SessionState : uint8_t { VALIDATING, READY, ARMED, LOCKED, ABORTED, COMPLETED, TESTING };
+enum DeviceState : uint8_t { VALIDATING, READY, ARMED, LOCKED, ABORTED, COMPLETED, TESTING };
 
 // Trigger Strategy (How we move from ARMED -> LOCKED)
 enum TriggerStrategy : uint8_t { STRAT_AUTO_COUNTDOWN, STRAT_BUTTON_TRIGGER };
+
+// Duration Type Enum (Intent)
+enum DurationType : uint8_t { DUR_FIXED, DUR_RANDOM, DUR_RANGE };
 
 // Struct for storing reward code history.
 struct Reward {
@@ -65,72 +68,126 @@ struct Reward {
   char checksum[REWARD_CHECKSUM_LENGTH + 1];
 };
 
-// --- SYTEM PREFERENCES ---
-struct SystemConfig {
-  uint32_t longPressSeconds;
-  uint32_t extButtonDetectionSeconds;
-  uint32_t minLockSeconds;
-  uint32_t maxLockSeconds;
-  uint32_t minPenaltySeconds;
-  uint32_t maxPenaltySeconds;
-  uint32_t minPaybackTimeSeconds;
-  uint32_t maxPaybackTimeSeconds;
-  uint32_t testModeDurationSeconds;
-  uint32_t failsafeMaxLockSeconds;
-  uint32_t keepAliveIntervalMs;
-  uint32_t keepAliveMaxStrikes;
-  uint32_t bootLoopThreshold;
-  uint32_t stableBootTimeMs;
-  uint32_t wifiMaxRetries;
-  uint32_t armedTimeoutSeconds;
+// Struct to hold the Active Session Configuration (Intent & Logic)
+struct ActiveSessionConfig {
+  DurationType durationType;
+  uint32_t durationMin;
+  uint32_t durationMax;
+
+  TriggerStrategy triggerStrategy;
+  uint32_t channelDelays[MAX_CHANNELS];
+  bool hideTimer;
+};
+
+// Struct to hold the Remaining Session Timers
+struct SessionTimers {
+  uint32_t lockDuration;
+  uint32_t penaltyDuration;
+  uint32_t lockRemaining;
+  uint32_t penaltyRemaining;
+  uint32_t testRemaining;
+  uint32_t triggerTimeout;
+
+  uint32_t channelDelays[MAX_CHANNELS];
+};
+
+// Struct to hold the accumulated session statistics
+struct SessionStats {
+  uint32_t streaks;
+  uint32_t completed;
+  uint32_t aborted;
+  uint32_t paybackAccumulated;
+  uint32_t totalLockedTime;
+};
+
+// Struct to hold the Deterrent Configuration during provisioning
+struct DeterrentConfig {
+  bool enableStreaks;
+  bool enableRewardCode;
+  uint32_t rewardPenalty;
+  bool enablePaybackTime;
+  uint32_t paybackTime;
+};
+
+// --- SYSTEM PREFERENCES  ---
+
+// 1. Hardware & System Behavior Defaults
+// These define how the physical device and firmware loops behave.
+struct SystemDefaults {
+  uint32_t longPressDuration;       // ms or seconds (depending on implementation)
+  uint32_t extButtonSignalDuration; // Debounce/Signal check duration
+  uint32_t testModeDuration;        // Duration of hardware test
+  uint32_t failsafeMaxLock;         // Absolute safety override
+  uint32_t keepAliveInterval;       // Watchdog ping interval
+  uint32_t keepAliveMaxStrikes;     // Watchdog tolerance
+  uint32_t bootLoopThreshold;       // Crash detection
+  uint32_t stableBootTime;          // Crash detection
+  uint32_t wifiMaxRetries;          // Network attempt limit
+  uint32_t armedTimeoutSeconds;     // Auto-disarm timeout
+};
+
+// 2. Session Constraints (Limits)
+// These define the allowable ranges for a user to configure a session.
+struct SessionLimits {
+  uint32_t minLockDuration;
+  uint32_t maxLockDuration;
+  uint32_t minRewardPenaltyDuration;
+  uint32_t maxRewardPenaltyDuration;
+  uint32_t minPaybackTime;
+  uint32_t maxPaybackTime;
 };
 
 #ifdef DEBUG_MODE
 // ============================================================================
 // DEBUG / DEVELOPMENT DEFAULTS
-// Optimized for rapid iteration and testing short lifecycles.
 // ============================================================================
-static const SystemConfig DEFAULT_SETTINGS = {
-    5,     // longPressSeconds
-    10,    // extButtonDetectionSeconds
-    10,    // minLockSeconds (10s minimum for quick lock cycles)
-    3600,  // maxLockSeconds (1 hour - allows testing longer ranges if needed)
-    10,    // minPenaltySeconds (10s penalty)
-    3600,  // maxPenaltySeconds
-    10,    // minPaybackTimeSeconds (10s minimum debt)
-    600,   // maxPaybackTimeSeconds (10 min cap)
-    240,   // testModeDurationSeconds (4m hardware test)
-    600,   // failsafeMaxLockSeconds (10 min failsafe for safety during debug)
-    10000, // keepAliveIntervalMs (UI ping)
+static const SystemDefaults DEFAULT_SYSTEM_DEFS = {
+    5,     // longPressDuration
+    10,    // extButtonSignalDuration
+    240,   // testModeDuration
+    600,   // failsafeMaxLock
+    10000, // keepAliveInterval
     4,     // keepAliveMaxStrikes
     5,     // bootLoopThreshold
-    30000, // stableBootTimeMs (30s to consider boot stable)
-    3,     // wifiMaxRetries (Fail faster)
-    300    // armedTimeoutSeconds (5 min idle timeout)
+    30000, // stableBootTime
+    3,     // wifiMaxRetries
+    300    // armedTimeoutSeconds
+};
+
+static const SessionLimits DEFAULT_SESSION_LIMITS = {
+    10,   // minLockDuration
+    3600, // maxLockDuration
+    10,   // minRewardPenaltyDuration
+    3600, // maxRewardPenaltyDuration
+    10,   // minPaybackTime
+    600   // maxPaybackTime
 };
 
 #else
 // ============================================================================
 // PRODUCTION / RELEASE DEFAULTS
 // ============================================================================
-static const SystemConfig DEFAULT_SETTINGS = {
-    5,      // longPressSeconds
-    10,     // extButtonDetectionSeconds
-    900,    // minLockSeconds (15 min)
-    10800,  // maxLockSeconds (180 min)
-    900,    // minPenaltySeconds (15 min)
-    10800,  // maxPenaltySeconds (180 min)
-    300,    // minPaybackTimeSeconds (5 min)
-    2700,   // maxPaybackTimeSeconds (45 min)
-    240,    // testModeDurationSeconds
-    14400,  // failsafeMaxLockSeconds (4 hours)
-    10000,  // keepAliveIntervalMs (UI ping)
+static const SystemDefaults DEFAULT_SYSTEM_DEFS = {
+    5,      // longPressDuration
+    10,     // extButtonSignalDuration
+    240,    // testModeDuration
+    14400,  // failsafeMaxLock
+    10000,  // keepAliveInterval
     4,      // keepAliveMaxStrikes
     5,      // bootLoopThreshold
-    120000, // stableBootTimeMs (2 Minutes)
+    120000, // stableBootTime
     5,      // wifiMaxRetries
-    1800    // armedTimeoutSeconds (30 Minutes)
+    1800    // armedTimeoutSeconds
 };
 
+static const SessionLimits DEFAULT_SESSION_LIMITS = {
+    900,   // minLockDuration
+    10800, // maxLockDuration
+    900,   // minRewardPenaltyDuration
+    10800, // maxRewardPenaltyDuration
+    300,   // minPaybackTime
+    2700   // maxPaybackTime
+};
 #endif
+
 #endif

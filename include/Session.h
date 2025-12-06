@@ -44,8 +44,9 @@ void completeSession();
 // =================================================================================
 // SECTION: PERIODIC LOGIC & WATCHDOGS
 // =================================================================================
-void startTimersForState(SessionState state);
 void handleOneSecondTick();
-bool checkSessionKeepAliveWatchdog();
+
+void setTimersForCurrentState();
+bool checkKeepAliveWatchdog();
 
 #endif

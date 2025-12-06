@@ -22,7 +22,7 @@
 uint16_t bytesToUint16(uint8_t *data);
 uint32_t bytesToUint32(uint8_t *data);
 void formatSeconds(unsigned long totalSeconds, char *buffer, size_t size);
-const char *stateToString(SessionState state);
+const char *stateToString(DeviceState state);
 
 // =================================================================================
 // SECTION: GENERATORS & HELPERS

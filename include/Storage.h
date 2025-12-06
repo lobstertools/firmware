@@ -16,10 +16,24 @@
 
 #include <Arduino.h>
 
-// =================================================================================
-// SECTION: NVS STATE PERSISTENCE
-// =================================================================================
+/**
+ * Loads the entire session state and config from NVS.
+ * @return true if valid data was found.
+ */
 bool loadState();
-void saveState(bool force = false);
+
+/**
+ * Saves the entire session state and config to NVS.
+ * @param force If false, might skip saving (reserved for future optimization).
+ */
+void saveState(bool force);
+
+// --- NEW: WiFi Credentials Management ---
+void loadWiFiCredentials();
+void saveWiFiCredentials(const char *ssid, const char *pass);
+
+// --- NEW: Provisioning (Hardware) Config Management ---
+void loadProvisioningConfig();
+void saveProvisioningConfig();
 
 #endif

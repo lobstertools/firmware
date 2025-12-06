@@ -18,6 +18,7 @@
 #include "Hardware.h"
 #include "Logger.h"
 #include "Session.h"
+#include "Storage.h"
 #include "Utils.h"
 #include "WebAPI.h"
 
@@ -52,13 +53,13 @@ void handleRoot(AsyncWebServerRequest *request) {
   html += "<h1>" + String(DEVICE_NAME) + " API</h1>";
   html += "<h2>" + String(DEVICE_VERSION) + " API</h2>";
   html += "<ul>";
-  html += "<li><b>GET /status</b> - Real-time metrics (lock timer, state).</li>";
-  html += "<li><b>GET /details</b> - Device configuration & capabilities.</li>";
+  html += "<li><b>GET /status</b> - Real-time metrics (SessionStatus).</li>";
+  html += "<li><b>GET /details</b> - Device configuration (DeviceDetails).</li>";
   html += "<li><b>GET /log</b> - Internal system logs.</li>";
   html += "<li><b>GET /reward</b> - Retrieve past unlock codes.</li>";
   html += "<li><b>GET /health</b> - Simple connectivity check.</li>";
-  html += "<li><b>POST /arm</b> - Begin session (JSON body required).</li>";
-  html += "<li><b>POST /start-test</b> - Run 2-min hardware test.</li>";
+  html += "<li><b>POST /arm</b> - Begin session (SessionConfig required).</li>";
+  html += "<li><b>POST /start-test</b> - Run hardware test.</li>";
   html += "<li><b>POST /abort</b> - Emergency stop (triggers penalty).</li>";
   html += "<li><b>POST /keepalive</b> - Reset connection watchdog.</li>";
   html += "<li><b>POST /update-wifi</b> - Update credentials.</li>";
@@ -88,7 +89,7 @@ void handleKeepAlive(AsyncWebServerRequest *request) {
   // Guard access to variables
   if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(100)) == pdTRUE) {
     // "Pet" the watchdog only if the session is in the LOCKED state
-    if (currentState == LOCKED || currentState == TESTING) {
+    if (g_currentState == LOCKED || g_currentState == TESTING) {
       g_lastKeepAliveTime = millis();
 
       // Log if we are recovering from missed checks
@@ -125,8 +126,7 @@ void handleArm(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t
     return;
   }
 
-  // ALLOCATE ON HEAP via RAII (Prefer PSRAM if available via ArduinoJson
-  // internals)
+  // ALLOCATE ON HEAP via RAII
   std::unique_ptr<JsonDocument> doc(new JsonDocument());
 
   DeserializationError error = deserializeJson(*doc, (const char *)data, len);
@@ -138,24 +138,59 @@ void handleArm(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t
     return;
   }
 
-  if (!(*doc)["lockDurationSeconds"].is<JsonInteger>()) {
-    sendJsonError(request, 400, "Missing required field: lockDurationSeconds.");
-    return;
+  // --- 1. PENALTY RESOLUTION ---
+  // Penalty is no longer passed in the API. It is hardcoded from Provisioning settings.
+  // (implied logic shift per prompt)
+  unsigned long resolvedPenalty = g_deterrentConfig.rewardPenalty;
+
+  // --- 2. DURATION RESOLUTION ---
+  // SessionConfig interface
+  const char *durTypeStr = (*doc)["durationType"] | "fixed";
+  DurationType durType = DUR_FIXED;
+
+  if (String(durTypeStr) == "random")
+    durType = DUR_RANDOM;
+  else if (String(durTypeStr) == "time-range" || String(durTypeStr) == "short" || String(durTypeStr) == "medium" ||
+           String(durTypeStr) == "long")
+    durType = DUR_RANGE;
+
+  unsigned long finalDuration = 0;
+  unsigned long inputMin = (*doc)["durationMin"] | 0;
+  unsigned long inputMax = (*doc)["durationMax"] | 0;
+
+  // Ensure randomness seed is updated per request based on arrival time
+  randomSeed(micros());
+
+  if (durType == DUR_FIXED) {
+    // Use the 'duration' field
+    finalDuration = (*doc)["duration"] | 0;
+    if (finalDuration == 0) {
+      sendJsonError(request, 400, "Missing required field: duration (for fixed type).");
+      return;
+    }
+    // Sync min/max for persistence consistency
+    inputMin = finalDuration;
+    inputMax = finalDuration;
+  } else {
+    // Random or Range
+    // Validate inputs
+    if (inputMax < inputMin) {
+      // Swap or clamp
+      unsigned long temp = inputMax;
+      inputMax = inputMin;
+      inputMin = temp;
+    }
+
+    if (inputMin == 0)
+      inputMin = g_sessionLimits.minLockDuration;
+    if (inputMax == 0)
+      inputMax = inputMin + 60; // Fallback
+
+    // Calculate Duration       // Arduino random(min, max) is exclusive of max, so we add 1
+    finalDuration = random(inputMin, inputMax + 1);
   }
 
-  // Penalty is required ONLY if Reward Code is enabled
-  if (enableRewardCode && !(*doc)["penaltyDurationSeconds"].is<JsonInteger>()) {
-    sendJsonError(request, 400,
-                  "Missing required field: penaltyDurationSeconds (Reward Code "
-                  "is enabled).");
-    return;
-  }
-
-  // Read session-specific data from the request
-  unsigned long durationSeconds = (*doc)["lockDurationSeconds"];
-  // Default to 0 if missing (allowed only if Reward Code is disabled)
-  unsigned long penaltySeconds = (*doc)["penaltyDurationSeconds"] | 0;
-  bool newHideTimer = (*doc)["hideTimer"] | false; // Default to false if not present
+  bool newHideTimer = (*doc)["hideTimer"] | false;
 
   // Parse Strategy
   String stratStr = (*doc)["triggerStrategy"] | "autoCountdown";
@@ -166,35 +201,45 @@ void handleArm(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t
 
   unsigned long tempDelays[4] = {0};
 
-  // Parse channels from nested 'channelDelaysSeconds' object
-  if ((*doc)["channelDelaysSeconds"].is<JsonObject>()) {
-    JsonObject delaysObj = (*doc)["channelDelaysSeconds"];
+  // Parse channels from nested 'channelDelays' object (Note: TS interface uses 'channelDelays')
+  if ((*doc)["channelDelays"].is<JsonObject>()) {
+    JsonObject delaysObj = (*doc)["channelDelays"];
     if (delaysObj["ch1"].is<unsigned long>())
-      tempDelays[0] = delaysObj["ch1"].as<unsigned long>();
+      tempDelays[0] = delaysObj["ch1"];
     if (delaysObj["ch2"].is<unsigned long>())
-      tempDelays[1] = delaysObj["ch2"].as<unsigned long>();
+      tempDelays[1] = delaysObj["ch2"];
     if (delaysObj["ch3"].is<unsigned long>())
-      tempDelays[2] = delaysObj["ch3"].as<unsigned long>();
+      tempDelays[2] = delaysObj["ch3"];
     if (delaysObj["ch4"].is<unsigned long>())
-      tempDelays[3] = delaysObj["ch4"].as<unsigned long>();
+      tempDelays[3] = delaysObj["ch4"];
   }
 
-  // Filter delays by enabled mask
+  // Filter delays by enabled mask (Hardware check)
   for (int i = 0; i < 4; i++) {
     if (!((g_enabledChannelsMask >> i) & 1)) {
       tempDelays[i] = 0;
     }
   }
 
-  // Prepare response buffer (stack allocated String)
+  // Prepare response buffer
   String responseJson;
 
   // We lock briefly ONLY to update the state machine.
   if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(1000)) == pdTRUE) {
 
     logKeyValue("WebAPI", "/arm");
+    char logBuf[100];
+    snprintf(logBuf, sizeof(logBuf), "Resolved Duration: %lu s (Type: %s)", finalDuration, durTypeStr);
+    logKeyValue("WebAPI", logBuf);
 
-    int result = startSession(durationSeconds, penaltySeconds, requestedStrat, tempDelays, newHideTimer);
+    int result = startSession(finalDuration, resolvedPenalty, requestedStrat, tempDelays, newHideTimer);
+
+    // If successful, update the Metadata fields in Active Config so /status echoes them back
+    if (result == 200) {
+      g_activeSessionConfig.durationType = durType;
+      g_activeSessionConfig.durationMin = inputMin;
+      g_activeSessionConfig.durationMax = inputMax;
+    }
 
     xSemaphoreGiveRecursive(stateMutex); // RELEASE LOCK
 
@@ -209,7 +254,7 @@ void handleArm(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t
       sendJsonError(request, 409, "Device is not ready.");
     } else {
       // 400
-      sendJsonError(request, 400, "Invalid configuration values.");
+      sendJsonError(request, 400, "Invalid configuration values (Duration/Penalty out of limits).");
     }
 
   } else {
@@ -235,7 +280,7 @@ void handleStartTest(AsyncWebServerRequest *request) {
     if (result == 200) {
       std::unique_ptr<JsonDocument> doc(new JsonDocument());
       (*doc)["status"] = "testing";
-      (*doc)["testSecondsRemaining"] = g_systemConfig.testModeDurationSeconds;
+      (*doc)["testSecondsRemaining"] = g_systemDefaults.testModeDuration; // Use System Default
       serializeJson(*doc, responseJson);
       request->send(200, "application/json", responseJson);
     } else {
@@ -253,7 +298,7 @@ void handleStartTest(AsyncWebServerRequest *request) {
 void handleAbort(AsyncWebServerRequest *request) {
   String responseJson;
   if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(1000)) == pdTRUE) {
-    if (currentState != LOCKED && currentState != ARMED && currentState != TESTING) {
+    if (g_currentState != LOCKED && g_currentState != ARMED && g_currentState != TESTING) {
       xSemaphoreGiveRecursive(stateMutex);
       sendJsonError(request, 409, "Device is not in an abortable state.");
       return;
@@ -264,7 +309,7 @@ void handleAbort(AsyncWebServerRequest *request) {
     abortSession("API Request");
 
     std::unique_ptr<JsonDocument> doc(new JsonDocument());
-    (*doc)["status"] = (currentState == ABORTED) ? "aborted" : (currentState == COMPLETED ? "completed" : "ready");
+    (*doc)["status"] = (g_currentState == ABORTED) ? "aborted" : (g_currentState == COMPLETED ? "completed" : "ready");
     serializeJson(*doc, responseJson);
 
     xSemaphoreGiveRecursive(stateMutex);
@@ -283,17 +328,28 @@ void handleAbort(AsyncWebServerRequest *request) {
  * Handler for GET /status
  */
 void handleStatus(AsyncWebServerRequest *request) {
-  // 1. Create the Snapshot
+  // 1. Create the Snapshot (Mapped to SessionStatus interface)
   struct StateSnapshot {
-
     // Session
-    SessionState state;
+    DeviceState state;
+
+    // Timers
+    uint32_t lockDuration;
+    uint32_t lockRemain;
+    uint32_t penaltyRemain;
+    uint32_t testRemain;
+    uint32_t triggerTimeout;
+
+    // Config Echo
     TriggerStrategy strategy;
-    unsigned long lockRemain;
-    unsigned long penaltyRemain;
-    unsigned long testRemain;
-    unsigned long delays[4];
     bool hideTimer;
+    DurationType durationType;
+    uint32_t durationMin;
+    uint32_t durationMax;
+    uint32_t configDelays[4];
+
+    // Live Data
+    uint32_t liveDelays[4];
 
     // Stats
     uint32_t streaks;
@@ -305,7 +361,6 @@ void handleStatus(AsyncWebServerRequest *request) {
     // Hardware
     bool isPressed;
     uint32_t pressDuration;
-    uint32_t longPressThreshold;
     int rssi;
     uint32_t freeHeap;
     uint32_t uptime;
@@ -314,38 +369,43 @@ void handleStatus(AsyncWebServerRequest *request) {
 
   // Quick Lock & Copy
   if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(200)) == pdTRUE) {
-    snapshot.state = currentState;
-    snapshot.strategy = currentStrategy;
-    snapshot.lockRemain = lockSecondsRemaining;
-    snapshot.penaltyRemain = penaltySecondsRemaining;
-    snapshot.testRemain = testSecondsRemaining;
+    snapshot.state = g_currentState;
+
+    // Timers - Source: g_sessionTimers
+    snapshot.lockDuration = g_sessionTimers.lockDuration;
+    snapshot.lockRemain = g_sessionTimers.lockRemaining;
+    snapshot.penaltyRemain = g_sessionTimers.penaltyRemaining;
+    snapshot.testRemain = g_sessionTimers.testRemaining;
+    snapshot.triggerTimeout = g_sessionTimers.triggerTimeout;
+
+    // Config Echo - Source: g_activeSessionConfig
+    snapshot.strategy = g_activeSessionConfig.triggerStrategy;
+    snapshot.hideTimer = g_activeSessionConfig.hideTimer;
+    snapshot.durationType = g_activeSessionConfig.durationType;
+    snapshot.durationMin = g_activeSessionConfig.durationMin;
+    snapshot.durationMax = g_activeSessionConfig.durationMax;
     for (int i = 0; i < 4; i++)
-      snapshot.delays[i] = channelDelaysRemaining[i];
-    snapshot.hideTimer = hideTimer;
-    snapshot.streaks = sessionStreakCount;
-    snapshot.aborted = abortedSessions;
-    snapshot.completed = completedSessions;
-    snapshot.totalLocked = totalLockedSessionSeconds;
-    snapshot.payback = paybackAccumulated;
+      snapshot.configDelays[i] = g_activeSessionConfig.channelDelays[i];
+
+    // Live Data - Source: g_sessionTimers
+    for (int i = 0; i < 4; i++)
+      snapshot.liveDelays[i] = g_sessionTimers.channelDelays[i];
+
+    // Stats - Source: g_sessionStats
+    snapshot.streaks = g_sessionStats.streaks;
+    snapshot.aborted = g_sessionStats.aborted;
+    snapshot.completed = g_sessionStats.completed;
+    snapshot.totalLocked = g_sessionStats.totalLockedTime;
+    snapshot.payback = g_sessionStats.paybackAccumulated;
 
     // --- HARDWARE STATUS COLLECTION ---
-    // 1. PCB Button (Active LOW)
     bool pcbPressed = (digitalRead(PCB_BUTTON_PIN) == LOW);
-
-    // 2. External Button (Active HIGH / NC) - Only if defined
     bool extPressed = false;
 #ifdef EXT_BUTTON_PIN
     extPressed = (digitalRead(EXT_BUTTON_PIN) == HIGH);
 #endif
-
-    // Logical OR: Is EITHER button triggering an event?
     snapshot.isPressed = pcbPressed || extPressed;
-
-    if (snapshot.isPressed) {
-      snapshot.pressDuration = millis() - g_buttonPressStartTime;
-    } else {
-      snapshot.pressDuration = 0;
-    }
+    snapshot.pressDuration = snapshot.isPressed ? (millis() - g_buttonPressStartTime) : 0;
 
     // 2. Connectivity & System
     snapshot.rssi = WiFi.RSSI();
@@ -365,44 +425,73 @@ void handleStatus(AsyncWebServerRequest *request) {
   // Use Stack memory.
   JsonDocument doc;
 
-  // Timers
+  // Status & Duration
   doc["status"] = stateToString(snapshot.state);
-  doc["lockSecondsRemaining"] = snapshot.lockRemain;
-  doc["penaltySecondsRemaining"] = snapshot.penaltyRemain;
-  doc["testSecondsRemaining"] = snapshot.testRemain;
+  doc["lockDuration"] = snapshot.lockDuration;
 
-  // Arming Context
-  if (snapshot.state == ARMED) {
-    doc["triggerStrategy"] = (snapshot.strategy == STRAT_BUTTON_TRIGGER) ? "buttonTrigger" : "autoCountdown";
-    if (snapshot.strategy == STRAT_BUTTON_TRIGGER) {
-      doc["triggerTimeoutRemainingSeconds"] = triggerTimeoutRemaining;
-    }
+  // --- timers (SessionTimers) ---
+  JsonObject timers = doc["timers"].to<JsonObject>();
+  timers["lockRemaining"] = snapshot.lockRemain;
+  timers["rewardRemaining"] = snapshot.penaltyRemain;
+  timers["testRemaining"] = snapshot.testRemain;
+  if (snapshot.state == ARMED && snapshot.strategy == STRAT_BUTTON_TRIGGER) {
+    timers["triggerTimeout"] = snapshot.triggerTimeout;
   }
 
-  // Channel info
-  JsonObject channels = doc["channelDelaysRemainingSeconds"].to<JsonObject>();
-  channels["ch1"] = snapshot.delays[0];
-  channels["ch2"] = snapshot.delays[1];
-  channels["ch3"] = snapshot.delays[2];
-  channels["ch4"] = snapshot.delays[3];
+  // --- config (SessionConfig) ---
+  JsonObject config = doc["config"].to<JsonObject>();
+  config["triggerStrategy"] = (snapshot.strategy == STRAT_BUTTON_TRIGGER) ? "buttonTrigger" : "autoCountdown";
+  config["hideTimer"] = snapshot.hideTimer;
 
-  doc["hideTimer"] = snapshot.hideTimer;
+  // Map DurationType enum to TS string
+  switch (snapshot.durationType) {
+  case DUR_RANDOM:
+    config["durationType"] = "random";
+    break;
+  case DUR_RANGE:
+    config["durationType"] = "time-range";
+    break;
+  default:
+    config["durationType"] = "fixed";
+    break;
+  }
+  if (snapshot.durationMin > 0)
+    config["durationMin"] = snapshot.durationMin;
+  if (snapshot.durationMax > 0)
+    config["durationMax"] = snapshot.durationMax;
 
-  // Accumulated stats
+  // Note: We intentionally do NOT populate 'duration' here because for Random/Range,
+  // the client knows it was random. The "actual" resolved duration is found in lockDuration.
+
+  // Reconstruct Configured Channel Delays
+  JsonObject cfgCh = config["channelDelays"].to<JsonObject>();
+  cfgCh["ch1"] = snapshot.configDelays[0];
+  cfgCh["ch2"] = snapshot.configDelays[1];
+  cfgCh["ch3"] = snapshot.configDelays[2];
+  cfgCh["ch4"] = snapshot.configDelays[3];
+
+  // --- channelDelaysRemaining (Live) ---
+  JsonObject liveCh = doc["channelDelaysRemaining"].to<JsonObject>();
+  liveCh["ch1"] = snapshot.liveDelays[0];
+  liveCh["ch2"] = snapshot.liveDelays[1];
+  liveCh["ch3"] = snapshot.liveDelays[2];
+  liveCh["ch4"] = snapshot.liveDelays[3];
+
+  // --- stats ---
   JsonObject stats = doc["stats"].to<JsonObject>();
   stats["streaks"] = snapshot.streaks;
   stats["aborted"] = snapshot.aborted;
   stats["completed"] = snapshot.completed;
-  stats["totalTimeLockedSeconds"] = snapshot.totalLocked;
-  stats["pendingPaybackSeconds"] = snapshot.payback;
+  stats["totalTimeLocked"] = snapshot.totalLocked;
+  stats["pendingPayback"] = snapshot.payback;
 
-  // --- Hardware
-  JsonObject hw = doc["hardwareStatus"].to<JsonObject>();
+  // --- hardware ---
+  JsonObject hw = doc["hardware"].to<JsonObject>();
   hw["buttonPressed"] = snapshot.isPressed;
   hw["currentPressDurationMs"] = snapshot.pressDuration;
   hw["rssi"] = snapshot.rssi;
   hw["freeHeap"] = snapshot.freeHeap;
-  hw["uptimeSeconds"] = snapshot.uptime;
+  hw["uptime"] = snapshot.uptime;
 
   // Handle temperature NaN or invalid reads gracefully
   if (isnan(snapshot.internalTemp)) {
@@ -426,26 +515,29 @@ void handleDetails(AsyncWebServerRequest *request) {
   if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(1000)) == pdTRUE) {
     uint8_t mac[6];
     esp_efuse_mac_get_default(mac);
-    char uniqueHostname[20];
+    char uniqueHostname[30];
     snprintf(uniqueHostname, sizeof(uniqueHostname), "lobster-lock-%02X%02X%02X", mac[3], mac[4], mac[5]);
 
     std::unique_ptr<JsonDocument> doc(new JsonDocument());
-    (*doc)["name"] = DEVICE_NAME;
     (*doc)["id"] = uniqueHostname;
+    (*doc)["name"] = DEVICE_NAME;
     (*doc)["version"] = DEVICE_VERSION;
 
-    (*doc)["longPressMs"] = g_systemConfig.longPressSeconds * 1000;
-
-    // System Limits
-    (*doc)["minLockSeconds"] = g_systemConfig.minLockSeconds;
-    (*doc)["maxLockSeconds"] = g_systemConfig.maxLockSeconds;
-    (*doc)["minPenaltySeconds"] = g_systemConfig.minPenaltySeconds;
-    (*doc)["maxPenaltySeconds"] = g_systemConfig.maxPenaltySeconds;
-    (*doc)["testModeDurationSeconds"] = g_systemConfig.testModeDurationSeconds;
+#ifdef DEBUG_MODE
+    (*doc)["buildType"] = "debug";
+#else
+    (*doc)["buildType"] = "release";
+#endif
 
     (*doc)["address"] = WiFi.localIP().toString();
     (*doc)["mac"] = WiFi.macAddress();
     (*doc)["port"] = 80;
+
+    // System Defaults & Limits
+    (*doc)["longPressMs"] = g_systemDefaults.longPressDuration * 1000;
+    (*doc)["minLockDuration"] = g_sessionLimits.minLockDuration;
+    (*doc)["maxLockDuration"] = g_sessionLimits.maxLockDuration;
+    (*doc)["testModeDuration"] = g_systemDefaults.testModeDuration;
 
     // Channels Configuration
     JsonObject channels = (*doc)["channels"].to<JsonObject>();
@@ -456,12 +548,14 @@ void handleDetails(AsyncWebServerRequest *request) {
 
     // Deterrent Configuration
     JsonObject deterrents = (*doc)["deterrents"].to<JsonObject>();
-    deterrents["enableStreaks"] = enableStreaks;
-    deterrents["enablePaybackTime"] = enablePaybackTime;
-    deterrents["enableRewardCode"] = enableRewardCode;
-    deterrents["paybackDurationSeconds"] = paybackTimeSeconds;
-    deterrents["minPaybackTimeSeconds"] = g_systemConfig.minPaybackTimeSeconds;
-    deterrents["maxPaybackTimeSeconds"] = g_systemConfig.maxPaybackTimeSeconds;
+    deterrents["enableStreaks"] = g_deterrentConfig.enableStreaks;
+    deterrents["enableRewardCode"] = g_deterrentConfig.enableRewardCode;
+    deterrents["rewardPenaltyDuration"] = g_deterrentConfig.rewardPenalty;
+
+    deterrents["enablePaybackTime"] = g_deterrentConfig.enablePaybackTime;
+    deterrents["paybackDuration"] = g_deterrentConfig.paybackTime;
+    deterrents["minPaybackDuration"] = g_sessionLimits.minPaybackTime;
+    deterrents["maxPaybackDuration"] = g_sessionLimits.maxPaybackTime;
 
     // Add features array
     JsonArray features = (*doc)["features"].to<JsonArray>();
@@ -540,7 +634,7 @@ void handleReward(AsyncWebServerRequest *request) {
   // To be safe, we just take the lock for the whole operation here since it's
   // read-only and fast enough.
   if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(1000)) == pdTRUE) {
-    if (currentState == LOCKED || currentState == ABORTED || currentState == ARMED) {
+    if (g_currentState == LOCKED || g_currentState == ABORTED || g_currentState == ARMED) {
       xSemaphoreGiveRecursive(stateMutex);
       sendJsonError(request, 403, "Reward is not yet available.");
     } else {
@@ -594,7 +688,7 @@ void handleUpdateWifi(AsyncWebServerRequest *request, uint8_t *data, size_t len,
 
   if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(1000)) == pdTRUE) {
     // State is already checked in the on() handler, but as a safeguard:
-    if (currentState != READY) {
+    if (g_currentState != READY) {
       xSemaphoreGiveRecursive(stateMutex);
       sendJsonError(request, 409, "Device must be in READY state to update Wi-Fi.");
       return;
@@ -602,13 +696,8 @@ void handleUpdateWifi(AsyncWebServerRequest *request, uint8_t *data, size_t len,
 
     logKeyValue("WebAPI", "/update-wifi");
 
-    // Save new credentials to NVS
-    wifiPreferences.begin("wifi-creds", false);
-    wifiPreferences.putString("ssid", ssid);
-    wifiPreferences.putString("pass", pass);
-    wifiPreferences.end();
-
-    logKeyValue("Prefs", "New Wi-Fi credentials saved.");
+    // Save new credentials to NVS using new Storage helper
+    saveWiFiCredentials(ssid, pass);
 
     xSemaphoreGiveRecursive(stateMutex);
   } else {
@@ -632,7 +721,7 @@ void handleFactoryReset(AsyncWebServerRequest *request) {
 
   if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(1000)) == pdTRUE) {
     // Do not allow forgetting during an active session
-    if (currentState != READY && currentState != COMPLETED) {
+    if (g_currentState != READY && g_currentState != COMPLETED) {
       xSemaphoreGiveRecursive(stateMutex);
       sendJsonError(request, 409,
                     "Device is in an active session. Cannot reset while "

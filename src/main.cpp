@@ -61,6 +61,7 @@ void printStartupDiagnostics() {
   logMessage("[ HARDWARE & FEATURES ]");
   logMessage(LOG_SEP_MINOR);
 
+  // Channel Status (from Provisioning)
   for (int i = 0; i < MAX_CHANNELS; i++) {
     bool isEnabled = (g_enabledChannelsMask >> i) & 1;
     snprintf(logBuf, sizeof(logBuf), " %-25s : %s (GPIO %d)", ("Channel " + String(i + 1)).c_str(), isEnabled ? "ENABLED" : "DISABLED",
@@ -81,46 +82,52 @@ void printStartupDiagnostics() {
 #endif
   logMessage(logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %lu s", "Long Press Time", g_systemConfig.longPressSeconds);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Long Press Time", g_systemDefaults.longPressDuration);
   logMessage(logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %lu ms", "External Button Threshold", g_systemConfig.extButtonDetectionSeconds);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u ms", "External Button Threshold", g_systemDefaults.extButtonSignalDuration);
   logMessage(logBuf);
 
   processLogQueue();
 
-  // --- SECTION: SYSTEM CONFIG ---
+  // --- SECTION: SYSTEM DEFAULTS ---
   logMessage(LOG_SEP_MINOR);
-  logMessage("[ SYSTEM CONFIG ]");
+  logMessage("[ SYSTEM DEFAULTS ]");
   logMessage(LOG_SEP_MINOR);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u s", "Lock Range", g_systemConfig.minLockSeconds, g_systemConfig.maxLockSeconds);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Test Session Duration", g_systemDefaults.testModeDuration);
   logMessage(logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u s", "Penalty Range", g_systemConfig.minPenaltySeconds,
-           g_systemConfig.maxPenaltySeconds);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Failsafe Timeout", g_systemDefaults.failsafeMaxLock);
   logMessage(logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u s", "Payback Range", g_systemConfig.minPaybackTimeSeconds,
-           g_systemConfig.maxPaybackTimeSeconds);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u ms / %u", "Keep-Alive", g_systemDefaults.keepAliveInterval,
+           g_systemDefaults.keepAliveMaxStrikes);
   logMessage(logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Test Session Duration", g_systemConfig.testModeDurationSeconds);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u ms", "Boot Loop/Stable", g_systemDefaults.bootLoopThreshold,
+           g_systemDefaults.stableBootTime);
   logMessage(logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Failsafe Timeout", g_systemConfig.failsafeMaxLockSeconds);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u s", "WiFi Retries/ArmedTO", g_systemDefaults.wifiMaxRetries,
+           g_systemDefaults.armedTimeoutSeconds);
   logMessage(logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %u ms / %u", "Keep-Alive", g_systemConfig.keepAliveIntervalMs,
-           g_systemConfig.keepAliveMaxStrikes);
+  processLogQueue();
+
+  // --- SECTION: SESSION LIMITS ---
+  logMessage(LOG_SEP_MINOR);
+  logMessage("[ SESSION LIMITS ]");
+  logMessage(LOG_SEP_MINOR);
+
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u s", "Lock Range", g_sessionLimits.minLockDuration, g_sessionLimits.maxLockDuration);
   logMessage(logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u ms", "Boot Loop/Stable", g_systemConfig.bootLoopThreshold,
-           g_systemConfig.stableBootTimeMs);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u s", "Penalty Range", g_sessionLimits.minRewardPenaltyDuration,
+           g_sessionLimits.maxRewardPenaltyDuration);
   logMessage(logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u s", "WiFi Retries/ArmedTO", g_systemConfig.wifiMaxRetries,
-           g_systemConfig.armedTimeoutSeconds);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u / %u s", "Payback Range", g_sessionLimits.minPaybackTime, g_sessionLimits.maxPaybackTime);
   logMessage(logBuf);
 
   processLogQueue();
@@ -130,18 +137,24 @@ void printStartupDiagnostics() {
   logMessage("[ DETERRENT CONFIG ]");
   logMessage(LOG_SEP_MINOR);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Session Streaks", enableStreaks ? "Enabled" : "Disabled");
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Session Streaks", g_deterrentConfig.enableStreaks ? "Enabled" : "Disabled");
   logMessage(logBuf);
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Time Payback", enablePaybackTime ? "Enabled" : "Disabled");
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Time Payback", g_deterrentConfig.enablePaybackTime ? "Enabled" : "Disabled");
   logMessage(logBuf);
 
-  if (enablePaybackTime) {
-    formatSeconds(paybackTimeSeconds, tBuf1, sizeof(tBuf1));
+  if (g_deterrentConfig.enablePaybackTime) {
+    formatSeconds(g_deterrentConfig.paybackTime, tBuf1, sizeof(tBuf1));
     snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Payback Duration", tBuf1);
     logMessage(logBuf);
   }
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Reward Code", enableRewardCode ? "Enabled" : "Disabled");
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Reward Code", g_deterrentConfig.enableRewardCode ? "Enabled" : "Disabled");
   logMessage(logBuf);
+
+  if (g_deterrentConfig.enableRewardCode) {
+    formatSeconds(g_deterrentConfig.rewardPenalty, tBuf1, sizeof(tBuf1));
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Reward Penalty", tBuf1);
+    logMessage(logBuf);
+  }
 
   processLogQueue();
 
@@ -150,18 +163,19 @@ void printStartupDiagnostics() {
   logMessage("[ STATISTICS ]");
   logMessage(LOG_SEP_MINOR);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %u", "Streak Count", sessionStreakCount);
+  // Read from g_sessionStats
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u", "Streak Count", g_sessionStats.streaks);
   logMessage(logBuf);
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %u", "Completed Sessions", completedSessions);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u", "Completed Sessions", g_sessionStats.completed);
   logMessage(logBuf);
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %u", "Aborted Sessions", abortedSessions);
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u", "Aborted Sessions", g_sessionStats.aborted);
   logMessage(logBuf);
 
-  formatSeconds(paybackAccumulated, tBuf1, sizeof(tBuf1));
+  formatSeconds(g_sessionStats.paybackAccumulated, tBuf1, sizeof(tBuf1));
   snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Accumulated Debt", tBuf1);
   logMessage(logBuf);
 
-  formatSeconds(totalLockedSessionSeconds, tBuf1, sizeof(tBuf1));
+  formatSeconds(g_sessionStats.totalLockedTime, tBuf1, sizeof(tBuf1));
   snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Lifetime Locked", tBuf1);
   logMessage(logBuf);
 
@@ -172,18 +186,18 @@ void printStartupDiagnostics() {
   logMessage("[ CURRENT SESSION ]");
   logMessage(LOG_SEP_MINOR);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Current State", stateToString(currentState));
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Current State", stateToString(g_currentState));
   logMessage(logBuf);
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Timer Visibility", hideTimer ? "Hidden" : "Visible");
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Timer Visibility", g_activeSessionConfig.hideTimer ? "Hidden" : "Visible");
   logMessage(logBuf);
 
-  formatSeconds(lockSecondsRemaining, tBuf1, sizeof(tBuf1));
-  formatSeconds(lockSecondsConfig, tBuf2, sizeof(tBuf2));
+  formatSeconds(g_sessionTimers.lockRemaining, tBuf1, sizeof(tBuf1));
+  formatSeconds(g_sessionTimers.lockDuration, tBuf2, sizeof(tBuf2));
   snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Cfg: %s)", "Lock Timer", tBuf1, tBuf2);
   logMessage(logBuf);
 
-  formatSeconds(penaltySecondsRemaining, tBuf1, sizeof(tBuf1));
-  formatSeconds(penaltySecondsConfig, tBuf2, sizeof(tBuf2));
+  formatSeconds(g_sessionTimers.penaltyRemaining, tBuf1, sizeof(tBuf1));
+  formatSeconds(g_sessionTimers.penaltyDuration, tBuf2, sizeof(tBuf2));
   snprintf(logBuf, sizeof(logBuf), " %-25s : %s (Cfg: %s)", "Penalty Timer", tBuf1, tBuf2);
   logMessage(logBuf);
 
@@ -196,27 +210,30 @@ void printStartupDiagnostics() {
 // --- Helper Functions: Initialization Phases ---
 // =================================================================
 
-void recoverSessionState() {
-  // Load Preferences
-  provisioningPrefs.begin("provisioning", true);
-  g_enabledChannelsMask = provisioningPrefs.getUChar("chMask", 0x0F);
-  provisioningPrefs.end();
+/**
+ * Recovers state from NVS.
+ * Now splits hardware/provisioning loading from dynamic session loading.
+ */
+void recoverDeviceState() {
+  // 1. Load Provisioning Settings (Hardware Mask + Deterrent Config)
+  // This ensures g_deterrentConfig and g_enabledChannelsMask are set before logic runs.
+  loadProvisioningConfig();
 
-  // Load Session State
+  // 2. Load Dynamic Session State (Timers, Stats, Active Config)
   bool validStateLoaded = loadState();
 
-  // Handle Logic (e.g. power loss during lock)
+  // 3. Handle Logic (e.g. power loss during lock)
   if (validStateLoaded) {
     handleRebootState();
   } else {
     resetToReady(true);
-    currentState = VALIDATING;
+    g_currentState = VALIDATING;
   }
 }
 
 void setupPeripherals() {
   // Setup Buttons
-  unsigned long longPressMs = (unsigned long)g_systemConfig.longPressSeconds * 1000;
+  unsigned long longPressMs = (unsigned long)g_systemDefaults.longPressDuration * 1000;
   if (longPressMs < 1000)
     longPressMs = 1000;
 
@@ -243,7 +260,7 @@ void setupPeripherals() {
  * Set the current state to READY
  */
 void moveToReady() {
-  currentState = READY;
+  g_currentState = READY;
   logKeyValue("System", "Device is operational.");
 }
 
@@ -303,15 +320,22 @@ void setup() {
   }
 
   randomSeed(esp_random());
+
   initializeChannels();
   initializeFailSafeTimer();
   initializeWatchdog();
+
   checkBootLoop();
 
   // ------------------------------
   // Data & State Recovery
   // ------------------------------
-  recoverSessionState();
+  recoverDeviceState();
+  setTimersForCurrentState(); 
+
+  // ------------------------------
+  // Diagnostic Dump
+  // ------------------------------
   printStartupDiagnostics();
 
   // ------------------------------
@@ -361,7 +385,7 @@ void loop() {
     // Tick the External button
     extButton.tick();
 
-    if (currentState == VALIDATING) {
+    if (g_currentState == VALIDATING) {
       if (digitalRead(EXT_BUTTON_PIN) == LOW) {
         // It is connected/safe. Start timing if we haven't already.
         if (extButtonSignalStartTime == 0) {
@@ -369,7 +393,7 @@ void loop() {
         }
 
         // If it has been safe for sufficient time, proceed
-        if (millis() - extButtonSignalStartTime > g_systemConfig.extButtonDetectionSeconds * 1000) {
+        if (millis() - extButtonSignalStartTime > g_systemDefaults.extButtonSignalDuration * 1000) {
           logKeyValue("System", "Safety Pedal connection verified.");
           extButtonSignalStartTime = 0; // Reset for next time
           moveToReady();
@@ -381,7 +405,7 @@ void loop() {
     }
 #else
     // in DEBUG, transition to READY immediately
-    if (currentState == VALIDATING) {
+    if (g_currentState == VALIDATING) {
       moveToReady();
     }
 #endif

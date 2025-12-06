@@ -38,9 +38,9 @@ void formatSeconds(unsigned long totalSeconds, char *buffer, size_t size) {
 }
 
 /**
- * Converts a SessionState enum to its string representation.
+ * Converts a DeviceState enum to its string representation.
  */
-const char *stateToString(SessionState s) {
+const char *stateToString(DeviceState s) {
   switch (s) {
   case READY:
     return "ready";

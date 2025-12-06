@@ -1,7 +1,7 @@
 /*
  * =================================================================================
  * Project:   Lobster Lock - Self-Bondage Session Manager
- * File:      Globals.h / Globals.cpp
+ * File:      Globals.cpp
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -17,7 +17,10 @@
 // =================================================================================
 
 AsyncWebServer server(80);
-SystemConfig g_systemConfig = DEFAULT_SETTINGS;
+
+// Initialize split configurations
+SystemDefaults g_systemDefaults = DEFAULT_SYSTEM_DEFS;
+SessionLimits g_sessionLimits = DEFAULT_SESSION_LIMITS;
 
 // --- Button Configuration ---
 
@@ -41,50 +44,66 @@ jled::JLed statusLed = jled::JLed(STATUS_LED_PIN);
 SemaphoreHandle_t stateMutex = NULL;
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED; // Critical section for tick counter
 
+unsigned long extButtonSignalStartTime = 0;
+
+volatile unsigned long g_buttonPressStartTime = 0;
+
 // =================================================================================
 // SECTION: STATE MANAGEMENT
 // =================================================================================
 
-SessionState currentState = VALIDATING;
-TriggerStrategy currentStrategy = STRAT_AUTO_COUNTDOWN;
+DeviceState g_currentState = VALIDATING;
+
+ActiveSessionConfig g_activeSessionConfig = {
+    DUR_FIXED,            // durationType
+    900,                  // durationMin (15m)
+    2700,                 // durationMax (45m)
+    STRAT_AUTO_COUNTDOWN, // triggerStrategy
+    {30, 30, 30, 30},     // channelDelays (30s default)
+    false                 // hideTimer
+};
 
 uint8_t g_enabledChannelsMask = 0x0F; // Default: 1111 (All enabled)
-unsigned long extButtonSignalStartTime = 0;
 
 // =================================================================================
 // SECTION: SESSION TIMERS & DELAYS
 // =================================================================================
 
-unsigned long lockSecondsRemaining = 0;
-unsigned long penaltySecondsRemaining = 0;
-unsigned long testSecondsRemaining = 0;
-unsigned long triggerTimeoutRemaining = 0;
-
-unsigned long penaltySecondsConfig = 0;
-unsigned long lockSecondsConfig = 0;
-bool hideTimer = false;
-
-unsigned long channelDelaysRemaining[MAX_CHANNELS] = {0, 0, 0, 0};
+// Updated to match the 6 fields in SessionTimers struct
+SessionTimers g_sessionTimers = {
+    0,           // lockDuration
+    0,           // penaltyDuration
+    0,           // lockRemaining
+    0,           // penaltyRemaining
+    0,           // testRemaining
+    0,           // triggerTimeout
+    {0, 0, 0, 0} // channelDelays
+};
 
 // =================================================================================
-// SECTION: FEATURE CONFIGURATION
+// SECTION: FEATURE PROVISIONING
 // =================================================================================
 
-bool enableStreaks = true;         // Default to true
-bool enablePaybackTime = true;     // Default to true
-bool enableRewardCode = true;      // Default to true
-uint32_t paybackTimeSeconds = 900; // Default to 900s (15min).
+DeterrentConfig g_deterrentConfig = {
+    true, // enableStreaks
+    true, // enableRewardCode
+    2700, // rewardPenalty (45 min)
+    true, // enablePaybackTime
+    900   // paybackTime (15 min)
+};
 
 // =================================================================================
 // SECTION: STATISTICS & HISTORY
 // =================================================================================
 
 // Persistent Session Counters (loaded from NVS)
-uint32_t sessionStreakCount = 0;
-uint32_t completedSessions = 0;
-uint32_t abortedSessions = 0;
-uint32_t paybackAccumulated = 0;        // In seconds
-uint32_t totalLockedSessionSeconds = 0; // Total accumulated lock time
+SessionStats g_sessionStats = {
+    0, // streaks
+    0, // completed
+    0, // aborted
+    0, // paybackAccumulated
+    0  // totalLockedTime
+};
 
 Reward rewardHistory[REWARD_HISTORY_SIZE];
 
@@ -92,10 +111,8 @@ Reward rewardHistory[REWARD_HISTORY_SIZE];
 // SECTION: WATCHDOGS & INPUT TRACKING
 // =================================================================================
 
-volatile unsigned long g_buttonPressStartTime = 0;
-
-// --- Keep-Alive Watchdog (LOCKED/TESTING) ---
-unsigned long g_lastKeepAliveTime = 0; // For watchdog. 0 = disarmed.
+// --- Keep-Alive Session Watchdog ---
+unsigned long g_lastKeepAliveTime = 0; // 0 = disarmed.
 int g_currentKeepAliveStrikes = 0;     // Counter for missed calls
 
 // =================================================================================
@@ -103,7 +120,7 @@ int g_currentKeepAliveStrikes = 0;     // Counter for missed calls
 // =================================================================================
 
 Preferences wifiPreferences;   // Namespace: "wifi-creds"
-Preferences provisioningPrefs; // Namespace: "provisioning" (Hardware Config)
+Preferences provisioningPrefs; // Namespace: "provisioning" (Hardware and Feature Config)
 Preferences sessionState;      // Namespace: "session" (Dynamic State)
 Preferences bootPrefs;         // Namespace: "boot" (Crash tracking)
 
