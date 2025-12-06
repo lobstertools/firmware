@@ -300,7 +300,7 @@ void disarmFailsafeTimer() {
     logKeyValue("System", "!!CRITICAL!! disarmFailsafeTimer called before initializeFailSafeTimer.");
     return;
   }
-  
+
   esp_timer_stop(failsafeTimer);
   logKeyValue("System", "Death Grip Timer DISARMED.");
 }

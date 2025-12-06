@@ -331,7 +331,7 @@ void setup() {
   // Data & State Recovery
   // ------------------------------
   recoverDeviceState();
-  setTimersForCurrentState(); 
+  setTimersForCurrentState();
 
   // ------------------------------
   // Diagnostic Dump

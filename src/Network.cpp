@@ -154,13 +154,12 @@ class ProvisioningCallbacks : public BLECharacteristicCallbacks {
 
       snprintf(logBuf, sizeof(logBuf), "SSID Set: %s", value.c_str());
       logKeyValue("BLE", logBuf);
-    } 
-    else if (uuid == PROV_PASS_CHAR_UUID) {
+    } else if (uuid == PROV_PASS_CHAR_UUID) {
       std::string value(data, data + len);
       wifiPreferences.begin("wifi-creds", false);
       wifiPreferences.putString("pass", value.c_str());
       wifiPreferences.end();
-      
+
       // Do not log the actual password
       snprintf(logBuf, sizeof(logBuf), "Password Received (%u chars)", len);
       logKeyValue("BLE", logBuf);
@@ -176,8 +175,7 @@ class ProvisioningCallbacks : public BLECharacteristicCallbacks {
 
       snprintf(logBuf, sizeof(logBuf), "Reward Code: %s", enable ? "ENABLED" : "DISABLED");
       logKeyValue("BLE", logBuf);
-    } 
-    else if (uuid == PROV_ENABLE_STREAKS_CHAR_UUID) {
+    } else if (uuid == PROV_ENABLE_STREAKS_CHAR_UUID) {
       bool enable = (bool)data[0];
       provisioningPrefs.begin("provisioning", false);
       provisioningPrefs.putBool("enableStreaks", enable);
@@ -185,8 +183,7 @@ class ProvisioningCallbacks : public BLECharacteristicCallbacks {
 
       snprintf(logBuf, sizeof(logBuf), "Streaks: %s", enable ? "ENABLED" : "DISABLED");
       logKeyValue("BLE", logBuf);
-    } 
-    else if (uuid == PROV_ENABLE_PAYBACK_TIME_CHAR_UUID) {
+    } else if (uuid == PROV_ENABLE_PAYBACK_TIME_CHAR_UUID) {
       bool enable = (bool)data[0];
       provisioningPrefs.begin("provisioning", false);
       provisioningPrefs.putBool("enablePayback", enable);
@@ -194,12 +191,11 @@ class ProvisioningCallbacks : public BLECharacteristicCallbacks {
 
       snprintf(logBuf, sizeof(logBuf), "Payback Time: %s", enable ? "ENABLED" : "DISABLED");
       logKeyValue("BLE", logBuf);
-    } 
-    else if (uuid == PROV_PAYBACK_TIME_CHAR_UUID) {
+    } else if (uuid == PROV_PAYBACK_TIME_CHAR_UUID) {
       provisioningPrefs.begin("provisioning", false);
       uint32_t rawVal = bytesToUint32(data);
       uint32_t finalVal = rawVal;
-      const char* clampNote = "";
+      const char *clampNote = "";
 
       // Logic: Clamping
       if (finalVal < g_sessionLimits.minPaybackTime) {
@@ -219,12 +215,11 @@ class ProvisioningCallbacks : public BLECharacteristicCallbacks {
         snprintf(logBuf, sizeof(logBuf), "Payback Time: %u s", finalVal);
       }
       logKeyValue("BLE", logBuf);
-    } 
-    else if (uuid == PROV_REWARD_PENALTY_CHAR_UUID) {
+    } else if (uuid == PROV_REWARD_PENALTY_CHAR_UUID) {
       provisioningPrefs.begin("provisioning", false);
       uint32_t rawVal = bytesToUint32(data);
       uint32_t finalVal = rawVal;
-      const char* clampNote = "";
+      const char *clampNote = "";
 
       // Logic: Clamping
       if (finalVal < g_sessionLimits.minRewardPenaltyDuration) {
@@ -253,15 +248,21 @@ class ProvisioningCallbacks : public BLECharacteristicCallbacks {
       bool enable = (bool)data[0];
       int chIndex = -1;
 
-      if (uuid == PROV_CH1_ENABLE_UUID) chIndex = 0;
-      else if (uuid == PROV_CH2_ENABLE_UUID) chIndex = 1;
-      else if (uuid == PROV_CH3_ENABLE_UUID) chIndex = 2;
-      else if (uuid == PROV_CH4_ENABLE_UUID) chIndex = 3;
+      if (uuid == PROV_CH1_ENABLE_UUID)
+        chIndex = 0;
+      else if (uuid == PROV_CH2_ENABLE_UUID)
+        chIndex = 1;
+      else if (uuid == PROV_CH3_ENABLE_UUID)
+        chIndex = 2;
+      else if (uuid == PROV_CH4_ENABLE_UUID)
+        chIndex = 3;
 
       if (chIndex >= 0) {
-        if (enable) currentMask |= (1 << chIndex);
-        else currentMask &= ~(1 << chIndex);
-        
+        if (enable)
+          currentMask |= (1 << chIndex);
+        else
+          currentMask &= ~(1 << chIndex);
+
         snprintf(logBuf, sizeof(logBuf), "Ch%d Config: %s", chIndex + 1, enable ? "ENABLED" : "DISABLED");
         logKeyValue("BLE", logBuf);
       }
@@ -322,7 +323,7 @@ void startBLEProvisioning() {
     processLogQueue();
     if (g_credentialsReceived) {
       logKeyValue("BLE", "Wifi Credentials received. Restarting...");
-      
+
       processLogQueue();
 
       delay(3000);

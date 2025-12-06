@@ -19,7 +19,7 @@
 #include "Utils.h"
 
 // =================================================================================
-// SECTION: LIFECYCLE and RECOVERY 
+// SECTION: LIFECYCLE and RECOVERY
 // =================================================================================
 
 void handleRebootState() {
@@ -64,7 +64,7 @@ void resetToReady(bool generateNewCode) {
   logKeyValue("Session", logBuf);
 
   g_currentState = READY;
-  
+
   // Timers are configured based on the new READY state (Disarms everything)
   setTimersForCurrentState();
 
@@ -134,8 +134,8 @@ int startSession(unsigned long duration, unsigned long penalty, TriggerStrategy 
 
   // 1. Validate ranges against SESSION LIMITS
   if (duration < g_sessionLimits.minLockDuration || duration > g_sessionLimits.maxLockDuration) {
-    snprintf(errorLogBuf, sizeof(errorLogBuf), "Start Failed: Duration %lu s out of range (%lu-%lu s)", 
-             duration, g_sessionLimits.minLockDuration, g_sessionLimits.maxLockDuration);
+    snprintf(errorLogBuf, sizeof(errorLogBuf), "Start Failed: Duration %lu s out of range (%lu-%lu s)", duration,
+             g_sessionLimits.minLockDuration, g_sessionLimits.maxLockDuration);
     logKeyValue("Session", errorLogBuf);
     return 400;
   }
@@ -143,13 +143,13 @@ int startSession(unsigned long duration, unsigned long penalty, TriggerStrategy 
   // Only enforce penalty range if Reward Code is enabled
   if (g_deterrentConfig.enableRewardCode) {
     if (penalty < g_sessionLimits.minRewardPenaltyDuration || penalty > g_sessionLimits.maxRewardPenaltyDuration) {
-      snprintf(errorLogBuf, sizeof(errorLogBuf), "Start Failed: Penalty %lu s out of range (%lu-%lu s)", 
-               penalty, g_sessionLimits.minRewardPenaltyDuration, g_sessionLimits.maxRewardPenaltyDuration);
+      snprintf(errorLogBuf, sizeof(errorLogBuf), "Start Failed: Penalty %lu s out of range (%lu-%lu s)", penalty,
+               g_sessionLimits.minRewardPenaltyDuration, g_sessionLimits.maxRewardPenaltyDuration);
       logKeyValue("Session", errorLogBuf);
       return 400;
     }
   }
-  
+
   // 2. Populate Active Configuration (Intent & Logic)
   // Note: Metadata (durationType, min, max) is handled by WebAPI. We just handle logic here.
   for (int i = 0; i < MAX_CHANNELS; i++)
@@ -293,9 +293,9 @@ void enterLockedState(const char *source) {
 void stopTestSession() {
   logKeyValue("Session", "Stopping test session.");
   g_currentState = READY;
-  
+
   g_sessionTimers.testRemaining = 0;
-  
+
   setTimersForCurrentState(); // Disarms watchdogs
 
   saveState(true);
@@ -317,7 +317,7 @@ void completeSession() {
   logKeyValue("Session", logBuf);
 
   g_currentState = COMPLETED;
-  
+
   // Update timers based on COMPLETED state (Disarms Failsafe/Watchdogs)
   setTimersForCurrentState();
 
@@ -392,7 +392,7 @@ void abortSession(const char *source) {
   char logBuf[100];
 
   if (g_currentState == LOCKED) {
-    
+
     // LOGGING VISUALS: Abort Block
     snprintf(logBuf, sizeof(logBuf), "%sABORTED", LOG_PREFIX_STATE);
     logKeyValue("Session", logBuf);
@@ -427,7 +427,7 @@ void abortSession(const char *source) {
       g_currentState = ABORTED;
       g_sessionTimers.lockRemaining = 0;
       g_sessionTimers.penaltyRemaining = g_sessionTimers.penaltyDuration; // Use stored penalty duration
-      
+
       // Update Timers (Disarm Failsafe/KA, set Watchdog to Critical for Penalty)
       setTimersForCurrentState();
     } else {
@@ -495,7 +495,7 @@ void disarmKeepAliveWatchdog() {
 }
 
 /**
- * Centralized logic to configure hardware timers and safety watchdogs 
+ * Centralized logic to configure hardware timers and safety watchdogs
  * based on the active state.
  */
 void setTimersForCurrentState() {
@@ -522,7 +522,7 @@ void setTimersForCurrentState() {
   } else {
     disarmKeepAliveWatchdog();
   }
-  
+
   g_currentKeepAliveStrikes = 0; // Reset strike counter on any state change
 }
 
@@ -573,7 +573,7 @@ void handleOneSecondTick() {
       for (size_t i = 0; i < MAX_CHANNELS; i++) {
         // Log delay status (Check SESSION TIMERS)
         char tmp[16];
-        snprintf(tmp, sizeof(tmp), "[%d]%lu ", (int)i+1, g_sessionTimers.channelDelays[i]);
+        snprintf(tmp, sizeof(tmp), "[%d]%lu ", (int)i + 1, g_sessionTimers.channelDelays[i]);
         strncat(debugDelayStr, tmp, sizeof(debugDelayStr) - strlen(debugDelayStr) - 1);
 
         // If a delay is configured in the session, we respect it regardless
