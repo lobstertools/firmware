@@ -145,7 +145,7 @@ static const SystemDefaults DEFAULT_SYSTEM_DEFS = {
     5,     // longPressDuration
     10,    // extButtonSignalDuration
     240,   // testModeDuration
-    600,   // failsafeMaxLock
+    300,   // failsafeMaxLock (Death Grip)
     10000, // keepAliveInterval
     4,     // keepAliveMaxStrikes
     5,     // bootLoopThreshold

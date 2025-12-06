@@ -39,7 +39,10 @@ esp_timer_handle_t failsafeTimer = NULL;
  */
 void IRAM_ATTR failsafe_timer_callback(void *arg) {
 
+  logKeyValue("System", "!!CRITICAL!! Death Grip Timer Callback. Unlocking all channels.");
   sendChannelOffAll();
+
+  processLogQueue();
 
   // While technically not 100% ISR-safe (can panic), a panic reset
   // is exactly what we want for a "Failsafe" condition.
@@ -272,10 +275,12 @@ void initializeFailSafeTimer() {
  * Arms the independent hardware timer.
  */
 void armFailsafeTimer() {
-  if (failsafeTimer == NULL)
+  if (failsafeTimer == NULL) {
+    logKeyValue("System", "!!CRITICAL!! armFailsafeTimer called before initializeFailSafeTimer.");
     return;
+  }
 
-  // Start one-shot timer. Converted to microseconds.
+  // Start one-shot timer. Converted from seconds to microseconds.
   uint64_t timeout_us = (uint64_t)g_systemDefaults.failsafeMaxLock * 1000000ULL;
   esp_timer_start_once(failsafeTimer, timeout_us);
 
@@ -291,8 +296,11 @@ void armFailsafeTimer() {
  * Disarms the independent hardware timer.
  */
 void disarmFailsafeTimer() {
-  if (failsafeTimer == NULL)
+  if (failsafeTimer == NULL) {
+    logKeyValue("System", "!!CRITICAL!! disarmFailsafeTimer called before initializeFailSafeTimer.");
     return;
+  }
+  
   esp_timer_stop(failsafeTimer);
   logKeyValue("System", "Death Grip Timer DISARMED.");
 }
