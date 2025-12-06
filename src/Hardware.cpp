@@ -290,11 +290,11 @@ void armFailsafeTimer() {
   }
 
   // Start one-shot timer. Converted from seconds to microseconds.
-  uint64_t timeout_us = (uint64_t)g_systemDefaults.failsafeMaxLock * 1000000ULL;
+  uint64_t timeout_us = (uint64_t)safeSeconds * 1000000ULL;
   esp_timer_start_once(failsafeTimer, timeout_us);
 
   char timeStr[64];
-  formatSeconds(g_systemDefaults.failsafeMaxLock, timeStr, sizeof(timeStr));
+  formatSeconds(safeSeconds, timeStr, sizeof(timeStr));
 
   char logBuf[100];
   snprintf(logBuf, sizeof(logBuf), "Death Grip Timer ARMED: %s", timeStr);
@@ -378,7 +378,11 @@ void checkBootLoop() {
     pinMode(STATUS_LED_PIN, OUTPUT);
     digitalWrite(STATUS_LED_PIN, HIGH);
 
-    delay(30000); // 30 Second penalty box before attempting start
+    // 30 Second penalty box before attempting start
+    for (int i = 0; i < 30; i++) {
+      sendChannelOffAll();
+      delay(1000);
+    }
   }
 
   bootPrefs.putInt("crashes", crashes + 1);
