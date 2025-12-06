@@ -151,7 +151,7 @@ static const SystemDefaults DEFAULT_SYSTEM_DEFS = {
     5,     // bootLoopThreshold
     30000, // stableBootTime
     3,     // wifiMaxRetries
-    300    // armedTimeoutSeconds
+    60     // armedTimeoutSeconds
 };
 
 static const SessionLimits DEFAULT_SESSION_LIMITS = {

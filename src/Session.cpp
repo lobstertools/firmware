@@ -208,7 +208,10 @@ int startSession(unsigned long duration, unsigned long penalty, TriggerStrategy 
   if (g_activeSessionConfig.triggerStrategy == STRAT_BUTTON_TRIGGER) {
     // Wait for Button: Set Timeout using SYSTEM DEFAULT
     g_sessionTimers.triggerTimeout = g_systemDefaults.armedTimeoutSeconds;
-    logKeyValue("Session", "Waiting for Manual Trigger.");
+    char tBuf1[50];
+    formatSeconds(g_systemDefaults.armedTimeoutSeconds, tBuf1, sizeof(tBuf1));
+    snprintf(logBuf, sizeof(logBuf), "Waiting for Manual Trigger. Trigger Timeout set to %s", tBuf1);
+    logKeyValue("Session", logBuf);
   } else {
     // Auto: Timers start ticking immediately in handleOneSecondTick
     logKeyValue("Session", "Auto Sequence Started.");
@@ -498,7 +501,7 @@ void disarmKeepAliveWatchdog() {
 void setTimersForCurrentState() {
   // 1. Hardware Task Watchdog (ESP WDT)
   // CRITICAL states (Active Lock or Penalty) require aggressive watchdog
-  if (g_currentState == LOCKED || g_currentState == ABORTED || g_currentState == TESTING) {
+  if (g_currentState == ARMED || g_currentState == LOCKED || g_currentState == ABORTED || g_currentState == TESTING) {
     updateWatchdogTimeout(CRITICAL_WDT_TIMEOUT);
   } else {
     updateWatchdogTimeout(DEFAULT_WDT_TIMEOUT);
@@ -506,7 +509,7 @@ void setTimersForCurrentState() {
 
   // 2. Failsafe (Death Grip) Timer
   // Only ARMED when physically locked.
-  if (g_currentState == LOCKED || g_currentState == TESTING) {
+  if (g_currentState == ARMED || g_currentState == LOCKED || g_currentState == TESTING) {
     armFailsafeTimer();
   } else {
     disarmFailsafeTimer();
@@ -514,7 +517,7 @@ void setTimersForCurrentState() {
 
   // 3. Keep-Alive (UI) Watchdog
   // Only ARMED when session is active (LOCKED) or testing.
-  if (g_currentState == LOCKED || g_currentState == TESTING) {
+  if (g_currentState == ARMED || g_currentState == LOCKED || g_currentState == TESTING) {
     armKeepAliveWatchdog();
   } else {
     disarmKeepAliveWatchdog();
