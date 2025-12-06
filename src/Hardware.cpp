@@ -281,6 +281,16 @@ void armFailsafeTimer() {
     return;
   }
 
+  const uint32_t ABSOLUTE_SAFETY_MAX_SEC = 10800; // 3 Hours hard limit
+  
+  uint32_t safeSeconds = g_systemDefaults.failsafeMaxLock;
+  if (safeSeconds > ABSOLUTE_SAFETY_MAX_SEC) {
+      safeSeconds = ABSOLUTE_SAFETY_MAX_SEC;
+  }
+  if (safeSeconds < 60) {
+      safeSeconds = 60; // Minimum 1 minute safety
+  }
+
   // Start one-shot timer. Converted from seconds to microseconds.
   uint64_t timeout_us = (uint64_t)g_systemDefaults.failsafeMaxLock * 1000000ULL;
   esp_timer_start_once(failsafeTimer, timeout_us);
