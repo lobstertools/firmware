@@ -381,11 +381,13 @@ void connectWiFiOrProvision() {
     }
 
     if (g_currentState == LOCKED || g_currentState == ARMED || g_currentState == TESTING) {
-      logKeyValue("Network", "Startup WiFi Failed. Skipping BLE to preserve Session Safety.");   
       // Just return. The main loop will run, buttons will work, 
       // and the "Network Fallback" in loop() will catch it later 
       // (triggering the Runtime Abort logic you already wrote).
       return; 
+      logKeyValue("Network", "Startup WiFi Failed. Skipping BLE to preserve Session Safety.");
+      g_triggerProvisioning = true;
+      return;
     }
   }
 
