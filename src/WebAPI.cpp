@@ -107,6 +107,38 @@ void handleKeepAlive(AsyncWebServerRequest *request) {
   request->send(200);
 }
 
+/**
+ * Handler for POST /reboot
+ * Only allows reboot if the session is COMPLETED.
+ */
+void handleReboot(AsyncWebServerRequest *request) {
+  if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(1000)) == pdTRUE) {
+    
+    // You cannot software-reboot out of an active lock.
+    if (g_currentState != COMPLETED && g_currentState != READY) {
+      xSemaphoreGiveRecursive(stateMutex);
+      sendJsonError(request, 403, "Reboot denied. Device is active/locked. Use physical disconnect to abort.");
+      return;
+    }
+    
+    // If we are here, state is COMPLETED or READY. 
+    // Proceed with safe reboot to clear memory.
+    logKeyValue("WebAPI", "User requested safe system reboot.");
+    
+    // Send success response immediately
+    request->send(200, "application/json", "{\"status\":\"rebooting\", \"message\":\"Rebooting to clear memory session...\"}");
+    
+    xSemaphoreGiveRecursive(stateMutex);
+    
+    // Delay slightly to ensure the HTTP response flushes to the client
+    delay(500);
+    ESP.restart();
+    
+  } else {
+    sendJsonError(request, 503, "System Busy");
+  }
+}
+
 // =================================================================================
 // SECTION: SESSION CONTROL HANDLERS (Arm, Abort, Test)
 // =================================================================================
@@ -792,6 +824,9 @@ void setupWebServer() {
 
   // API: Keep-alive endpoint
   server.on("/keepalive", HTTP_POST, handleKeepAlive);
+
+  // API: System Reboot (Safe Reset)
+  server.on("/reboot", HTTP_POST, handleReboot);
 
   // API: Arm/Start a session
   server.on("/arm", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, handleArm);
