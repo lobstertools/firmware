@@ -398,9 +398,9 @@ void abortSession(const char *source) {
       formatSeconds(g_sessionStats.paybackAccumulated, timeStr, sizeof(timeStr));
 
       // Log formatted payback stats
-      snprintf(logBuf, sizeof(logBuf), " %-20s : +%u s", "Payback Added", g_deterrentConfig.paybackTime);
+      snprintf(logBuf, sizeof(logBuf), "%-20s : +%u s", "Payback Added", g_deterrentConfig.paybackTime);
       logKeyValue("Session", logBuf);
-      snprintf(logBuf, sizeof(logBuf), " %-20s : %s", "Total Debt", timeStr);
+      snprintf(logBuf, sizeof(logBuf), "%-20s : %s", "Total Debt", timeStr);
       logKeyValue("Session", logBuf);
     } else {
       logKeyValue("Session", "Disabled (No time added)");
@@ -417,11 +417,14 @@ void abortSession(const char *source) {
       setTimersForCurrentState();
     } else {
       // No Reward Code = No Penalty Box
-      logKeyValue("Session", "Reward Code disabled. Skipping penalty. Transitioning to COMPLETED.");
+      logKeyValue("Session", "Reward Code disabled. Skipping penalty.");
 
       g_currentState = COMPLETED;
       g_sessionTimers.lockRemaining = 0;
       g_sessionTimers.penaltyRemaining = 0;
+
+      snprintf(logBuf, sizeof(logBuf), "%COMPLETED", LOG_PREFIX_STATE);
+      logKeyValue("Session", logBuf);
 
       // Update Timers (Disarm everything)
       setTimersForCurrentState();

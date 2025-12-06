@@ -214,9 +214,9 @@ class ProvisioningCallbacks : public BLECharacteristicCallbacks {
       provisioningPrefs.end();
 
       if (strlen(clampNote) > 0) {
-        snprintf(logBuf, sizeof(logBuf), "Payback: %u s%s (Req: %u)", finalVal, clampNote, rawVal);
+        snprintf(logBuf, sizeof(logBuf), "Payback Time: %u s%s (Req: %u)", finalVal, clampNote, rawVal);
       } else {
-        snprintf(logBuf, sizeof(logBuf), "Payback: %u s", finalVal);
+        snprintf(logBuf, sizeof(logBuf), "Payback Time: %u s", finalVal);
       }
       logKeyValue("BLE", logBuf);
     } 
@@ -239,9 +239,9 @@ class ProvisioningCallbacks : public BLECharacteristicCallbacks {
       provisioningPrefs.end();
 
       if (strlen(clampNote) > 0) {
-        snprintf(logBuf, sizeof(logBuf), "Penalty: %u s%s (Req: %u)", finalVal, clampNote, rawVal);
+        snprintf(logBuf, sizeof(logBuf), "Reward Penalty: %u s%s (Req: %u)", finalVal, clampNote, rawVal);
       } else {
-        snprintf(logBuf, sizeof(logBuf), "Penalty: %u s", finalVal);
+        snprintf(logBuf, sizeof(logBuf), "Reward Penalty: %u s", finalVal);
       }
       logKeyValue("BLE", logBuf);
     }
@@ -321,9 +321,11 @@ void startBLEProvisioning() {
   while (1) {
     processLogQueue();
     if (g_credentialsReceived) {
-      processLogQueue();
       logKeyValue("BLE", "Wifi Credentials received. Restarting...");
-      delay(1000);
+      
+      processLogQueue();
+
+      delay(3000);
       ESP.restart();
     }
     statusLed.Update();
