@@ -181,12 +181,12 @@ static const SystemDefaults DEFAULT_SYSTEM_DEFS = {
 };
 
 static const SessionLimits DEFAULT_SESSION_LIMITS = {
-    900,   // minLockDuration
-    10800, // maxLockDuration
-    900,   // minRewardPenaltyDuration
-    10800, // maxRewardPenaltyDuration
-    300,   // minPaybackTime
-    2700   // maxPaybackTime
+    900,   // minLockDuration (15min)
+    10800, // maxLockDuration (3hr)
+    900,   // minRewardPenaltyDuration (15min)
+    10800, // maxRewardPenaltyDuration (3hr)
+    300,   // minPaybackTime (5min)
+    2700   // maxPaybackTime (45min)
 };
 #endif
 

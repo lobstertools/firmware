@@ -140,7 +140,6 @@ void handleArm(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t
 
   // --- 1. PENALTY RESOLUTION ---
   // Penalty is no longer passed in the API. It is hardcoded from Provisioning settings.
-  // (implied logic shift per prompt)
   unsigned long resolvedPenalty = g_deterrentConfig.rewardPenalty;
 
   // --- 2. DURATION RESOLUTION ---

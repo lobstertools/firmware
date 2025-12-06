@@ -123,21 +123,33 @@ void resetToReady(bool generateNewCode) {
  * @param hide: Visibility flag
  */
 int startSession(unsigned long duration, unsigned long penalty, TriggerStrategy strategy, unsigned long *delays, bool hide) {
+  char errorLogBuf[128];
+
   // State check
   if (g_currentState != READY) {
+    snprintf(errorLogBuf, sizeof(errorLogBuf), "Start Failed: Device not READY (Current State: %d)", g_currentState);
+    logKeyValue("Session", errorLogBuf);
     return 409;
   }
 
   // 1. Validate ranges against SESSION LIMITS
-  if (duration < g_sessionLimits.minLockDuration || duration > g_sessionLimits.maxLockDuration)
+  if (duration < g_sessionLimits.minLockDuration || duration > g_sessionLimits.maxLockDuration) {
+    snprintf(errorLogBuf, sizeof(errorLogBuf), "Start Failed: Duration %lu s out of range (%lu-%lu s)", 
+             duration, g_sessionLimits.minLockDuration, g_sessionLimits.maxLockDuration);
+    logKeyValue("Session", errorLogBuf);
     return 400;
+  }
 
   // Only enforce penalty range if Reward Code is enabled
   if (g_deterrentConfig.enableRewardCode) {
-    if (penalty < g_sessionLimits.minRewardPenaltyDuration || penalty > g_sessionLimits.maxRewardPenaltyDuration)
+    if (penalty < g_sessionLimits.minRewardPenaltyDuration || penalty > g_sessionLimits.maxRewardPenaltyDuration) {
+      snprintf(errorLogBuf, sizeof(errorLogBuf), "Start Failed: Penalty %lu s out of range (%lu-%lu s)", 
+               penalty, g_sessionLimits.minRewardPenaltyDuration, g_sessionLimits.maxRewardPenaltyDuration);
+      logKeyValue("Session", errorLogBuf);
       return 400;
+    }
   }
-
+  
   // 2. Populate Active Configuration (Intent & Logic)
   // Note: Metadata (durationType, min, max) is handled by WebAPI. We just handle logic here.
   for (int i = 0; i < MAX_CHANNELS; i++)
