@@ -441,7 +441,7 @@ void checkSystemHealth() {
     snprintf(logBuf, sizeof(logBuf), "CRITICAL: Overheating detected (%.1f C)! Emergency Stop.", currentTemp);
     logKeyValue("System", logBuf);
 
-    sendChannelOffAll();
+    abortSession("Device Overheating");
   }
 }
 
