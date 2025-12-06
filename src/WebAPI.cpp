@@ -88,8 +88,9 @@ void handleHealth(AsyncWebServerRequest *request) {
 void handleKeepAlive(AsyncWebServerRequest *request) {
   // Guard access to variables
   if (xSemaphoreTakeRecursive(stateMutex, (TickType_t)pdMS_TO_TICKS(100)) == pdTRUE) {
-    // "Pet" the watchdog only if the session is in the LOCKED state
-    if (g_currentState == LOCKED || g_currentState == TESTING) {
+
+    // "Pet" the watchdog only if the state is critical
+    if (g_currentState == LOCKED || g_currentState == TESTING || g_currentState == ARMED) {
       g_lastKeepAliveTime = millis();
 
       // Log if we are recovering from missed checks
