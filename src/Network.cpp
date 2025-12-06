@@ -323,6 +323,10 @@ void startBLEProvisioning() {
   // --- Wait here forever until credentials are set ---
   while (1) {
     processLogQueue();
+
+    // Actively force pins LOW every cycle to prevent latch-up/glitches
+    sendChannelOffAll();
+
     if (g_credentialsReceived) {
       logKeyValue("BLE", "Wifi Credentials received. Restarting...");
 
