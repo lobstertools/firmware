@@ -19,73 +19,8 @@
 // --- Device Name String ---
 #define DEVICE_NAME "LobsterLock-diymore-MOS"
 
-
-// --- Session Constants & NVS ---
-#define REWARD_HISTORY_SIZE 10
-#define REWARD_CODE_LENGTH 32
-#define REWARD_CHECKSUM_LENGTH 16
-
 // --- Enums & Structs ---
 
-// Main state machine enum.
-enum DeviceState : uint8_t { VALIDATING, READY, ARMED, LOCKED, ABORTED, COMPLETED, TESTING };
-
-// Trigger Strategy (How we move from ARMED -> LOCKED)
-enum TriggerStrategy : uint8_t { STRAT_AUTO_COUNTDOWN, STRAT_BUTTON_TRIGGER };
-
-// Duration Type Enum (Intent)
-enum DurationType : uint8_t { DUR_FIXED, DUR_RANDOM, DUR_RANGE };
-
-// Struct for storing reward code history.
-struct Reward {
-  char code[REWARD_CODE_LENGTH + 1];
-  char checksum[REWARD_CHECKSUM_LENGTH + 1];
-};
-
-// Struct to hold the Active Session Configuration (Intent & Logic)
-struct ActiveSessionConfig {
-  DurationType durationType;
-  uint32_t durationMin;
-  uint32_t durationMax;
-
-  TriggerStrategy triggerStrategy;
-  uint32_t channelDelays[MAX_CHANNELS];
-  bool hideTimer;
-};
-
-// Struct to hold the Remaining Session Timers
-struct SessionTimers {
-  uint32_t lockDuration;
-  uint32_t penaltyDuration;
-  uint32_t lockRemaining;
-  uint32_t penaltyRemaining;
-  uint32_t testRemaining;
-  uint32_t triggerTimeout;
-
-  uint32_t channelDelays[MAX_CHANNELS];
-};
-
-// Struct to hold the accumulated session statistics
-struct SessionStats {
-  uint32_t streaks;
-  uint32_t completed;
-  uint32_t aborted;
-  uint32_t paybackAccumulated;
-  uint32_t totalLockedTime;
-};
-
-// Struct to hold the Deterrent Configuration during provisioning
-struct DeterrentConfig {
-  bool enableStreaks;
-  bool enableRewardCode;
-  uint32_t rewardPenalty;
-  bool enablePaybackTime;
-  uint32_t paybackTime;
-};
-
-// --- SYSTEM PREFERENCES  ---
-
-// 1. Hardware & System Behavior Defaults
 // These define how the physical device and firmware loops behave.
 struct SystemDefaults {
   uint32_t longPressDuration;       // ms or seconds (depending on implementation)
@@ -100,16 +35,6 @@ struct SystemDefaults {
   uint32_t armedTimeoutSeconds;     // Auto-disarm timeout
 };
 
-// 2. Session Constraints (Limits)
-// These define the allowable ranges for a user to configure a session.
-struct SessionLimits {
-  uint32_t minLockDuration;
-  uint32_t maxLockDuration;
-  uint32_t minRewardPenaltyDuration;
-  uint32_t maxRewardPenaltyDuration;
-  uint32_t minPaybackTime;
-  uint32_t maxPaybackTime;
-};
 
 #ifdef DEBUG_MODE
 // ============================================================================

@@ -14,7 +14,72 @@
 #ifndef SESSION_H
 #define SESSION_H
 
-#include "Config.h"
+#include "Hardware.h"
+
+// Main state machine enum.
+enum DeviceState : uint8_t { VALIDATING, READY, ARMED, LOCKED, ABORTED, COMPLETED, TESTING };
+
+// Trigger Strategy to move from ARMED -> LOCKED
+enum TriggerStrategy : uint8_t { STRAT_AUTO_COUNTDOWN, STRAT_BUTTON_TRIGGER };
+
+// Duration Type Enum (Intent)
+enum DurationType : uint8_t { DUR_FIXED, DUR_RANDOM, DUR_RANGE };
+
+// --- Session Constants & NVS ---
+#define REWARD_HISTORY_SIZE 10
+#define REWARD_CODE_LENGTH 32
+#define REWARD_CHECKSUM_LENGTH 16
+
+struct Reward {
+  char code[REWARD_CODE_LENGTH + 1];
+  char checksum[REWARD_CHECKSUM_LENGTH + 1];
+};
+
+struct SessionConfig {
+  DurationType durationType;
+  uint32_t fixedDuration;
+  uint32_t minDuration;
+  uint32_t maxDuration;
+  TriggerStrategy triggerStrategy;
+  uint32_t channelDelays[MAX_CHANNELS];
+  bool hideTimer;
+};
+
+struct SessionTimers {
+  uint32_t lockDuration;
+  uint32_t penaltyDuration;
+  uint32_t lockRemaining;
+  uint32_t penaltyRemaining;
+  uint32_t testRemaining;
+  uint32_t triggerTimeout;
+
+  uint32_t channelDelays[MAX_CHANNELS];
+};
+
+struct SessionStats {
+  uint32_t streaks;
+  uint32_t completed;
+  uint32_t aborted;
+  uint32_t paybackAccumulated;
+  uint32_t totalLockedTime;    
+};
+
+struct DeterrentConfig {
+  bool enableStreaks;
+  bool enableRewardCode;
+  uint32_t rewardPenalty;
+  bool enablePaybackTime;
+  uint32_t paybackTime;
+};
+
+struct SessionLimits {
+  uint32_t minLockDuration;
+  uint32_t maxLockDuration;
+  uint32_t minRewardPenaltyDuration;
+  uint32_t maxRewardPenaltyDuration;
+  uint32_t minPaybackTime;
+  uint32_t maxPaybackTime;
+};
 
 // =================================================================================
 // SECTION: LIFECYCLE & RECOVERY
