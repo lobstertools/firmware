@@ -14,8 +14,34 @@
 #ifndef HARDWARE_H
 #define HARDWARE_H
 
-#include "Config.h"
 #include <Arduino.h>
+
+// --- Hardware & Global Configuration ---
+#define SERIAL_BAUD_RATE 115200
+
+#define DEFAULT_WDT_TIMEOUT 20 // Relaxed for READY state
+#define CRITICAL_WDT_TIMEOUT 5 // Tight for LOCKED state
+#define MAX_SAFE_TEMP_C 85.0   // Safety Threshold (85°C)
+
+// --- System Identification & Validation ---
+#define MAGIC_VALUE 0x3CADD200
+
+// --- Pin Definitions ---
+#define PCB_BUTTON_PIN 0 // Standard ESP32 Boot Button
+
+#ifdef DEBUG_MODE
+// Development (Diymore Debug)
+#define STATUS_LED_PIN 23
+// EXT_BUTTON_PIN is purposefully undefined in Debug mode
+#else
+// Production (Diymore Release)
+#define STATUS_LED_PIN 21
+#define EXT_BUTTON_PIN 15 // External NC Switch
+#endif
+
+// --- Channel-Specific Configuration ---
+#define MAX_CHANNELS 4
+static const int HARDWARE_PINS[MAX_CHANNELS] = {16, 17, 26, 27};
 
 // =================================================================================
 // SECTION: CORE HARDWARE LOGIC
