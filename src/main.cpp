@@ -98,9 +98,6 @@ void printStartupDiagnostics() {
   snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Test Session Duration", g_systemDefaults.testModeDuration);
   logMessage(logBuf);
 
-  snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Failsafe Timeout", g_systemDefaults.failsafeMaxLock);
-  logMessage(logBuf);
-
   snprintf(logBuf, sizeof(logBuf), " %-25s : %u ms / %u", "Keep-Alive", g_systemDefaults.keepAliveInterval,
            g_systemDefaults.keepAliveMaxStrikes);
   logMessage(logBuf);

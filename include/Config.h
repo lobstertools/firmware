@@ -13,8 +13,8 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#include <Arduino.h>
 #include <string>
+#include "Session.h"
 
 // --- Device Name String ---
 #define DEVICE_NAME "LobsterLock-diymore-MOS"
@@ -26,7 +26,6 @@ struct SystemDefaults {
   uint32_t longPressDuration;       // ms or seconds (depending on implementation)
   uint32_t extButtonSignalDuration; // Debounce/Signal check duration
   uint32_t testModeDuration;        // Duration of hardware test
-  uint32_t failsafeMaxLock;         // Absolute safety override
   uint32_t keepAliveInterval;       // Watchdog ping interval
   uint32_t keepAliveMaxStrikes;     // Watchdog tolerance
   uint32_t bootLoopThreshold;       // Crash detection
@@ -44,7 +43,6 @@ static const SystemDefaults DEFAULT_SYSTEM_DEFS = {
     5,     // longPressDuration
     10,    // extButtonSignalDuration
     240,   // testModeDuration
-    300,   // failsafeMaxLock (Death Grip)
     10000, // keepAliveInterval
     4,     // keepAliveMaxStrikes
     5,     // bootLoopThreshold
@@ -70,7 +68,6 @@ static const SystemDefaults DEFAULT_SYSTEM_DEFS = {
     5,      // longPressDuration
     10,     // extButtonSignalDuration
     240,    // testModeDuration
-    14400,  // failsafeMaxLock
     10000,  // keepAliveInterval
     4,      // keepAliveMaxStrikes
     5,      // bootLoopThreshold

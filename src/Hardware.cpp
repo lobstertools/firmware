@@ -272,6 +272,8 @@ void initializeFailSafeTimer() {
 
 /**
  * Arms the independent hardware timer.
+ * Finds the smallest hardcoded tier that is greater than or equal to
+ * the user's requested safety limit.
  */
 void armFailsafeTimer() {
   if (failsafeTimer == NULL) {
@@ -279,25 +281,77 @@ void armFailsafeTimer() {
     return;
   }
 
-  const uint32_t ABSOLUTE_SAFETY_MAX_SEC = 10800; // 3 Hours hard limit
+  // 1. Define High-Density Safety Tiers
+  // We use a dense array to ensure the "Safety Gap" is small.
+  // - < 24 Hours:  4 Hour steps
+  // - > 24 Hours:  1 Day steps
+  const uint32_t ONE_HOUR = 3600;
+  const uint32_t ONE_DAY  = 86400;
 
-  uint32_t safeSeconds = g_systemDefaults.failsafeMaxLock;
-  if (safeSeconds > ABSOLUTE_SAFETY_MAX_SEC) {
-    safeSeconds = ABSOLUTE_SAFETY_MAX_SEC;
-  }
-  if (safeSeconds < 60) {
-    safeSeconds = 60; // Minimum 1 minute safety
+  const uint32_t SAFETY_TIERS[] = {
+    // --- Intra-Day Tiers (4h Steps) ---
+    4  * ONE_HOUR,
+    8  * ONE_HOUR,
+    12 * ONE_HOUR,
+    16 * ONE_HOUR,
+    20 * ONE_HOUR,
+    24 * ONE_HOUR, // 1 Day
+
+    // --- Daily Tiers (1 Day Steps) ---
+    2  * ONE_DAY,
+    3  * ONE_DAY,
+    4  * ONE_DAY,
+    5  * ONE_DAY,
+    6  * ONE_DAY,
+    7  * ONE_DAY, // 1 Week
+    8  * ONE_DAY,
+    9  * ONE_DAY,
+    10 * ONE_DAY,
+    11 * ONE_DAY,
+    12 * ONE_DAY,
+    13 * ONE_DAY,
+    14 * ONE_DAY  // 2 Weeks (Absolute Hard Max)
+  };
+
+  const int NUM_TIERS = sizeof(SAFETY_TIERS) / sizeof(SAFETY_TIERS[0]);
+
+  // 2. Get User Request
+  uint32_t requestedSeconds = g_sessionTimers.lockDuration;
+
+  // Basic sanity clamp for minimum time
+  if (requestedSeconds < g_sessionLimits.minLockDuration) {
+    requestedSeconds = g_sessionLimits.minLockDuration + 60;
   }
 
+  // 3. Select the appropriate Tier
+  // Default to the Absolute Max (Last Tier) to catch any huge requests
+  uint32_t armedSeconds = SAFETY_TIERS[NUM_TIERS - 1]; 
+
+  for (int i = 0; i < NUM_TIERS; i++) {
+    // Find the first tier that fits the request
+    if (SAFETY_TIERS[i] >= requestedSeconds) {
+      armedSeconds = SAFETY_TIERS[i];
+      break; 
+    }
+  }
+
+  // 4. Arm the Timer
   // Start one-shot timer. Converted from seconds to microseconds.
-  uint64_t timeout_us = (uint64_t)safeSeconds * 1000000ULL;
+  uint64_t timeout_us = (uint64_t)armedSeconds * 1000000ULL;
   esp_timer_start_once(failsafeTimer, timeout_us);
 
+  // 5. Logging
   char timeStr[64];
-  formatSeconds(safeSeconds, timeStr, sizeof(timeStr));
+  formatSeconds(armedSeconds, timeStr, sizeof(timeStr));
 
-  char logBuf[100];
-  snprintf(logBuf, sizeof(logBuf), "Death Grip Timer ARMED: %s", timeStr);
+  char logBuf[128];
+  // Calculate the "Safety Gap" (how much extra time was added) for visibility
+  uint32_t overhead = (armedSeconds > requestedSeconds) ? (armedSeconds - requestedSeconds) : 0;
+  
+  snprintf(logBuf, sizeof(logBuf), 
+    "Death Grip ARMED: %s (Buffer: +%u sec)", 
+    timeStr, overhead);
+    
   logKeyValue("System", logBuf);
 }
 
