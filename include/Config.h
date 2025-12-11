@@ -1,7 +1,7 @@
 /*
  * =================================================================================
  * Project:   Lobster Lock - Self-Bondage Session Manager
- * File:      Config.h
+ * File:      include/Config.h
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -10,30 +10,42 @@
  * default settings, safety limits (thermal/timing), and compiler flags.
  * =================================================================================
  */
-#ifndef CONFIG_H
-#define CONFIG_H
-
-#include <string>
-#include "Session.h"
+#pragma once
+#include "Types.h"
 
 // --- Device Name String ---
 #define DEVICE_NAME "LobsterLock-diymore-MOS"
 
+// =================================================================================
+// SECTION: HARDWARE & SYSTEM OBJECTS
+// =================================================================================
+
+#define SERIAL_BAUD_RATE 115200
+#define DEFAULT_WDT_TIMEOUT 20 // Relaxed for READY state
+#define CRITICAL_WDT_TIMEOUT 5 // Tight for LOCKED state
+#define MAX_SAFE_TEMP_C 85.0   // Safety Threshold (85°C)
+
+// System Identification
+#define MAGIC_VALUE 0x3CBDD200
+
+// --- Pin Definitions ---
+#define PCB_BUTTON_PIN 0 // Standard ESP32 Boot Button
+
+#ifdef DEBUG_MODE
+// Development (Diymore Debug)
+#define STATUS_LED_PIN 23
+// EXT_BUTTON_PIN is purposefully undefined in Debug mode
+#else
+// Production (Diymore Release)
+#define STATUS_LED_PIN 21
+#define EXT_BUTTON_PIN 15 // External NC Switch
+#endif
+
+// --- Channel-Specific Configuration ---
+
+static const int HARDWARE_PINS[MAX_CHANNELS] = {16, 17, 26, 27};
+
 // --- Enums & Structs ---
-
-// These define how the physical device and firmware loops behave.
-struct SystemDefaults {
-  uint32_t longPressDuration;       // ms or seconds (depending on implementation)
-  uint32_t extButtonSignalDuration; // Debounce/Signal check duration
-  uint32_t testModeDuration;        // Duration of hardware test
-  uint32_t keepAliveInterval;       // Watchdog ping interval
-  uint32_t keepAliveMaxStrikes;     // Watchdog tolerance
-  uint32_t bootLoopThreshold;       // Crash detection
-  uint32_t stableBootTime;          // Crash detection
-  uint32_t wifiMaxRetries;          // Network attempt limit
-  uint32_t armedTimeoutSeconds;     // Auto-disarm timeout
-};
-
 
 #ifdef DEBUG_MODE
 // ============================================================================
@@ -51,15 +63,6 @@ static const SystemDefaults DEFAULT_SYSTEM_DEFS = {
     60     // armedTimeoutSeconds
 };
 
-static const SessionLimits DEFAULT_SESSION_LIMITS = {
-    10,   // minLockDuration
-    240,  // maxLockDuration
-    10,   // minRewardPenaltyDuration
-    3600, // maxRewardPenaltyDuration
-    10,   // minPaybackTime
-    600   // maxPaybackTime
-};
-
 #else
 // ============================================================================
 // PRODUCTION / RELEASE DEFAULTS
@@ -75,15 +78,4 @@ static const SystemDefaults DEFAULT_SYSTEM_DEFS = {
     5,      // wifiMaxRetries
     1800    // armedTimeoutSeconds
 };
-
-static const SessionLimits DEFAULT_SESSION_LIMITS = {
-    900,   // minLockDuration (15min)
-    10800, // maxLockDuration (3hr)
-    900,   // minRewardPenaltyDuration (15min)
-    10800, // maxRewardPenaltyDuration (3hr)
-    300,   // minPaybackTime (5min)
-    2700   // maxPaybackTime (45min)
-};
-#endif
-
 #endif

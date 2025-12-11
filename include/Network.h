@@ -1,33 +1,67 @@
 /*
  * =================================================================================
- * Project:   Lobster Lock - Self-Bondage Session Manager
- * File:      Network.h / Network.cpp
- *
- * SPDX-License-Identifier: Apache-2.0
- *
- * Description:
- * Network management module. Handles Wi-Fi connection logic, mDNS advertising,
- * and the BLE Provisioning fallback mechanism for setting credentials and
- * initial configuration.
+ * File:      include/Network.h
+ * Description: Public interface for Network Management.
+ * Refactor: Converted to Singleton Class 'NetworkManager'.
  * =================================================================================
  */
-#ifndef NETWORK_H
-#define NETWORK_H
-
+#pragma once
 #include <Arduino.h>
+#include <WiFi.h>
 #include <freertos/timers.h>
 
-// =================================================================================
-// SECTION: WIFI LOGIC
-// =================================================================================
-void connectWiFiOrProvision();
-void handleNetworkFallback();
+class NetworkManager {
+public:
+  // Singleton Accessor
+  static NetworkManager &getInstance();
 
-// =================================================================================
-// SECTION: GLOBALS & EXTERNS
-// =================================================================================
-extern TimerHandle_t wifiReconnectTimer;
-extern int g_wifiRetries;
-extern volatile bool g_credentialsReceived;
+  // --- Public API ---
 
-#endif
+  /**
+   * Attempts to connect to WiFi using stored credentials.
+   * If it fails after retries, it sets an internal flag requesting provisioning.
+   * It DOES NOT block or change state itself.
+   */
+  void connectOrRequestProvisioning();
+
+  /**
+   * Checks if the network layer has failed and is requesting user intervention.
+   * Used by the HAL/SessionEngine to decide when to pause operations.
+   */
+  bool isProvisioningNeeded() const { return _triggerProvisioning; }
+
+  /**
+   * Enters the blocking BLE Provisioning loop.
+   * This function does not return until the device is rebooted.
+   * It enforces hardware safety (pins LOW) internally.
+   */
+  void startBLEProvisioningBlocking();
+
+  void printStartupDiagnostics();
+
+private:
+  NetworkManager(); // Private Constructor
+
+  void log(const char *key, const char *value);
+
+  // --- Internal State ---
+  char _wifiSSID[33];
+  char _wifiPass[65];
+  bool _wifiCredentialsExist;
+
+  volatile bool _triggerProvisioning;
+  volatile int _wifiRetries;
+  TimerHandle_t _wifiReconnectTimer;
+
+  // --- Helpers ---
+  void connectToWiFi();
+  void startMDNS();
+
+  // --- Static Callbacks (Trampolines) ---
+  static void onWiFiEvent(WiFiEvent_t event);
+  static void onWifiTimer(TimerHandle_t t);
+
+  // --- Member Event Handlers ---
+  void handleWiFiEvent(WiFiEvent_t event);
+  void handleWifiTimer();
+};

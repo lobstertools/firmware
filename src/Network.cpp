@@ -1,13 +1,11 @@
 /*
  * =================================================================================
  * Project:   Lobster Lock - Self-Bondage Session Manager
- * File:      Network.cpp
- *
- * SPDX-License-Identifier: Apache-2.0
+ * File:      src/Network.cpp
  *
  * Description:
- * Network management module. Handles Wi-Fi connection logic, mDNS advertising,
- * and the BLE Provisioning fallback mechanism.
+ * Network management module. Handles Wi-Fi connection logic and BLE Provisioning.
+ * Refactor: Object-Oriented implementation.
  * =================================================================================
  */
 #include <BLEDevice.h>
@@ -17,12 +15,12 @@
 #include <WiFi.h>
 #include <esp_task_wdt.h>
 
+#include "Config.h"
+#include "Esp32SessionHAL.h"
 #include "Globals.h"
-#include "Hardware.h"
-#include "Logger.h"
 #include "Network.h"
-#include "Session.h"
-#include "Utils.h"
+#include "SettingsManager.h"
+#include "Types.h"
 
 // =================================================================================
 // SECTION: CONSTANTS & UUIDS
@@ -48,55 +46,66 @@
 #define PROV_CH4_ENABLE_UUID "5a16000d-8334-469b-a316-c340cf29188f"
 
 // =================================================================================
-// SECTION: GLOBALS
+// SECTION: CLASS IMPLEMENTATION
 // =================================================================================
 
-volatile bool g_credentialsReceived = false;
-TimerHandle_t wifiReconnectTimer = NULL;
-int g_wifiRetries = 0;
+NetworkManager &NetworkManager::getInstance() {
+  static NetworkManager instance;
+  return instance;
+}
+
+NetworkManager::NetworkManager() : _wifiCredentialsExist(false), _triggerProvisioning(false), _wifiRetries(0), _wifiReconnectTimer(NULL) {
+  memset(_wifiSSID, 0, sizeof(_wifiSSID));
+  memset(_wifiPass, 0, sizeof(_wifiPass));
+}
+
+void NetworkManager::log(const char *key, const char *val) { Esp32SessionHAL::getInstance().logKeyValue(key, val); }
 
 // =================================================================================
 // SECTION: WIFI LOGIC
 // =================================================================================
 
-/**
- * Trigger the WiFi connection process using stored credentials.
- */
-void connectToWiFi() {
-  if (!g_wifiCredentialsExist)
+void NetworkManager::connectToWiFi() {
+  if (!_wifiCredentialsExist)
     return;
   if (WiFi.status() == WL_CONNECTED)
     return;
 
-  logKeyValue("Network", "Connecting...");
+  log("Network", "Connecting...");
   WiFi.mode(WIFI_STA);
-  WiFi.begin(g_wifiSSID, g_wifiPass);
+  WiFi.begin(_wifiSSID, _wifiPass);
 }
 
-/**
- * Handle WiFi connection events (connected, disconnected, etc).
- */
-void WiFiEvent(WiFiEvent_t event) {
+// --- Static Callbacks ---
+
+void NetworkManager::onWiFiEvent(WiFiEvent_t event) { getInstance().handleWiFiEvent(event); }
+
+void NetworkManager::onWifiTimer(TimerHandle_t t) { getInstance().handleWifiTimer(); }
+
+// --- Member Handlers ---
+
+void NetworkManager::handleWifiTimer() { connectToWiFi(); }
+
+void NetworkManager::handleWiFiEvent(WiFiEvent_t event) {
   switch (event) {
-  case ARDUINO_EVENT_WIFI_STA_GOT_IP: {
-    char logBuf[64];
-    snprintf(logBuf, sizeof(logBuf), "Connected. IP: %s", WiFi.localIP().toString().c_str());
-    logKeyValue("Network", logBuf);
-    g_wifiRetries = 0;
-    if (wifiReconnectTimer != NULL)
-      xTimerStop(wifiReconnectTimer, 0);
+  case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+    log("Network", "Connected.");
+    _wifiRetries = 0;
+    if (_wifiReconnectTimer != NULL)
+      xTimerStop(_wifiReconnectTimer, 0);
     break;
-  }
   case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
-    if (g_wifiRetries >= g_systemDefaults.wifiMaxRetries) {
-      logKeyValue("Network", "Max retries exceeded. Falling back to BLE Provisioning...");
-      if (wifiReconnectTimer != NULL)
-        xTimerStop(wifiReconnectTimer, 0);
-      g_triggerProvisioning = true;
+    // If we fail too many times, we don't abort directly.
+    // We just raise the flag. The Engine will decide what to do.
+    if (_wifiRetries >= g_systemDefaults.wifiMaxRetries) {
+      log("Network", "Max retries exceeded. Requesting Provisioning...");
+      if (_wifiReconnectTimer != NULL)
+        xTimerStop(_wifiReconnectTimer, 0);
+      _triggerProvisioning = true;
     } else {
-      g_wifiRetries++;
-      if (wifiReconnectTimer != NULL)
-        xTimerStart(wifiReconnectTimer, 0);
+      _wifiRetries++;
+      if (_wifiReconnectTimer != NULL)
+        xTimerStart(_wifiReconnectTimer, 0);
     }
     break;
   default:
@@ -104,39 +113,43 @@ void WiFiEvent(WiFiEvent_t event) {
   }
 }
 
-/**
- * Starts the mDNS service to advertise 'lobster-lock.local'
- */
-void startMDNS() {
-  logKeyValue("Network", "Starting mDNS advertiser...");
+void NetworkManager::startMDNS() {
+  log("Network", "Starting mDNS advertiser...");
   uint8_t mac[6];
   esp_efuse_mac_get_default(mac);
   char uniqueHostname[30];
   snprintf(uniqueHostname, sizeof(uniqueHostname), "lobster-lock-%02X%02X%02X", mac[3], mac[4], mac[5]);
 
-  // Set the unique hostname (e.g., lobster-lock-AABBCC.local)
   if (!MDNS.begin(uniqueHostname)) {
-    logKeyValue("Network", "Failed to set up mDNS responder!");
+    log("Network", "Failed to set up mDNS responder!");
     return;
   }
-  // Announce the service your NodeJS app will look for
   MDNS.addService("lobster-lock", "tcp", 80);
-  MDNS.addServiceTxt("lobster-lock", "tcp", "mac", WiFi.macAddress().c_str());
 
   char logBuf[64];
   snprintf(logBuf, sizeof(logBuf), "mDNS active: %s.local", uniqueHostname);
-  logKeyValue("Network", logBuf);
+  log("Network", logBuf);
 }
 
 // =================================================================================
-// SECTION: BLE PROVISIONING LOGIC
+// SECTION: BLE PROVISIONING (Transport Only)
 // =================================================================================
 
-/**
- * BLE callback class to handle writes to characteristics.
- * This receives the Wi-Fi credentials and config from the server/UI.
- */
+uint16_t bytesToUint16(uint8_t *data) { return (uint16_t)data[0] | ((uint16_t)data[1] << 8); }
+uint32_t bytesToUint32(uint8_t *data) {
+  return (uint32_t)data[0] | ((uint32_t)data[1] << 8) | ((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24);
+}
+
 class ProvisioningCallbacks : public BLECharacteristicCallbacks {
+  // Flag to signal completion to the manager
+  bool *_credentialsReceivedPtr;
+
+private:
+  void log(const char *key, const char *val) { Esp32SessionHAL::getInstance().logKeyValue(key, val); }
+
+public:
+  ProvisioningCallbacks(bool *flagPtr) : _credentialsReceivedPtr(flagPtr) {}
+
   void onWrite(BLECharacteristic *pCharacteristic) {
     std::string uuid = pCharacteristic->getUUID().toString();
     uint8_t *data = pCharacteristic->getData();
@@ -145,155 +158,58 @@ class ProvisioningCallbacks : public BLECharacteristicCallbacks {
     if (len == 0)
       return;
 
-    char logBuf[100]; // Buffer for formatted log messages
-
-    // --- 1. WiFi Credentials ---
+    // --- Delegate all logic to SettingsManager ---
     if (uuid == PROV_SSID_CHAR_UUID) {
-      std::string value(data, data + len);
-      wifiPreferences.begin("wifi-creds", false);
-      wifiPreferences.putString("ssid", value.c_str());
-      wifiPreferences.end();
-
-      snprintf(logBuf, sizeof(logBuf), "SSID Set: %s", value.c_str());
-      logKeyValue("BLE", logBuf);
+      std::string val(data, data + len);
+      SettingsManager::setWifiSSID(val.c_str());
+      log("BLE", "SSID Received");
     } else if (uuid == PROV_PASS_CHAR_UUID) {
-      std::string value(data, data + len);
-      wifiPreferences.begin("wifi-creds", false);
-      wifiPreferences.putString("pass", value.c_str());
-      wifiPreferences.end();
+      std::string val(data, data + len);
+      SettingsManager::setWifiPassword(val.c_str());
+      log("BLE", "Password Received");
 
-      // Do not log the actual password
-      snprintf(logBuf, sizeof(logBuf), "Password Received (%u chars)", len);
-      logKeyValue("BLE", logBuf);
-      g_credentialsReceived = true;
-    }
-
-    // --- 2. Deterrent Config ---
-    else if (uuid == PROV_ENABLE_REWARD_CODE_CHAR_UUID) {
-      bool enable = (bool)data[0];
-      provisioningPrefs.begin("provisioning", false);
-      provisioningPrefs.putBool("enableCode", enable);
-      provisioningPrefs.end();
-
-      snprintf(logBuf, sizeof(logBuf), "Reward Code: %s", enable ? "ENABLED" : "DISABLED");
-      logKeyValue("BLE", logBuf);
-    } else if (uuid == PROV_ENABLE_STREAKS_CHAR_UUID) {
-      bool enable = (bool)data[0];
-      provisioningPrefs.begin("provisioning", false);
-      provisioningPrefs.putBool("enableStreaks", enable);
-      provisioningPrefs.end();
-
-      snprintf(logBuf, sizeof(logBuf), "Streaks: %s", enable ? "ENABLED" : "DISABLED");
-      logKeyValue("BLE", logBuf);
-    } else if (uuid == PROV_ENABLE_PAYBACK_TIME_CHAR_UUID) {
-      bool enable = (bool)data[0];
-      provisioningPrefs.begin("provisioning", false);
-      provisioningPrefs.putBool("enablePayback", enable);
-      provisioningPrefs.end();
-
-      snprintf(logBuf, sizeof(logBuf), "Payback Time: %s", enable ? "ENABLED" : "DISABLED");
-      logKeyValue("BLE", logBuf);
-    } else if (uuid == PROV_PAYBACK_TIME_CHAR_UUID) {
-      provisioningPrefs.begin("provisioning", false);
-      uint32_t rawVal = bytesToUint32(data);
-      uint32_t finalVal = rawVal;
-      const char *clampNote = "";
-
-      // Logic: Clamping
-      if (finalVal < g_sessionLimits.minPaybackTime) {
-        finalVal = g_sessionLimits.minPaybackTime;
-        clampNote = " (Clamped Min)";
-      } else if (finalVal > g_sessionLimits.maxPaybackTime) {
-        finalVal = g_sessionLimits.maxPaybackTime;
-        clampNote = " (Clamped Max)";
-      }
-
-      provisioningPrefs.putUInt("paybackSeconds", finalVal);
-      provisioningPrefs.end();
-
-      if (strlen(clampNote) > 0) {
-        snprintf(logBuf, sizeof(logBuf), "Payback Time: %u s%s (Req: %u)", finalVal, clampNote, rawVal);
-      } else {
-        snprintf(logBuf, sizeof(logBuf), "Payback Time: %u s", finalVal);
-      }
-      logKeyValue("BLE", logBuf);
-    } else if (uuid == PROV_REWARD_PENALTY_CHAR_UUID) {
-      provisioningPrefs.begin("provisioning", false);
-      uint32_t rawVal = bytesToUint32(data);
-      uint32_t finalVal = rawVal;
-      const char *clampNote = "";
-
-      // Logic: Clamping
-      if (finalVal < g_sessionLimits.minRewardPenaltyDuration) {
-        finalVal = g_sessionLimits.minRewardPenaltyDuration;
-        clampNote = " (Clamped Min)";
-      } else if (finalVal > g_sessionLimits.maxRewardPenaltyDuration) {
-        finalVal = g_sessionLimits.maxRewardPenaltyDuration;
-        clampNote = " (Clamped Max)";
-      }
-
-      provisioningPrefs.putUInt("rwdPenaltySec", finalVal);
-      provisioningPrefs.end();
-
-      if (strlen(clampNote) > 0) {
-        snprintf(logBuf, sizeof(logBuf), "Reward Penalty: %u s%s (Req: %u)", finalVal, clampNote, rawVal);
-      } else {
-        snprintf(logBuf, sizeof(logBuf), "Reward Penalty: %u s", finalVal);
-      }
-      logKeyValue("BLE", logBuf);
-    }
-
-    // --- 3. Hardware Config (Channel Mask) ---
-    else {
-      provisioningPrefs.begin("provisioning", false);
-      uint8_t currentMask = provisioningPrefs.getUChar("chMask", 0x0F);
-      bool enable = (bool)data[0];
-      int chIndex = -1;
-
-      if (uuid == PROV_CH1_ENABLE_UUID)
-        chIndex = 0;
-      else if (uuid == PROV_CH2_ENABLE_UUID)
-        chIndex = 1;
-      else if (uuid == PROV_CH3_ENABLE_UUID)
-        chIndex = 2;
-      else if (uuid == PROV_CH4_ENABLE_UUID)
-        chIndex = 3;
-
-      if (chIndex >= 0) {
-        if (enable)
-          currentMask |= (1 << chIndex);
-        else
-          currentMask &= ~(1 << chIndex);
-
-        snprintf(logBuf, sizeof(logBuf), "Ch%d Config: %s", chIndex + 1, enable ? "ENABLED" : "DISABLED");
-        logKeyValue("BLE", logBuf);
-      }
-
-      provisioningPrefs.putUChar("chMask", currentMask);
-      provisioningPrefs.end();
-      g_enabledChannelsMask = currentMask;
-
-      snprintf(logBuf, sizeof(logBuf), "New Channel Mask: 0x%02X", currentMask);
-      logKeyValue("BLE", logBuf);
-    }
+      // Signal completion
+      if (_credentialsReceivedPtr)
+        *_credentialsReceivedPtr = true;
+    } else if (uuid == PROV_ENABLE_REWARD_CODE_CHAR_UUID)
+      SettingsManager::setRewardCodeEnabled((bool)data[0]);
+    else if (uuid == PROV_ENABLE_STREAKS_CHAR_UUID)
+      SettingsManager::setStreaksEnabled((bool)data[0]);
+    else if (uuid == PROV_ENABLE_PAYBACK_TIME_CHAR_UUID)
+      SettingsManager::setPaybackEnabled((bool)data[0]);
+    else if (uuid == PROV_PAYBACK_TIME_CHAR_UUID)
+      SettingsManager::setPaybackDuration(bytesToUint32(data));
+    else if (uuid == PROV_REWARD_PENALTY_CHAR_UUID)
+      SettingsManager::setRewardPenaltyDuration(bytesToUint32(data));
+    else if (uuid == PROV_CH1_ENABLE_UUID)
+      SettingsManager::setChannelEnabled(0, (bool)data[0]);
+    else if (uuid == PROV_CH2_ENABLE_UUID)
+      SettingsManager::setChannelEnabled(1, (bool)data[0]);
+    else if (uuid == PROV_CH3_ENABLE_UUID)
+      SettingsManager::setChannelEnabled(2, (bool)data[0]);
+    else if (uuid == PROV_CH4_ENABLE_UUID)
+      SettingsManager::setChannelEnabled(3, (bool)data[0]);
   }
 };
 
-/**
- * Starts the BLE provisioning service.
- * This function DOES NOT RETURN. It waits for credentials and reboots.
- */
-void startBLEProvisioning() {
-  logKeyValue("BLE", "Starting Provisioning Mode...");
+void NetworkManager::startBLEProvisioningBlocking() {
+  log("BLE", "Entering Provisioning Mode (Blocking)...");
 
-  // Set a "pairing" pulse pattern
-  statusLed.FadeOn(500).FadeOff(500).Forever();
+  // 1. Shutdown WiFi
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+
+  // 2. Feedback
+  Esp32SessionHAL::getInstance().getStatusLed().FadeOn(500).FadeOff(500).Forever();
+
+  // 3. Init BLE
+  bool localCredentialsReceived = false;
 
   BLEDevice::init(DEVICE_NAME);
   BLEServer *pServer = BLEDevice::createServer();
   BLEService *pService = pServer->createService(BLEUUID(PROV_SERVICE_UUID), 35);
 
-  ProvisioningCallbacks *callbacks = new ProvisioningCallbacks();
+  ProvisioningCallbacks *callbacks = new ProvisioningCallbacks(&localCredentialsReceived);
 
   auto createChar = [&](const char *uuid) {
     BLECharacteristic *p = pService->createCharacteristic(uuid, BLECharacteristic::PROPERTY_WRITE);
@@ -315,120 +231,161 @@ void startBLEProvisioning() {
 
   pService->start();
 
-  // Start advertising
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(PROV_SERVICE_UUID);
   pAdvertising->start();
 
-  // --- Wait here forever until credentials are set ---
+  // 4. Blocking Loop (Hardware Safe)
   while (1) {
-    processLogQueue();
+    Esp32SessionHAL::getInstance().tick();
 
-    // Actively force pins LOW every cycle to prevent latch-up/glitches
-    sendChannelOffAll();
+    // CRITICAL: Ensure pins are OFF directly
+    // The Session Engine is paused/blocked here, so we must enforce safety manually.
+    for (int i = 0; i < MAX_CHANNELS; i++)
+      digitalWrite(HARDWARE_PINS[i], LOW);
 
-    if (g_credentialsReceived) {
-      logKeyValue("BLE", "Wifi Credentials received. Restarting...");
-
-      processLogQueue();
-
+    if (localCredentialsReceived) {
+      log("BLE", "Credentials received. Restarting...");
+      Esp32SessionHAL::getInstance().tick();
       delay(3000);
       ESP.restart();
     }
-    statusLed.Update();
+
     esp_task_wdt_reset();
     delay(100);
   }
 }
 
 // =================================================================================
-// SECTION: PUBLIC API
+// SECTION: PUBLIC API IMPLEMENTATION
 // =================================================================================
 
-/**
- * Setup function to wrap the wifi init logic.
- * If WiFi fails or credentials are missing, this falls through to BLE Provisioning (Blocking).
- */
-void connectWiFiOrProvision() {
-  wifiReconnectTimer = xTimerCreate("wifiTimer", pdMS_TO_TICKS(2000), pdFALSE, (void *)0, [](TimerHandle_t t) { connectToWiFi(); });
+void NetworkManager::connectOrRequestProvisioning() {
+  // Create Timer
+  _wifiReconnectTimer = xTimerCreate("wifiTimer", pdMS_TO_TICKS(2000), pdFALSE, (void *)0, NetworkManager::onWifiTimer);
 
-  if (!wifiPreferences.begin("wifi-creds", true)) {
-    logKeyValue("Prefs", "'wifi-creds' missing.");
-  }
-  String ssidTemp = wifiPreferences.getString("ssid", "");
-  String passTemp = wifiPreferences.getString("pass", "");
-  wifiPreferences.end();
+  SettingsManager::getWifiSSID(_wifiSSID, sizeof(_wifiSSID));
+  SettingsManager::getWifiPassword(_wifiPass, sizeof(_wifiPass));
 
-  strncpy(g_wifiSSID, ssidTemp.c_str(), sizeof(g_wifiSSID));
-  strncpy(g_wifiPass, passTemp.c_str(), sizeof(g_wifiPass));
-
-  if (strlen(g_wifiSSID) > 0) {
-    logKeyValue("Network", "Found Wi-Fi credentials.");
-    g_wifiCredentialsExist = true;
-    WiFi.onEvent(WiFiEvent);
+  // Determine if we can connect
+  if (strlen(_wifiSSID) > 0) {
+    log("Network", "Found Wi-Fi credentials.");
+    _wifiCredentialsExist = true;
+    WiFi.onEvent(NetworkManager::onWiFiEvent);
     connectToWiFi();
-  } else {
-    // Fallthrough
   }
 
-  if (g_wifiCredentialsExist) {
+  // Blocking wait for initial connection
+  if (_wifiCredentialsExist) {
     unsigned long wifiWaitStart = millis();
     WiFi.setSleep(false);
+
+    // Wait for connection (Blocking briefly on startup)
     while (WiFi.status() != WL_CONNECTED && (millis() - wifiWaitStart < 30000)) {
-      processLogQueue();
+      Esp32SessionHAL::getInstance().tick();
       esp_task_wdt_reset();
       delay(100);
     }
+
     if (WiFi.status() == WL_CONNECTED) {
       startMDNS();
       return;
     }
 
-    if (g_currentState == LOCKED || g_currentState == ARMED || g_currentState == TESTING) {
-      // Just return. The main loop will run, buttons will work,
-      // and the "Network Fallback" in loop() will catch it later
-      // (triggering the Runtime Abort logic you already wrote).
-      return;
-      logKeyValue("Network", "Startup WiFi Failed. Skipping BLE to preserve Session Safety.");
-      g_triggerProvisioning = true;
-      return;
-    }
+    // Failure: Just flag it.
+    log("Network", "Startup WiFi Failed. Requesting Provisioning...");
+    _triggerProvisioning = true;
+  } else {
+    // No creds? Flag immediately.
+    _triggerProvisioning = true;
   }
-
-  logKeyValue("BLE", "Entering BLE Provisioning Fallback.");
-  WiFi.disconnect(true);
-  WiFi.mode(WIFI_OFF);
-  startBLEProvisioning();
 }
 
-void handleNetworkFallback() {
-  if (g_triggerProvisioning) {
+void NetworkManager::printStartupDiagnostics() {
+    char logBuf[128];
+    const char* boolStr[] = { "NO", "YES" };
+    
+    // Get HAL instance for raw logging
+    Esp32SessionHAL& hal = Esp32SessionHAL::getInstance();
 
-    // If WiFi fails, we treat it like a Keep-Alive failure.
-    // 1. Abort the session (Records the stats, applies penalty, saves to NVS).
-    // 2. Unlock hardware (User is free).
-    // 3. Enter Provisioning (Device is effectively disabled until fixed).
-    if (g_currentState == LOCKED || g_currentState == ARMED || g_currentState == TESTING) {
-      logKeyValue("Network", "Critical: WiFi Stack Failure during session.");
+    hal.log("==========================================================================");
+    hal.log("                            NETWORK DIAGNOSTICS                           ");
+    hal.log("==========================================================================");
 
-      processLogQueue();
+    // -------------------------------------------------------------------------
+    // SECTION: WI-FI STATE
+    // -------------------------------------------------------------------------
+    hal.log("[ WI-FI STATUS ]");
 
-      // Trigger the logic abort (State -> ABORTED/COMPLETED)
-      // This ensures the failure is recorded in stats and penalties are armed.
-      abortSession("WiFi Connection Lost");
+    // Connection State
+    wl_status_t status = WiFi.status();
+    const char* statusStr;
+    switch(status) {
+        case WL_CONNECTED:       statusStr = "CONNECTED"; break;
+        case WL_NO_SSID_AVAIL:   statusStr = "SSID NOT FOUND"; break;
+        case WL_CONNECT_FAILED:  statusStr = "FAILED"; break;
+        case WL_IDLE_STATUS:     statusStr = "IDLE"; break;
+        case WL_DISCONNECTED:    statusStr = "DISCONNECTED"; break;
+        default:                 statusStr = "UNKNOWN"; break;
+    }
+    
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Connection State", statusStr);
+    hal.log(logBuf);
 
-      // Force Hardware Unlock immediately (Safety)
-      // We call this explicitly because the blocking call below prevents
-      // the main loop's 'enforceHardwareState' from running.
-      sendChannelOffAll();
+    // SSID (Only show if we have one loaded)
+    if (strlen(_wifiSSID) > 0) {
+        snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Target SSID", _wifiSSID);
+        hal.log(logBuf);
+    } else {
+        snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Target SSID", "-- NOT SET --");
+        hal.log(logBuf);
+    }
+    
+    // Signal Strength (RSSI) - Only valid if connected
+    if (status == WL_CONNECTED) {
+        snprintf(logBuf, sizeof(logBuf), " %-25s : %ld dBm", "Signal Strength", WiFi.RSSI());
+        hal.log(logBuf);
     }
 
-    // 3. Clear flag and enter blocking BLE mode
-    g_triggerProvisioning = false;
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_OFF);
+    // Hardware MAC (Always available)
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Device MAC", WiFi.macAddress().c_str());
+    hal.log(logBuf);
 
-    // This function blocks forever until credentials are provided + Reboot.
-    startBLEProvisioning();
-  }
+    // -------------------------------------------------------------------------
+    // SECTION: IP CONFIGURATION
+    // -------------------------------------------------------------------------
+    if (status == WL_CONNECTED) {
+        hal.log(""); 
+        hal.log("[ IP CONFIGURATION ]");
+
+        snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Local IP", WiFi.localIP().toString().c_str());
+        hal.log(logBuf);
+
+        snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Subnet Mask", WiFi.subnetMask().toString().c_str());
+        hal.log(logBuf);
+
+        snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Gateway", WiFi.gatewayIP().toString().c_str());
+        hal.log(logBuf);
+
+        // mDNS Check
+        // Note: MDNS.begin returns true/false, but there isn't a direct "isRunning()" 
+        // getter exposed easily in standard ESP libraries, but we can imply it from success.
+        snprintf(logBuf, sizeof(logBuf), " %-25s : %s.local", "mDNS Hostname", "lobster-lock-[MAC]"); 
+        hal.log(logBuf);
+    }
+
+    // -------------------------------------------------------------------------
+    // SECTION: INTERNAL FLAGS
+    // -------------------------------------------------------------------------
+    hal.log(""); 
+    hal.log("[ LOGIC FLAGS ]");
+
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Credentials Loaded", boolStr[_wifiCredentialsExist]);
+    hal.log(logBuf);
+
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %d / %d", "Retry Counter", _wifiRetries, g_systemDefaults.wifiMaxRetries);
+    hal.log(logBuf);
+
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Provisioning Request", boolStr[_triggerProvisioning]);
+    hal.log(logBuf);
 }

@@ -1,0 +1,526 @@
+/*
+ * =================================================================================
+ * Project:   Lobster Lock - Self-Bondage Session Manager
+ * File:      Esp32SessionHAL.cpp (Hardware.cpp)
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Description:
+ * Low-level hardware abstraction layer. Manages GPIO control for channels,
+ * LED patterns, fail-safe ISRs (Death Grip), system health monitoring.
+ * =================================================================================
+ */
+#include "Esp32SessionHAL.h"
+#include "esp_timer.h"
+#include <esp_task_wdt.h>
+
+#include "Config.h"
+#include "Globals.h"
+#include "Network.h"
+#include "SettingsManager.h"
+
+#define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
+#define BYTE_TO_BINARY(byte)  \
+  ((byte) & 0x80 ? '1' : '0'), \
+  ((byte) & 0x40 ? '1' : '0'), \
+  ((byte) & 0x20 ? '1' : '0'), \
+  ((byte) & 0x10 ? '1' : '0'), \
+  ((byte) & 0x08 ? '1' : '0'), \
+  ((byte) & 0x04 ? '1' : '0'), \
+  ((byte) & 0x02 ? '1' : '0'), \
+  ((byte) & 0x01 ? '1' : '0')
+
+// =================================================================================
+// SECTION: STATIC GLOBALS (Required for ISRs/C-APIs)
+// =================================================================================
+
+// Failsafe Timer Handle (Must be static/global for esp_timer callback)
+static esp_timer_handle_t s_failsafeTimer = NULL;
+
+/**
+ * Hardware Timer Callback for "Death Grip".
+ * This runs in ISR context when the absolute maximum safety limit is hit.
+ * Forces a reboot to ensure pins go low.
+ */
+static void IRAM_ATTR failsafe_timer_callback(void *arg) {
+  for (int i = 0; i < MAX_CHANNELS; i++) {
+    digitalWrite(HARDWARE_PINS[i], LOW);
+  }
+  // Panic reset is desired for a Failsafe condition.
+  esp_restart();
+}
+
+// =================================================================================
+// SECTION: CLASS IMPLEMENTATION
+// =================================================================================
+
+Esp32SessionHAL::Esp32SessionHAL()
+    : _triggerActionPending(false), _abortActionPending(false), _shortPressPending(false), _cachedState(READY), _logBufferIndex(0),
+      _queueHead(0), _queueTail(0), _statusLed(JLed(STATUS_LED_PIN)), _lastHealthCheck(0), _bootStartTime(0), _bootMarkedStable(false),
+      _enabledChannelsMask(0x0F) {
+  // OneButton Setup (Pin, ActiveLow, Pullup)
+  _pcbButton = OneButton(PCB_BUTTON_PIN, true, true);
+
+#ifdef EXT_BUTTON_PIN
+  if (EXT_BUTTON_PIN != -1) {
+    _extButton = OneButton(EXT_BUTTON_PIN, true, true);
+  }
+#endif
+
+  // Clear log buffer
+  for (int i = 0; i < LOG_BUFFER_SIZE; i++)
+    _logBuffer[i][0] = '\0';
+}
+
+Esp32SessionHAL &Esp32SessionHAL::getInstance() {
+  static Esp32SessionHAL instance;
+  return instance;
+}
+
+// --- Initialization ---
+
+void Esp32SessionHAL::initialize() {
+
+  // 1. Acquire the Mutex
+  _stateMutex = xSemaphoreCreateRecursiveMutex();
+  if (_stateMutex == NULL) {
+    Serial.println("Critical Error: Could not create Mutex.");
+    ESP.restart();
+  }
+
+  // 2. Random Number Generator
+  randomSeed(esp_random());
+
+  // 3. Logging Init
+  logKeyValue("System", "Initializing Hardware...");
+
+  // 4. Channels
+  logKeyValue("System", "Initializing Channels...");
+  for (int i = 0; i < MAX_CHANNELS; i++) {
+    pinMode(HARDWARE_PINS[i], OUTPUT);
+    digitalWrite(HARDWARE_PINS[i], LOW);
+  }
+
+  // 5. Button Attachments
+  // Double Click -> Trigger Start
+  _pcbButton.attachDoubleClick(handleDoublePressISR);
+
+  // Long Press -> Abort
+  _pcbButton.setPressMs(g_systemDefaults.longPressDuration * 1000);
+  _pcbButton.attachLongPressStart(handleLongPressISR);
+
+  // Single Press -> Test Mode / Interaction
+  _pcbButton.attachClick(handleShortPressISR);
+
+#ifdef EXT_BUTTON_PIN
+  if (EXT_BUTTON_PIN != -1) {
+    _extButton.attachDoubleClick(handleDoublePressISR);
+    _extButton.setPressMs(g_systemDefaults.longPressDuration * 1000);
+    _extButton.attachLongPressStart(handleLongPressISR);
+    _extButton.attachClick(handleShortPressISR);
+  }
+#endif
+
+  // 6. Watchdogs & Failsafe
+  logKeyValue("System", "Initializing Hardware Watchdog...");
+  esp_task_wdt_init(DEFAULT_WDT_TIMEOUT, true);
+  esp_task_wdt_add(NULL);
+
+  logKeyValue("System", "Initializing Death Grip Timer...");
+  const esp_timer_create_args_t failsafe_timer_args = {.callback = &failsafe_timer_callback, .name = "failsafe_wdt"};
+  esp_timer_create(&failsafe_timer_args, &s_failsafeTimer);
+
+  // 7. Boot Checks
+  checkBootLoop();
+}
+
+// --- Main Tick ---
+
+void Esp32SessionHAL::tick() {
+
+  if (!lockState()) {
+    return;
+  }
+
+  // 1. Process Serial Logs (Internal Queue)
+  processLogQueue();
+
+  // 2. Tick Peripherals
+  _pcbButton.tick();
+#ifdef EXT_BUTTON_PIN
+  _extButton.tick();
+#endif
+
+  _statusLed.Update();
+
+  // 3. Periodic Health Checks (Every 60s)
+  if (millis() - _lastHealthCheck > 60000) {
+    checkSystemHealth();
+    _lastHealthCheck = millis();
+  }
+
+  // 4. Maintenance
+  markBootStability();
+
+  unlockState();
+}
+
+// =================================================================================
+// SECTION: CHANNEL CONFIGURATION
+// =================================================================================
+
+void Esp32SessionHAL::setChannelMask(uint8_t mask) { _enabledChannelsMask = mask; }
+
+uint8_t Esp32SessionHAL::getChannelMask() const { return _enabledChannelsMask; }
+
+bool Esp32SessionHAL::isChannelEnabled(int channelIndex) const {
+  if (channelIndex < 0 || channelIndex >= MAX_CHANNELS)
+    return false;
+  return (_enabledChannelsMask >> channelIndex) & 1;
+}
+
+// =================================================================================
+// SECTION: SYNCHRONIZATION
+// =================================================================================
+
+bool Esp32SessionHAL::lockState(uint32_t timeoutMs) {
+  if (_stateMutex == NULL)
+    return false;
+  return (xSemaphoreTakeRecursive(_stateMutex, (TickType_t)pdMS_TO_TICKS(timeoutMs)) == pdTRUE);
+}
+
+void Esp32SessionHAL::unlockState() {
+  if (_stateMutex != NULL) {
+    xSemaphoreGiveRecursive(_stateMutex);
+  }
+}
+
+// =================================================================================
+// SECTION: LOGGING SYSTEM
+// =================================================================================
+
+void Esp32SessionHAL::log(const char *message) {
+  // 1. Write to RAM (WebAPI Buffer)
+  strncpy(_logBuffer[_logBufferIndex], message, MAX_LOG_LENGTH);
+  _logBuffer[_logBufferIndex][MAX_LOG_LENGTH - 1] = '\0';
+
+  _logBufferIndex++;
+  if (_logBufferIndex >= LOG_BUFFER_SIZE) {
+    _logBufferIndex = 0;
+  }
+
+  // 2. Write to Serial Queue
+  int nextHead = (_queueHead + 1) % SERIAL_QUEUE_SIZE;
+  if (nextHead != _queueTail) {
+    strncpy(_serialQueue[_queueHead], message, MAX_LOG_LENGTH);
+    _serialQueue[_queueHead][MAX_LOG_LENGTH - 1] = '\0';
+    _queueHead = nextHead;
+  }
+  // Else: Queue full, drop message to prevent blocking
+}
+
+void Esp32SessionHAL::logKeyValue(const char *key, const char *value) {
+  char tempBuf[MAX_LOG_LENGTH];
+  snprintf(tempBuf, MAX_LOG_LENGTH, " %-8s : %s", key, value);
+  log(tempBuf);
+}
+
+void Esp32SessionHAL::processLogQueue() {
+  // Process a batch of logs to keep Serial active without blocking too long
+  int maxLines = 10;
+  while (_queueHead != _queueTail && maxLines > 0) {
+    Serial.println(_serialQueue[_queueTail]);
+    _queueTail = (_queueTail + 1) % SERIAL_QUEUE_SIZE;
+    maxLines--;
+  }
+}
+
+void Esp32SessionHAL::printStartupDiagnostics() {
+    char logBuf[128]; // Increased buffer size for safety
+
+    log("==========================================================================");
+    log("                            DEVICE DIAGNOSTICS                           ");
+    log("==========================================================================");
+
+    // -------------------------------------------------------------------------
+    // SECTION: SYSTEM HEALTH
+    // -------------------------------------------------------------------------
+    log("[ SYSTEM HEALTH ]");
+    
+    // Heap Memory
+    uint32_t freeHeap = ESP.getFreeHeap();
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %u bytes", "Free Heap", freeHeap);
+    log(logBuf);
+
+    // Temperature (Built-in sensor)
+    float temp = temperatureRead();
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %.1f C", "CPU Temp", temp);
+    log(logBuf);
+
+    // Crash Counters
+    int crashes = SettingsManager::getCrashCount();
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %d", "Recorded Crashes", crashes);
+    log(logBuf);
+    
+    // -------------------------------------------------------------------------
+    // SECTION: GPIO CONFIGURATION
+    // -------------------------------------------------------------------------
+    log(""); // Spacer
+    log("[ GPIO & PERIPHERALS ]");
+
+    // Buttons
+    snprintf(logBuf, sizeof(logBuf), " %-25s : GPIO %d", "PCB Button", PCB_BUTTON_PIN);
+    log(logBuf);
+
+    #ifdef EXT_BUTTON_PIN
+    if (EXT_BUTTON_PIN != -1) {
+        snprintf(logBuf, sizeof(logBuf), " %-25s : GPIO %d (Active Low)", "Ext. Safety Switch", EXT_BUTTON_PIN);
+    } else {
+        snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Ext. Safety Switch", "DISABLED");
+    }
+    #else
+        snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Ext. Safety Switch", "NOT DEFINED");
+    #endif
+    log(logBuf);
+
+    // Status LED
+    snprintf(logBuf, sizeof(logBuf), " %-25s : GPIO %d", "Status LED", STATUS_LED_PIN);
+    log(logBuf);
+
+    // -------------------------------------------------------------------------
+    // SECTION: CHANNEL OUTPUTS
+    // -------------------------------------------------------------------------
+    log(""); // Spacer
+    log("[ CHANNEL STATUS ]");
+
+    // Global Mask
+    snprintf(logBuf, sizeof(logBuf), " %-25s : 0x%02X (Binary: " BYTE_TO_BINARY_PATTERN ")", 
+             "Hardware Mask", _enabledChannelsMask, BYTE_TO_BINARY(_enabledChannelsMask));
+    log(logBuf);
+
+    // Individual Pins
+    for (int i = 0; i < MAX_CHANNELS; i++) {
+        // Read actual physical state of the pin
+        int state = digitalRead(HARDWARE_PINS[i]); 
+        bool enabledInMask = (_enabledChannelsMask >> i) & 1;
+        
+        snprintf(logBuf, sizeof(logBuf), " %-25s : GPIO %d | State: %s | Mask: %s", 
+                 (String("Channel ") + String(i + 1)).c_str(), 
+                 HARDWARE_PINS[i],
+                 state == HIGH ? "HIGH (ON)" : "LOW (OFF)",
+                 enabledInMask ? "ENABLED" : "MASKED");
+        log(logBuf);
+    }
+
+}
+
+// =================================================================================
+// SECTION: ISessionHAL IMPLEMENTATION
+// =================================================================================
+
+void Esp32SessionHAL::setHardwareSafetyMask(uint8_t mask) {
+  for (int i = 0; i < MAX_CHANNELS; i++) {
+    // Logic: mask bit 1 = HIGH, 0 = LOW
+    int level = (mask >> i) & 1 ? HIGH : LOW;
+    digitalWrite(HARDWARE_PINS[i], level);
+  }
+}
+
+// --- Input Events ---
+
+bool Esp32SessionHAL::checkTriggerAction() {
+  if (_triggerActionPending) {
+    _triggerActionPending = false;
+    return true;
+  }
+  return false;
+}
+
+bool Esp32SessionHAL::checkAbortAction() {
+  if (_abortActionPending) {
+    _abortActionPending = false;
+    return true;
+  }
+  return false;
+}
+
+bool Esp32SessionHAL::checkShortPressAction() {
+  if (_shortPressPending) {
+    _shortPressPending = false;
+    return true;
+  }
+  return false;
+}
+
+// --- Safety Interlock ---
+
+bool Esp32SessionHAL::isSafetyInterlockEngaged() {
+#ifdef EXT_BUTTON_PIN
+  // Production: Normally Closed (NC) switch.
+  // CLOSED (GND/LOW) = Safe/Connected.
+  // OPEN (VCC/HIGH) = Unsafe/Disconnected.
+  return (digitalRead(EXT_BUTTON_PIN) == LOW);
+#else
+  return true; // Dev mode always safe
+#endif
+}
+
+// --- Network ---
+
+bool Esp32SessionHAL::isNetworkProvisioningRequested() { return NetworkManager::getInstance().isProvisioningNeeded(); }
+
+void Esp32SessionHAL::enterNetworkProvisioning() {
+  // Force safe state first
+  setHardwareSafetyMask(0x00);
+  NetworkManager::getInstance().startBLEProvisioningBlocking();
+}
+
+// --- Watchdogs ---
+
+void Esp32SessionHAL::setWatchdogTimeout(uint32_t seconds) { esp_task_wdt_init(seconds, true); }
+
+void Esp32SessionHAL::armFailsafeTimer(uint32_t seconds) {
+  if (s_failsafeTimer == NULL) {
+    logKeyValue("System", "CRITICAL: Failsafe Timer not initialized!");
+    return;
+  }
+
+  // Safety Logic: Tiers
+  const uint32_t ONE_HOUR = 3600;
+  const uint32_t SAFETY_TIERS[] = {4 * ONE_HOUR, 8 * ONE_HOUR, 12 * ONE_HOUR, 24 * ONE_HOUR, 48 * ONE_HOUR, 168 * ONE_HOUR};
+  const int NUM_TIERS = sizeof(SAFETY_TIERS) / sizeof(SAFETY_TIERS[0]);
+
+  // Select Tier (Smallest tier >= requested seconds)
+  uint32_t armedSeconds = SAFETY_TIERS[NUM_TIERS - 1];
+  for (int i = 0; i < NUM_TIERS; i++) {
+    if (SAFETY_TIERS[i] >= seconds) {
+      armedSeconds = SAFETY_TIERS[i];
+      break;
+    }
+  }
+
+  uint64_t timeout_us = (uint64_t)armedSeconds * 1000000ULL;
+  esp_timer_start_once(s_failsafeTimer, timeout_us);
+
+  char logBuf[64];
+  snprintf(logBuf, sizeof(logBuf), "Death Grip ARMED: %u s (Req: %u)", armedSeconds, seconds);
+  logKeyValue("System", logBuf);
+}
+
+void Esp32SessionHAL::disarmFailsafeTimer() {
+  if (s_failsafeTimer != NULL) {
+    esp_timer_stop(s_failsafeTimer);
+    logKeyValue("System", "Death Grip Timer DISARMED.");
+  }
+}
+
+// --- Storage ---
+
+void Esp32SessionHAL::saveState(const DeviceState &state, const SessionTimers &timers, const SessionStats &stats) {
+  updateLedPattern(state);
+
+  // Delegate to SettingsManager
+  SettingsManager::saveSessionState(state, timers, stats);
+}
+
+// --- Utils ---
+
+unsigned long Esp32SessionHAL::getMillis() { return millis(); }
+
+uint32_t Esp32SessionHAL::getRandom(uint32_t min, uint32_t max) { return random(min, max); }
+
+// =================================================================================
+// SECTION: INTERNAL LOGIC & HELPERS
+// =================================================================================
+
+void Esp32SessionHAL::updateLedPattern(DeviceState state) {
+  if (state != _cachedState) {
+    _cachedState = state;
+    char logBuf[50];
+    snprintf(logBuf, sizeof(logBuf), "LED Pattern: State %d", (int)state);
+    logKeyValue("System", logBuf);
+  }
+
+  switch (state) {
+  case READY:
+    _statusLed.Breathe(4000).Forever();
+    break;
+  case ARMED:
+    _statusLed.Blink(250, 250).Forever();
+    break;
+  case LOCKED:
+    _statusLed.On().Forever();
+    break;
+  case ABORTED:
+    _statusLed.Blink(500, 500).Forever();
+    break;
+  case COMPLETED:
+    _statusLed.Blink(200, 200).Repeat(2).DelayAfter(3000).Forever();
+    break;
+  case TESTING:
+    _statusLed.FadeOn(750).FadeOff(750).Forever();
+    break;
+  default:
+    _statusLed.Off().Forever();
+    break;
+  }
+}
+
+void Esp32SessionHAL::checkBootLoop() {
+  int crashes = SettingsManager::getCrashCount();
+
+  if (crashes >= g_systemDefaults.bootLoopThreshold) {
+    Serial.println("CRITICAL: Boot Loop Detected! Entering Safe Mode.");
+    delay(5000);
+    // Emergency Pins Low
+    for (int i = 0; i < MAX_CHANNELS; i++)
+      digitalWrite(HARDWARE_PINS[i], LOW);
+
+    pinMode(STATUS_LED_PIN, OUTPUT);
+    digitalWrite(STATUS_LED_PIN, HIGH);
+    for (int i = 0; i < 30; i++) {
+      delay(1000);
+    }
+  }
+
+  SettingsManager::incrementCrashCount();
+  _bootStartTime = millis();
+}
+
+void Esp32SessionHAL::markBootStability() {
+  if (!_bootMarkedStable && (millis() - _bootStartTime > g_systemDefaults.stableBootTime)) {
+    _bootMarkedStable = true;
+    SettingsManager::clearCrashCount();
+    logKeyValue("System", "System stable.");
+  }
+}
+
+void Esp32SessionHAL::checkSystemHealth() {
+  size_t freeMem = ESP.getFreeHeap();
+  if (freeMem < 10000) {
+    logKeyValue("System", "CRITICAL: Low Heap! Emergency Stop.");
+    for (int i = 0; i < MAX_CHANNELS; i++)
+      digitalWrite(HARDWARE_PINS[i], LOW);
+    ESP.restart();
+  }
+
+  float currentTemp = temperatureRead();
+  if (!isnan(currentTemp) && currentTemp > MAX_SAFE_TEMP_C) {
+    char logBuf[100];
+    snprintf(logBuf, sizeof(logBuf), "CRITICAL: Overheating (%.1f C)!", currentTemp);
+    logKeyValue("System", logBuf);
+    // Force pins low immediately
+    for (int i = 0; i < MAX_CHANNELS; i++)
+      digitalWrite(HARDWARE_PINS[i], LOW);
+  }
+}
+
+// =================================================================================
+// SECTION: STATIC ISR PROXIES
+// =================================================================================
+
+void Esp32SessionHAL::handleDoublePressISR() { getInstance().setTriggerPending(); }
+
+void Esp32SessionHAL::handleLongPressISR() { getInstance().setAbortPending(); }
+
+void Esp32SessionHAL::handleShortPressISR() { getInstance()._shortPressPending = true; }

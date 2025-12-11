@@ -1,0 +1,108 @@
+/*
+ * =================================================================================
+ * Project:   Lobster Lock - Self-Bondage Session Manager
+ * File:      Types.h
+ * =================================================================================
+ */
+#pragma once
+#include <stdint.h>
+#include <stddef.h>
+
+// --- Enums ---
+enum DeviceState : uint8_t { READY, ARMED, LOCKED, ABORTED, COMPLETED, TESTING };
+enum TriggerStrategy : uint8_t { STRAT_AUTO_COUNTDOWN, STRAT_BUTTON_TRIGGER };
+enum DurationType : uint8_t { DUR_FIXED, DUR_RANDOM, DUR_RANGE_SHORT, DUR_RANGE_MEDIUM, DUR_RANGE_LONG };
+enum DeterrentStrategy : uint8_t { DETERRENT_FIXED, DETERRENT_RANDOM };
+
+// --- Constants ---
+
+// Reward codes
+#define REWARD_HISTORY_SIZE 10
+#define REWARD_CODE_LENGTH 32
+#define REWARD_CHECKSUM_LENGTH 16
+
+// Logging
+#define SERIAL_QUEUE_SIZE 50
+#define LOG_BUFFER_SIZE 150
+#define MAX_LOG_LENGTH 150
+
+// Hardware 
+#define MAX_CHANNELS 4
+
+// --- Configuration Structs ---
+struct SessionConfig {
+  DurationType durationType;
+  uint32_t fixedDuration;
+  uint32_t minDuration;
+  uint32_t maxDuration;
+  TriggerStrategy triggerStrategy;
+  uint32_t channelDelays[MAX_CHANNELS];
+  bool hideTimer;
+};
+
+struct SessionPresets {
+  // --- Generators ---
+  uint32_t shortMin, shortMax;
+  uint32_t mediumMin, mediumMax;
+  uint32_t longMin, longMax;
+  
+  // --- Deterrent Ranges ---
+  uint32_t penaltyMin, penaltyMax;
+  uint32_t paybackMin, paybackMax; 
+  
+  // --- Safety / Profile Limits (The "Ceiling") ---
+  uint32_t limitLockMax;
+  uint32_t limitPenaltyMax;
+  uint32_t limitPaybackMax;
+
+  // --- Absolute Minimums (The "Floor") ---
+  uint32_t minLockDuration;         // e.g. 10 seconds
+  uint32_t minRewardPenaltyDuration;// e.g. 10 seconds
+  uint32_t minPaybackTime;          // e.g. 10 seconds
+};
+
+struct DeterrentConfig {
+  bool enableStreaks;
+  bool enableRewardCode;
+  DeterrentStrategy penaltyStrategy;
+  uint32_t rewardPenalty; 
+  bool enablePaybackTime;
+  DeterrentStrategy paybackStrategy;
+  uint32_t paybackTime; 
+};
+
+struct SystemDefaults {
+  uint32_t longPressDuration;
+  uint32_t extButtonSignalDuration;
+  uint32_t testModeDuration;
+  uint32_t keepAliveInterval;
+  uint32_t keepAliveMaxStrikes;
+  uint32_t bootLoopThreshold;
+  uint32_t stableBootTime;
+  uint32_t wifiMaxRetries;
+  uint32_t armedTimeoutSeconds;
+};
+
+// --- State Structs ---
+struct SessionTimers {
+  uint32_t lockDuration;
+  uint32_t penaltyDuration;
+  uint32_t lockRemaining;
+  uint32_t penaltyRemaining;
+  uint32_t testRemaining;
+  uint32_t triggerTimeout;
+  uint32_t channelDelays[MAX_CHANNELS];
+};
+
+struct SessionStats {
+  uint32_t streaks;
+  uint32_t completed;
+  uint32_t aborted;
+  uint32_t paybackAccumulated;
+  uint32_t totalLockedTime;    
+};
+
+struct Reward {
+  char code[REWARD_CODE_LENGTH + 1];
+  char checksum[REWARD_CHECKSUM_LENGTH + 1];
+};
