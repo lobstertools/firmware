@@ -45,30 +45,24 @@ struct SessionPresets {
   uint32_t shortMin, shortMax;
   uint32_t mediumMin, mediumMax;
   uint32_t longMin, longMax;
-  
-  // --- Deterrent Ranges ---
-  uint32_t penaltyMin, penaltyMax;
-  uint32_t paybackMin, paybackMax; 
-  
-  // --- Safety / Profile Limits (The "Ceiling") ---
-  uint32_t limitLockMax;
-  uint32_t limitPenaltyMax;
-  uint32_t limitPaybackMax;
-
-  // --- Absolute Minimums (The "Floor") ---
-  uint32_t minLockDuration;         // e.g. 10 seconds
-  uint32_t minRewardPenaltyDuration;// e.g. 10 seconds
-  uint32_t minPaybackTime;          // e.g. 10 seconds
+    
+  // --- Safety / Profile Limits (The "Ceiling" and "Floor") ---
+  uint32_t maxLockDuration;
+  uint32_t minLockDuration;
 };
 
 struct DeterrentConfig {
   bool enableStreaks;
+
   bool enableRewardCode;
-  DeterrentStrategy penaltyStrategy;
-  uint32_t rewardPenalty; 
+  DeterrentStrategy rewardPenaltyStrategy;
+  uint32_t rewardPenaltyMin, rewardPenaltyMax;
+  uint32_t rewardPenalty;
+
   bool enablePaybackTime;
-  DeterrentStrategy paybackStrategy;
-  uint32_t paybackTime; 
+  DeterrentStrategy paybackTimeStrategy;
+  uint32_t paybackTimeMin, paybackTimeMax; 
+  uint32_t paybackTime;
 };
 
 struct SystemDefaults {
