@@ -19,15 +19,30 @@ public:
   static void getWifiSSID(char *buf, size_t maxLen);
   static void getWifiPassword(char *buf, size_t maxLen);
 
-  // --- Feature Toggles ---
+  // --- Features and Provisioing ---
   static void setRewardCodeEnabled(bool enabled);
   static void setStreaksEnabled(bool enabled);
   static void setPaybackEnabled(bool enabled);
 
-  // Loads all provisioning features
+  // --- Session Configuration ---
+  // Sets global safety floor/ceiling
+  static void setSessionLimits(uint32_t minDuration, uint32_t maxDuration);
+  
+  // Sets ranges for DUR_RANGE_SHORT, DUR_RANGE_MEDIUM, DUR_RANGE_LONG
+  static void setDurationPreset(DurationType type, uint32_t min, uint32_t max);
+
+  // --- Deterrent Configuration ---
+  static void setPaybackStrategy(DeterrentStrategy strategy);
+  static void setPaybackRange(uint32_t min, uint32_t max);
+  
+  static void setRewardStrategy(DeterrentStrategy strategy);
+  static void setRewardRange(uint32_t min, uint32_t max);
+
+  // Loads all provisioning features into the updated structs
   static void loadProvisioningConfig(DeterrentConfig &config, SessionPresets &presets, uint8_t &channelMask);
 
   // --- Numeric Settings (Validated) ---
+  // Sets the fixed/base duration for these deterrents
   static uint32_t setPaybackDuration(uint32_t seconds);
   static uint32_t setRewardPenaltyDuration(uint32_t seconds);
 
@@ -44,7 +59,6 @@ public:
   static void clearCrashCount();
 
   // --- Factory Reset ---
-  // Clears ALL namespaces (WiFi, Provisioning, Session, Boot)
   static void wipeAll();
 
 private:
