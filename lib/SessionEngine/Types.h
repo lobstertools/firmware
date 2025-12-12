@@ -32,12 +32,13 @@ enum DeterrentStrategy : uint8_t { DETERRENT_FIXED, DETERRENT_RANDOM };
 // --- Configuration Structs ---
 struct SessionConfig {
   DurationType durationType;
-  uint32_t fixedDuration;
-  uint32_t minDuration;
-  uint32_t maxDuration;
+  uint32_t durationFixed;
+  uint32_t durationMin;
+  uint32_t durationMax;
   TriggerStrategy triggerStrategy;
   uint32_t channelDelays[MAX_CHANNELS];
   bool hideTimer;
+  bool disableLED;
 };
 
 struct SessionPresets {
@@ -47,8 +48,8 @@ struct SessionPresets {
   uint32_t longMin, longMax;
     
   // --- Safety / Profile Limits (The "Ceiling" and "Floor") ---
-  uint32_t maxLockDuration;
-  uint32_t minLockDuration;
+  uint32_t maxSessionDuration;
+  uint32_t minSessionDuration;
 };
 
 struct DeterrentConfig {

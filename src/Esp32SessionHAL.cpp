@@ -55,7 +55,9 @@ static void IRAM_ATTR failsafe_timer_callback(void *arg) {
 // =================================================================================
 
 Esp32SessionHAL::Esp32SessionHAL()
-    : _triggerActionPending(false), _abortActionPending(false), _shortPressPending(false), _cachedState(READY), _logBufferIndex(0),
+    : _triggerActionPending(false), _abortActionPending(false), _shortPressPending(false), 
+      _pcbPressed(false), _extPressed(false), _pressStartTime(0),
+      _cachedState(READY), _logBufferIndex(0),
       _queueHead(0), _queueTail(0), _statusLed(JLed(STATUS_LED_PIN)), _lastHealthCheck(0), _bootStartTime(0), _bootMarkedStable(false),
       _enabledChannelsMask(0x0F) {
   // OneButton Setup (Pin, ActiveLow, Pullup)
@@ -102,22 +104,26 @@ void Esp32SessionHAL::initialize() {
   }
 
   // 5. Button Attachments
-  // Double Click -> Trigger Start
-  _pcbButton.attachDoubleClick(handleDoublePressISR);
-
-  // Long Press -> Abort
+  // We use detailed handlers to track the "Pressed" state for telemetry
+  // while preserving the original Click/Double/Long logic.
+  
+  // -- PCB Button --
+  _pcbButton.attachPress(handlePcbPressStart);        // State: DOWN
+  _pcbButton.attachClick(handlePcbClick);             // State: UP + Action: Short
+  _pcbButton.attachDoubleClick(handlePcbDoubleClick); // State: UP + Action: Trigger
   _pcbButton.setPressMs(g_systemDefaults.longPressDuration * 1000);
-  _pcbButton.attachLongPressStart(handleLongPressISR);
+  _pcbButton.attachLongPressStart(handlePcbLongStart);// Action: Abort
+  _pcbButton.attachLongPressStop(handlePcbLongStop);  // State: UP
 
-  // Single Press -> Test Mode / Interaction
-  _pcbButton.attachClick(handleShortPressISR);
-
+  // -- EXT Button --
 #ifdef EXT_BUTTON_PIN
   if (EXT_BUTTON_PIN != -1) {
-    _extButton.attachDoubleClick(handleDoublePressISR);
+    _extButton.attachPress(handleExtPressStart);
+    _extButton.attachClick(handleExtClick);
+    _extButton.attachDoubleClick(handleExtDoubleClick);
     _extButton.setPressMs(g_systemDefaults.longPressDuration * 1000);
-    _extButton.attachLongPressStart(handleLongPressISR);
-    _extButton.attachClick(handleShortPressISR);
+    _extButton.attachLongPressStart(handleExtLongStart);
+    _extButton.attachLongPressStop(handleExtLongStop);
   }
 #endif
 
@@ -179,6 +185,17 @@ bool Esp32SessionHAL::isChannelEnabled(int channelIndex) const {
   return (_enabledChannelsMask >> channelIndex) & 1;
 }
 
+bool Esp32SessionHAL::isButtonPressed() const {
+  return _pcbPressed || _extPressed;
+}
+
+uint32_t Esp32SessionHAL::getCurrentPressDurationMs() const {
+  if (!isButtonPressed() || _pressStartTime == 0) {
+    return 0;
+  }
+  return millis() - _pressStartTime;
+}
+
 // =================================================================================
 // SECTION: SYNCHRONIZATION
 // =================================================================================
@@ -236,7 +253,7 @@ void Esp32SessionHAL::processLogQueue() {
 }
 
 void Esp32SessionHAL::printStartupDiagnostics() {
-    char logBuf[128]; // Increased buffer size for safety
+    char logBuf[128];
 
     log("==========================================================================");
     log("                            DEVICE DIAGNOSTICS                           ");
@@ -515,12 +532,83 @@ void Esp32SessionHAL::checkSystemHealth() {
   }
 }
 
+void Esp32SessionHAL::checkPressState() {
+  bool wasPressed = (_pressStartTime != 0);
+  bool isPressed = _pcbPressed || _extPressed;
+
+  if (isPressed && !wasPressed) {
+    _pressStartTime = millis();
+  } else if (!isPressed && wasPressed) {
+    _pressStartTime = 0;
+  }
+}
+
 // =================================================================================
-// SECTION: STATIC ISR PROXIES
+// SECTION: STATIC HANDLERS (OneButton Callbacks)
 // =================================================================================
 
-void Esp32SessionHAL::handleDoublePressISR() { getInstance().setTriggerPending(); }
+// --- PCB Button Handlers ---
 
-void Esp32SessionHAL::handleLongPressISR() { getInstance().setAbortPending(); }
+void Esp32SessionHAL::handlePcbPressStart() {
+  Esp32SessionHAL& inst = getInstance();
+  inst._pcbPressed = true;
+  inst.checkPressState();
+}
 
-void Esp32SessionHAL::handleShortPressISR() { getInstance()._shortPressPending = true; }
+void Esp32SessionHAL::handlePcbClick() {
+  Esp32SessionHAL& inst = getInstance();
+  inst._pcbPressed = false;
+  inst.checkPressState();
+  inst.setShortPressPending();
+}
+
+void Esp32SessionHAL::handlePcbDoubleClick() {
+  Esp32SessionHAL& inst = getInstance();
+  inst._pcbPressed = false;
+  inst.checkPressState();
+  inst.setTriggerPending();
+}
+
+void Esp32SessionHAL::handlePcbLongStart() {
+  // Note: Press flag remains TRUE during long press
+  Esp32SessionHAL& inst = getInstance();
+  inst.setAbortPending(); // Original Action
+}
+
+void Esp32SessionHAL::handlePcbLongStop() {
+  Esp32SessionHAL& inst = getInstance();
+  inst._pcbPressed = false;
+  inst.checkPressState();
+}
+
+// --- EXT Button Handlers ---
+
+void Esp32SessionHAL::handleExtPressStart() {
+  Esp32SessionHAL& inst = getInstance();
+  inst._extPressed = true;
+  inst.checkPressState();
+}
+
+void Esp32SessionHAL::handleExtClick() {
+  Esp32SessionHAL& inst = getInstance();
+  inst._extPressed = false;
+  inst.checkPressState();
+  inst.setShortPressPending();
+}
+
+void Esp32SessionHAL::handleExtDoubleClick() {
+  Esp32SessionHAL& inst = getInstance();
+  inst._extPressed = false;
+  inst.checkPressState();
+  inst.setTriggerPending();
+}
+
+void Esp32SessionHAL::handleExtLongStart() {
+  getInstance().setAbortPending();
+}
+
+void Esp32SessionHAL::handleExtLongStop() {
+  Esp32SessionHAL& inst = getInstance();
+  inst._extPressed = false;
+  inst.checkPressState();
+}

@@ -26,6 +26,12 @@ private:
   volatile bool _triggerActionPending;
   volatile bool _abortActionPending;
   volatile bool _shortPressPending;
+  
+  // -- Button State Tracking --
+  volatile bool _pcbPressed;
+  volatile bool _extPressed;
+  unsigned long _pressStartTime; // Timestamp of press start
+
   DeviceState _cachedState;
 
   // --- Log State (RAM + Serial) ---
@@ -54,11 +60,22 @@ private:
   void checkBootLoop();
   void markBootStability();
   void processLogQueue();
+  void checkPressState(); // Helper to manage start time logic
 
-  // --- Static Interrupt Handlers ---
-  static void handleDoublePressISR();
-  static void handleLongPressISR();
-  static void handleShortPressISR();
+  // --- Static Interrupt/Callback Handlers ---
+  // PCB Handlers
+  static void handlePcbPressStart(); // Tracks button down
+  static void handlePcbClick();      // Tracks button up + Short Press Action
+  static void handlePcbDoubleClick();// Tracks button up + Trigger Action
+  static void handlePcbLongStart();  // Abort Action
+  static void handlePcbLongStop();   // Tracks button up
+
+  // External Handlers
+  static void handleExtPressStart();
+  static void handleExtClick();
+  static void handleExtDoubleClick();
+  static void handleExtLongStart();
+  static void handleExtLongStop();
 
 public:
   static Esp32SessionHAL &getInstance();
@@ -84,8 +101,14 @@ public:
   }
   int getLogBufferIndex() const { return _logBufferIndex; }
 
-  // --- Used by BLE provisioning
+  // --- Used by BLE provisioning & Telemetry
   JLed getStatusLed() const { return _statusLed; }
+  
+  // Returns true if EITHER the PCB or External button is currently held down.
+  bool isButtonPressed() const;
+
+  // Returns duration of current press in ms. Returns 0 if not pressed.
+  uint32_t getCurrentPressDurationMs() const;
 
   // --- Channel modifiers
   void setChannelMask(uint8_t mask);
@@ -110,7 +133,8 @@ public:
   unsigned long getMillis() override;
   uint32_t getRandom(uint32_t min, uint32_t max) override;
 
-  // Internal Setters for ISRs
+  // Internal Setters for ISRs/Callbacks
   void setTriggerPending() { _triggerActionPending = true; }
   void setAbortPending() { _abortActionPending = true; }
+  void setShortPressPending() { _shortPressPending = true; }
 };

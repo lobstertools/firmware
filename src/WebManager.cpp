@@ -5,16 +5,13 @@
  *
  * Description:
  * Async HTTP Server implementation.
- * Refactor:
- * - Modular architecture (WebManager class).
- * - Full input validation and field mapping.
- * - Uses SettingsManager for NVS operations.
- * - Uses HAL for thread safety (Mutex).
+ * Updated to match TypeScript interfaces for SessionConfig, DeviceDetails, SessionStatus.
  * =================================================================================
  */
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include <string.h>
+#include <esp_timer.h> // For uptime
 
 #include "Config.h"
 #include "Esp32SessionHAL.h"
@@ -40,7 +37,6 @@ void WebManager::begin(SessionEngine *engine) {
   log("WebAPI", "HTTP server started.");
 }
 
-// Local helper to shorten HAL log calls
 void WebManager::log(const char *key, const char *value) { Esp32SessionHAL::getInstance().logKeyValue(key, value); }
 
 // =================================================================================
@@ -98,13 +94,6 @@ void WebManager::handleRoot(AsyncWebServerRequest *request) {
   String html = "<html><head><title>" + String(DEVICE_NAME) + "</title></head><body>";
   html += "<h1>" + String(DEVICE_NAME) + " API</h1>";
   html += "<h2>" + String(DEVICE_VERSION) + "</h2>";
-  html += "<ul>";
-  html += "<li><b>GET /status</b> - Real-time metrics.</li>";
-  html += "<li><b>GET /details</b> - Device configuration.</li>";
-  html += "<li><b>GET /log</b> - Internal logs.</li>";
-  html += "<li><b>POST /arm</b> - Begin session (JSON).</li>";
-  html += "<li><b>POST /abort</b> - Emergency stop.</li>";
-  html += "</ul></body></html>";
   request->send(200, "text/html", html);
 }
 
@@ -118,7 +107,6 @@ void WebManager::handleHealth(AsyncWebServerRequest *request) {
 }
 
 void WebManager::handleKeepAlive(AsyncWebServerRequest *request) {
-  // HAL locking ensures thread safety for the watchdog update
   if (Esp32SessionHAL::getInstance().lockState()) {
     _engine->petWatchdog();
     Esp32SessionHAL::getInstance().unlockState();
@@ -157,14 +145,9 @@ void WebManager::handleFactoryReset(AsyncWebServerRequest *request) {
       sendJsonError(request, 409, "Cannot reset while active.");
       return;
     }
-
     log("WebAPI", "Factory Reset initiated.");
-
     SettingsManager::wipeAll();
-
-    // Send response before reboot
     request->send(200, "application/json", "{\"status\":\"resetting\"}");
-
     Esp32SessionHAL::getInstance().unlockState();
     delay(1000);
     ESP.restart();
@@ -178,8 +161,7 @@ void WebManager::handleFactoryReset(AsyncWebServerRequest *request) {
 // =================================================================================
 
 void WebManager::handleArm(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-  if (index + len != total)
-    return;
+  if (index + len != total) return;
 
   JsonDocument doc;
   DeserializationError error = deserializeJson(doc, (const char *)data, len);
@@ -190,15 +172,14 @@ void WebManager::handleArm(AsyncWebServerRequest *request, uint8_t *data, size_t
 
   SessionConfig intent;
   std::string err;
-  uint8_t mask = Esp32SessionHAL::getInstance().getChannelMask(); // Get mask from HAL
+  uint8_t mask = Esp32SessionHAL::getInstance().getChannelMask();
 
-  // Use Static Validator
+  // Updated Validator handles the new TypeScript interface structure
   if (!WebValidators::parseSessionConfig(doc, mask, intent, err)) {
     sendJsonError(request, 400, err);
     return;
   }
 
-  // Execution
   if (Esp32SessionHAL::getInstance().lockState()) {
     int result = _engine->startSession(intent);
     Esp32SessionHAL::getInstance().unlockState();
@@ -217,7 +198,6 @@ void WebManager::handleStartTest(AsyncWebServerRequest *request) {
   if (Esp32SessionHAL::getInstance().lockState()) {
     int result = _engine->startTest();
     Esp32SessionHAL::getInstance().unlockState();
-
     if (result == 200) {
       request->send(200, "application/json", "{\"status\":\"testing\"}");
     } else {
@@ -231,13 +211,15 @@ void WebManager::handleStartTest(AsyncWebServerRequest *request) {
 void WebManager::handleAbort(AsyncWebServerRequest *request) {
   if (Esp32SessionHAL::getInstance().lockState()) {
     _engine->abort("API Request");
-
-    JsonDocument doc;
     DeviceState s = _engine->getState();
-    doc["status"] = (s == ABORTED) ? "aborted" : (s == COMPLETED ? "completed" : "ready");
+    // TS Expects DeviceState enum string: 'ABORTED', 'COMPLETED', 'READY'
+    JsonDocument doc;
+    if (s == ABORTED) doc["status"] = "ABORTED";
+    else if (s == COMPLETED) doc["status"] = "COMPLETED";
+    else doc["status"] = "READY";
+    
     String rJson;
     serializeJson(doc, rJson);
-
     Esp32SessionHAL::getInstance().unlockState();
     request->send(200, "application/json", rJson);
   } else {
@@ -249,149 +231,186 @@ void WebManager::handleAbort(AsyncWebServerRequest *request) {
 // SECTION: STATUS & INFO
 // =================================================================================
 
-/**
- * Converts a DeviceState enum to its string representation.
- */
 const char *stateToString(DeviceState s) {
   switch (s) {
-  case READY:
-    return "ready";
-  case ARMED:
-    return "armed";
-  case LOCKED:
-    return "locked";
-  case ABORTED:
-    return "aborted";
-  case COMPLETED:
-    return "completed";
-  case TESTING:
-    return "testing";
-  default:
-    return "unknown";
+    case READY: return "READY";
+    case ARMED: return "ARMED";
+    case LOCKED: return "LOCKED";
+    case ABORTED: return "ABORTED";
+    case COMPLETED: return "COMPLETED";
+    case TESTING: return "TESTING";
+    default: return "READY";
   }
 }
 
+const char *durTypeToString(DurationType d) {
+    switch(d) {
+        case DUR_RANDOM: return "DUR_RANDOM";
+        case DUR_RANGE_SHORT: return "DUR_RANGE_SHORT";
+        case DUR_RANGE_MEDIUM: return "DUR_RANGE_MEDIUM";
+        case DUR_RANGE_LONG: return "DUR_RANGE_LONG";
+        default: return "DUR_FIXED";
+    }
+}
+
 void WebManager::handleStatus(AsyncWebServerRequest *request) {
-  // Quick Lock to snapshot state
   if (!Esp32SessionHAL::getInstance().lockState()) {
     request->send(503, "text/plain", "Busy");
     return;
   }
 
-  // Snapshot Data locally to minimize lock time
+  // Snapshot Data
   DeviceState s = _engine->getState();
   SessionTimers t = _engine->getTimers();
   SessionStats stats = _engine->getStats();
   SessionConfig cfg = _engine->getActiveConfig();
-
+  
+  // Hardware reading
+  bool btnPressed = Esp32SessionHAL::getInstance().isButtonPressed();
   int rssi = WiFi.RSSI();
   uint32_t heap = ESP.getFreeHeap();
   float temp = temperatureRead();
+  int64_t uptime = esp_timer_get_time() / 1000; // micro to milli
+  bool verified = Esp32SessionHAL::getInstance().isSafetyInterlockEngaged();
+  uint32_t currentPressDurationMs = Esp32SessionHAL::getInstance().getCurrentPressDurationMs();
 
   Esp32SessionHAL::getInstance().unlockState();
 
-  // Build JSON (Heavy operation done unlocked)
   AsyncResponseStream *response = request->beginResponseStream("application/json");
   JsonDocument doc;
 
-  doc["status"] = stateToString(s);
-  doc["lockDuration"] = t.lockDuration;
+  // 1. Root Status
+  doc["state"] = stateToString(s);
+  doc["verified"] = verified;
 
-  JsonObject timers = doc["timers"].to<JsonObject>();
-  timers["lockRemaining"] = t.lockRemaining;
-  timers["rewardRemaining"] = t.penaltyRemaining;
-  timers["testRemaining"] = t.testRemaining;
-
+  // 2. Config Echo (Matching SessionConfig Interface)
   JsonObject cObj = doc["config"].to<JsonObject>();
+  cObj["durationType"] = durTypeToString(cfg.durationType);
+  cObj["durationFixed"] = cfg.durationFixed;
+  cObj["durationMin"] = cfg.durationMin;
+  cObj["durationMax"] = cfg.durationMax;
+  cObj["triggerStrategy"] = (cfg.triggerStrategy == STRAT_BUTTON_TRIGGER) ? "STRAT_BUTTON_TRIGGER" : "STRAT_AUTO_COUNTDOWN";
   cObj["hideTimer"] = cfg.hideTimer;
+  cObj["disableLED"] = cfg.disableLED;
+  
+  JsonArray cDelays = cObj["channelDelays"].to<JsonArray>();
+  for(int i=0; i<4; i++) cDelays.add(cfg.channelDelays[i]);
 
-  // Config Echo
-  if (cfg.triggerStrategy == STRAT_BUTTON_TRIGGER)
-    cObj["triggerStrategy"] = "buttonTrigger";
-  else
-    cObj["triggerStrategy"] = "autoCountdown";
+  // 3. Timers (Matching SessionTimers Interface)
+  JsonObject tObj = doc["timers"].to<JsonObject>();
+  tObj["lockDuration"] = t.lockDuration;
+  tObj["penaltyDuration"] = t.penaltyDuration;
+  tObj["lockRemaining"] = t.lockRemaining;
+  tObj["penaltyRemaining"] = t.penaltyRemaining;
+  tObj["testRemaining"] = t.testRemaining;
+  tObj["triggerTimeout"] = t.triggerTimeout;
+  
+  JsonArray tDelays = tObj["channelDelays"].to<JsonArray>();
+  for(int i=0; i<4; i++) tDelays.add(t.channelDelays[i]);
 
-  JsonObject st = doc["stats"].to<JsonObject>();
-  st["streaks"] = stats.streaks;
-  st["completed"] = stats.completed;
-  st["totalTimeLocked"] = stats.totalLockedTime;
+  // 4. Stats
+  JsonObject sObj = doc["stats"].to<JsonObject>();
+  sObj["streaks"] = stats.streaks;
+  sObj["completed"] = stats.completed;
+  sObj["aborted"] = stats.aborted;
+  sObj["paybackAccumulated"] = stats.paybackAccumulated;
+  sObj["totalLockedTime"] = stats.totalLockedTime;
 
-  JsonObject hw = doc["hardware"].to<JsonObject>();
-  hw["rssi"] = rssi;
-  hw["freeHeap"] = heap;
-  hw["internalTempC"] = isnan(temp) ? 0.0 : temp;
+  // 5. Telemetry
+  JsonObject tel = doc["telemetry"].to<JsonObject>();
+  tel["buttonPressed"] = btnPressed;
+  tel["currentPressDurationMs"] = currentPressDurationMs;
+  tel["rssi"] = rssi;
+  tel["freeHeap"] = heap;
+  tel["uptime"] = uptime;
+  if(isnan(temp)) tel["internalTempC"] = "N/A";
+  else tel["internalTempC"] = temp;
 
   serializeJson(doc, *response);
   request->send(response);
 }
 
 // =================================================================================
-// SECTION: STATUS & INFO
+// SECTION: DEVICE DETAILS
 // =================================================================================
 
 void WebManager::handleDetails(AsyncWebServerRequest *request) {
-  // 1. Prepare Identification Data
-  uint8_t mac[6];
-  esp_efuse_mac_get_default(mac);
+  // 1. Prepare Identification
+  uint8_t macRaw[6];
+  esp_efuse_mac_get_default(macRaw);
   char idBuf[32];
-  snprintf(idBuf, sizeof(idBuf), "lobster-lock-%02X%02X%02X", mac[3], mac[4], mac[5]);
+  snprintf(idBuf, sizeof(idBuf), "lobster-lock-%02X%02X%02X", macRaw[3], macRaw[4], macRaw[5]);
 
   JsonDocument doc;
+  
+  // -- Root ID
   doc["id"] = idBuf;
-  doc["name"] = DEVICE_NAME;
-  doc["version"] = DEVICE_VERSION;
-  doc["address"] = WiFi.localIP().toString();
-  doc["mac"] = WiFi.macAddress();
-  doc["port"] = 80;
 
+  // -- Identity Interface
+  JsonObject identity = doc["identity"].to<JsonObject>();
+  identity["name"] = DEVICE_NAME;
+  identity["version"] = DEVICE_VERSION;
 #ifdef DEBUG_MODE
-  doc["buildType"] = "debug";
+  identity["buildType"] = "debug";
 #else
-  doc["buildType"] = "release";
+  identity["buildType"] = "release";
 #endif
+  identity["buildDate"] = __DATE__;
+  identity["buildTime"] = __TIME__;
+  identity["cppStandard"] = __cplusplus;
 
-  // 2. Features List
+  // -- Network Interface
+  JsonObject net = doc["network"].to<JsonObject>();
+  net["ssid"] = WiFi.SSID();
+  net["rssi"] = WiFi.RSSI();
+  net["mac"] = WiFi.macAddress();
+  net["ip"] = WiFi.localIP().toString();
+  net["subnetMask"] = WiFi.subnetMask().toString();
+  net["gateway"] = WiFi.gatewayIP().toString();
+  net["hostname"] = WiFi.getHostname();
+  net["port"] = 80;
+
+  // -- Features
   JsonArray features = doc["features"].to<JsonArray>();
   features.add("footPedal");
+  features.add("startCountdown");
   features.add("statusLed");
-  features.add("wifiConfig");
 
-  // 3. Retrieve Config from Engine (Thread Safe)
+  // -- Channels
+  JsonObject chans = doc["channels"].to<JsonObject>();
+  chans["ch1"] = Esp32SessionHAL::getInstance().isChannelEnabled(0);
+  chans["ch2"] = Esp32SessionHAL::getInstance().isChannelEnabled(1);
+  chans["ch3"] = Esp32SessionHAL::getInstance().isChannelEnabled(2);
+  chans["ch4"] = Esp32SessionHAL::getInstance().isChannelEnabled(3);
+
+  // -- Retrieve Config Data
   if (Esp32SessionHAL::getInstance().lockState()) {
     const SessionPresets &presets = _engine->getPresets();
     const DeterrentConfig &det = _engine->getDeterrents();
 
-    // --- Session Presets ---
-    JsonObject p = doc["sessionPresets"].to<JsonObject>();
-    // Generators
+    // -- Presets Interface
+    JsonObject p = doc["presets"].to<JsonObject>();
     p["shortMin"] = presets.shortMin;
     p["shortMax"] = presets.shortMax;
     p["mediumMin"] = presets.mediumMin;
     p["mediumMax"] = presets.mediumMax;
     p["longMin"] = presets.longMin;
     p["longMax"] = presets.longMax;
-    // Ranges
-    p["penaltyMin"] = presets.penaltyMin;
-    p["penaltyMax"] = presets.penaltyMax;
-    p["paybackMin"] = presets.paybackMin;
-    p["paybackMax"] = presets.paybackMax;
-    // Safety Ceilings
-    p["limitLockMax"] = presets.limitLockMax;
-    p["limitPenaltyMax"] = presets.limitPenaltyMax;
-    p["limitPaybackMax"] = presets.limitPaybackMax;
-    // Absolute Floors
-    p["minLockDuration"] = presets.minLockDuration;
-    p["minRewardPenaltyDuration"] = presets.minRewardPenaltyDuration;
-    p["minPaybackTime"] = presets.minPaybackTime;
+    p["minSessionDuration"] = presets.minSessionDuration; 
+    p["maxSessionDuration"] = presets.maxSessionDuration;
 
-    // --- Deterrents ---
-    JsonObject d = doc["deterrents"].to<JsonObject>();
+    // -- DeterrentConfig Interface
+    JsonObject d = doc["deterrentConfig"].to<JsonObject>();
     d["enableStreaks"] = det.enableStreaks;
     d["enableRewardCode"] = det.enableRewardCode;
-    d["penaltyStrategy"] = (det.penaltyStrategy == DETERRENT_FIXED) ? "fixed" : "random";
+    d["rewardPenaltyStrategy"] = (det.rewardPenaltyStrategy == DETERRENT_FIXED) ? "DETERRENT_FIXED" : "DETERRENT_RANDOM";
+    d["rewardPenaltyMin"] = det.rewardPenaltyMin;
+    d["rewardPenaltyMax"] = det.rewardPenaltyMax;
     d["rewardPenalty"] = det.rewardPenalty;
     d["enablePaybackTime"] = det.enablePaybackTime;
-    d["paybackStrategy"] = (det.paybackStrategy == DETERRENT_FIXED) ? "fixed" : "random";
+    d["paybackTimeStrategy"] = (det.paybackTimeStrategy == DETERRENT_FIXED) ? "DETERRENT_FIXED" : "DETERRENT_RANDOM";
+    d["paybackTimeMin"] = det.paybackTimeMin; 
+    d["paybackTimeMax"] = det.paybackTimeMax;
     d["paybackTime"] = det.paybackTime;
 
     Esp32SessionHAL::getInstance().unlockState();
@@ -400,12 +419,14 @@ void WebManager::handleDetails(AsyncWebServerRequest *request) {
     return;
   }
 
-  // 4. Channel Configuration (from Globals)
-  JsonObject c = doc["channels"].to<JsonObject>();
-  c["ch1"] = Esp32SessionHAL::getInstance().isChannelEnabled(0);
-  c["ch2"] = Esp32SessionHAL::getInstance().isChannelEnabled(1);
-  c["ch3"] = Esp32SessionHAL::getInstance().isChannelEnabled(2);
-  c["ch4"] = Esp32SessionHAL::getInstance().isChannelEnabled(3);
+  // -- System Defaults (Mocking or retrieving from constants if available)
+  JsonObject def = doc["defaults"].to<JsonObject>();
+  def["longPressDuration"] = 2000; 
+  def["extButtonSignalDuration"] = 50;
+  def["testModeDuration"] = 10000;
+  def["keepAliveInterval"] = 5000;
+  def["wifiMaxRetries"] = 10;
+  def["armedTimeoutSeconds"] = 300;
 
   String response;
   serializeJson(doc, response);
@@ -414,21 +435,14 @@ void WebManager::handleDetails(AsyncWebServerRequest *request) {
 
 void WebManager::handleLog(AsyncWebServerRequest *request) {
   AsyncResponseStream *response = request->beginResponseStream("text/plain");
-
-  // HAL Interaction
   Esp32SessionHAL &hal = Esp32SessionHAL::getInstance();
 
-  // Iterate and Stream
-  // We lock briefly per line to ensure thread safety while streaming
-  // without blocking the system for the entire transfer.
   for (int i = 0; i < LOG_BUFFER_SIZE; i++) {
     if (hal.lockState()) {
       const char *line = hal.getLogLine(i);
-      // Copy line to stack to send outside lock
       char lineBuf[256];
       strncpy(lineBuf, line, sizeof(lineBuf));
       lineBuf[sizeof(lineBuf) - 1] = '\0';
-
       hal.unlockState();
 
       if (strlen(lineBuf) > 0) {
@@ -436,18 +450,15 @@ void WebManager::handleLog(AsyncWebServerRequest *request) {
         response->print("\n");
       }
     } else {
-      // Failed to get lock, skip line or retry
       response->print("[Busy]\n");
     }
   }
-
   request->send(response);
 }
 
 void WebManager::handleReward(AsyncWebServerRequest *request) {
   if (Esp32SessionHAL::getInstance().lockState()) {
     const Reward *history = _engine->getRewardHistory();
-
     JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
 
@@ -458,7 +469,6 @@ void WebManager::handleReward(AsyncWebServerRequest *request) {
         r["checksum"] = history[i].checksum;
       }
     }
-
     String rJson;
     serializeJson(doc, rJson);
     Esp32SessionHAL::getInstance().unlockState();
@@ -473,8 +483,7 @@ void WebManager::handleReward(AsyncWebServerRequest *request) {
 // =================================================================================
 
 void WebManager::handleUpdateWifi(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-  if (index + len != total)
-    return;
+  if (index + len != total) return;
 
   JsonDocument doc;
   DeserializationError error = deserializeJson(doc, (const char *)data, len);
@@ -488,7 +497,6 @@ void WebManager::handleUpdateWifi(AsyncWebServerRequest *request, uint8_t *data,
   const char *pass = doc["pass"];
   std::string err;
 
-  // Use Static Validator
   if (!WebValidators::validateWifiCredentials(ssid, pass, err)) {
     sendJsonError(request, 400, err);
     return;

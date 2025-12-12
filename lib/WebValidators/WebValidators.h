@@ -1,6 +1,6 @@
 #pragma once
 #include <ArduinoJson.h>
-#include <string.h>
+#include <string>
 #include "Session.h"
 
 class WebValidators {
