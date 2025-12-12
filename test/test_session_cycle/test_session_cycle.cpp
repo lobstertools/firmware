@@ -12,14 +12,26 @@
 const SystemDefaults defaults = { 5, 10, 240, 10000, 4, 5, 30000, 3, 60 };
 
 const SessionPresets presets = { 
-    300, 600, 900, 1800, 3600, 7200, // Ranges (Short, Medium, Long)
-    300, 900,                        // Penalty Range
-    60, 120,                         // Payback Range
-    14400, 14400, 3600,              // Limits (Ceilings)
-    10, 10, 10                       // Absolute Minimums (Floors)
+    300, 600,   // Short Range
+    900, 1800,  // Medium Range
+    3600, 7200, // Long Range
+    14400,      // maxSessionDuration
+    10          // minSessionDuration
 };
 
-const DeterrentConfig deterrents = { true, true, DETERRENT_FIXED, 300, true, DETERRENT_FIXED, 60 };
+const DeterrentConfig deterrents = { 
+    true,            // enableStreaks
+    
+    true,            // enableRewardCode
+    DETERRENT_FIXED, // rewardPenaltyStrategy
+    300, 900,        // rewardPenaltyMin, rewardPenaltyMax
+    300,             // rewardPenalty
+    
+    true,            // enablePaybackTime
+    DETERRENT_FIXED, // paybackTimeStrategy
+    60, 120,         // paybackTimeMin, paybackTimeMax
+    60               // paybackTime
+};
 
 // --- Helper ---
 void engageSafetyInterlock(MockSessionHAL& hal, SessionEngine& engine) {
@@ -44,7 +56,7 @@ void test_full_cycle_auto_countdown(void) {
 
     SessionConfig cfg = {};
     cfg.durationType = DUR_FIXED;
-    cfg.fixedDuration = 60;
+    cfg.durationFixed = 60;
     cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
     cfg.channelDelays[0] = 2; 
 
@@ -70,7 +82,7 @@ void test_full_cycle_button_trigger(void) {
 
     SessionConfig cfg = {};
     cfg.durationType = DUR_FIXED;
-    cfg.fixedDuration = 60;
+    cfg.durationFixed = 60;
     cfg.triggerStrategy = STRAT_BUTTON_TRIGGER;
 
     engine.startSession(cfg);
@@ -90,7 +102,7 @@ void test_armed_state_timeout(void) {
 
     SessionConfig cfg = {};
     cfg.durationType = DUR_FIXED;
-    cfg.fixedDuration = 60;
+    cfg.durationFixed = 60;
     cfg.triggerStrategy = STRAT_BUTTON_TRIGGER;
     engine.startSession(cfg);
 
@@ -158,8 +170,8 @@ void test_resolve_duration_random_custom(void) {
 
     SessionConfig cfg = {};
     cfg.durationType = DUR_RANDOM; 
-    cfg.minDuration = 100; // Custom range
-    cfg.maxDuration = 200;
+    cfg.durationMin = 100;
+    cfg.durationMax = 200;
     cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
 
     // (100+200)/2 = 150
@@ -242,7 +254,7 @@ void test_api_trigger_starts_locked_state(void) {
 
     SessionConfig cfg = {};
     cfg.durationType = DUR_FIXED;
-    cfg.fixedDuration = 60;
+    cfg.durationFixed = 60;
     cfg.triggerStrategy = STRAT_BUTTON_TRIGGER;
     engine.startSession(cfg);
 
@@ -268,18 +280,15 @@ void test_penalty_box_auto_completion(void) {
     
     // Setup Custom Config (Allow short penalty)
     DeterrentConfig fastPenalty = deterrents;
-    fastPenalty.rewardPenalty = 10; 
+    fastPenalty.rewardPenalty = 10;
+    fastPenalty.rewardPenaltyMin = 10; 
     
-    // FIX: Create permissive presets because default minimum is 300s
-    SessionPresets loosePresets = presets;
-    loosePresets.penaltyMin = 10; 
-    
-    SessionEngine engine(hal, rules, defaults, loosePresets, fastPenalty);
+    SessionEngine engine(hal, rules, defaults, presets, fastPenalty);
     engageSafetyInterlock(hal, engine);
 
     SessionConfig cfg = {};
     cfg.durationType = DUR_FIXED;
-    cfg.fixedDuration = 600;
+    cfg.durationFixed = 600;
     
     engine.startSession(cfg);
     engine.tick(); 
@@ -297,7 +306,7 @@ void test_start_rejected_by_rules_logic(void) {
 
     SessionConfig cfg = {};
     cfg.durationType = DUR_FIXED;
-    cfg.fixedDuration = 5; 
+    cfg.durationFixed = 5;
 
     int res = engine.startSession(cfg);
     TEST_ASSERT_EQUAL(400, res); 
@@ -309,16 +318,18 @@ void test_start_fails_if_penalty_out_of_range(void) {
     
     // 1. Setup: Fixed Penalty of 10s (Too Short!)
     DeterrentConfig badConfig = deterrents;
-    badConfig.penaltyStrategy = DETERRENT_FIXED;
+    badConfig.rewardPenaltyStrategy = DETERRENT_FIXED;
     badConfig.rewardPenalty = 10; 
     
-    // Presets.penaltyMin is 300s by default. 10 < 300 -> Invalid.
+    // Limits are in badConfig (copied from 'deterrents' which has 300 min)
+    // 10 < 300 -> Invalid.
+    
     SessionEngine engine(hal, rules, defaults, presets, badConfig);
     engageSafetyInterlock(hal, engine);
 
     SessionConfig cfg = {};
     cfg.durationType = DUR_FIXED;
-    cfg.fixedDuration = 600;
+    cfg.durationFixed = 600;
 
     // 2. Act
     int res = engine.startSession(cfg);

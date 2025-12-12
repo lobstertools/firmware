@@ -11,14 +11,26 @@
 const SystemDefaults defaults = { 5, 10, 240, 10000, 4, 5, 30000, 3, 60 };
 
 const SessionPresets presets = { 
-    300, 600, 900, 1800, 3600, 7200, // Ranges
-    300, 900,                        // Penalty Range
-    60, 120,                         // Payback Range
-    14400, 14400, 3600,              // Limits (Ceilings)
-    10, 10, 10                       // Absolute Minimums (Floors)
+    300, 600,    // Short Range
+    900, 1800,   // Medium Range
+    3600, 7200,  // Long Range
+    14400,       // maxSessionDuration
+    10           // minSessionDuration
 };
 
-const DeterrentConfig deterrents = { true, true, DETERRENT_FIXED, 300, true, DETERRENT_FIXED, 60 };
+const DeterrentConfig deterrents = { 
+    true,            // enableStreaks
+    
+    true,            // enableRewardCode
+    DETERRENT_FIXED, // rewardPenaltyStrategy
+    300, 900,        // rewardPenaltyMin, rewardPenaltyMax
+    300,             // rewardPenalty
+    
+    true,            // enablePaybackTime
+    DETERRENT_FIXED, // paybackTimeStrategy
+    60, 120,         // paybackTimeMin, paybackTimeMax
+    60               // paybackTime
+};
 
 // --- Helper ---
 void engageSafetyInterlock(MockSessionHAL& hal, SessionEngine& engine) {
@@ -44,7 +56,7 @@ void test_interlock_disconnect_during_lock(void) {
     // Start and Lock
     SessionConfig cfg = {};
     cfg.durationType = DUR_FIXED;
-    cfg.fixedDuration = 100;
+    cfg.durationFixed = 100;
     cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
     engine.startSession(cfg);
     engine.tick(); // Lock it
@@ -70,7 +82,7 @@ void test_start_fails_without_interlock(void) {
     
     SessionConfig cfg = {};
     cfg.durationType = DUR_FIXED;
-    cfg.fixedDuration = 60;
+    cfg.durationFixed = 60;
 
     int result = engine.startSession(cfg);
 
@@ -95,7 +107,7 @@ void test_hardware_abort_trigger(void) {
     // 1. Start and Lock
     SessionConfig cfg = {};
     cfg.durationType = DUR_FIXED;
-    cfg.fixedDuration = 600;
+    cfg.durationFixed = 600;
     cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
     engine.startSession(cfg);
     engine.tick(); 
@@ -123,7 +135,7 @@ void test_watchdog_petting_prevents_timeout(void) {
     // 1. Start and Lock
     SessionConfig cfg = {};
     cfg.durationType = DUR_FIXED;
-    cfg.fixedDuration = 600; 
+    cfg.durationFixed = 600; 
     cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
     engine.startSession(cfg);
     engine.tick(); 
@@ -155,7 +167,7 @@ void test_watchdog_petting_prevents_timeout_and_resets_strikes(void) {
     // 1. Start and Lock
     SessionConfig cfg = {};
     cfg.durationType = DUR_FIXED;
-    cfg.fixedDuration = 600; 
+    cfg.durationFixed = 600; 
     cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
     engine.startSession(cfg);
     engine.tick(); 
@@ -192,7 +204,7 @@ void test_ui_watchdog_timeout_aborts_session(void) {
     // 1. Start and Lock
     SessionConfig cfg = {};
     cfg.durationType = DUR_FIXED;
-    cfg.fixedDuration = 600; 
+    cfg.durationFixed = 600; 
     cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
     engine.startSession(cfg);
     engine.tick(); // Locked
@@ -302,7 +314,7 @@ void test_channel_delay_masking(void) {
 
     SessionConfig cfg = {};
     cfg.durationType = DUR_FIXED;
-    cfg.fixedDuration = 60;
+    cfg.durationFixed = 60;
     cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
     
     cfg.channelDelays[0] = 0; 
@@ -329,7 +341,7 @@ void test_start_rejected_if_already_locked(void) {
 
     SessionConfig cfg = {};
     cfg.durationType = DUR_FIXED;
-    cfg.fixedDuration = 60;
+    cfg.durationFixed = 60;
     cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
     engine.startSession(cfg);
     engine.tick(); 
@@ -359,7 +371,7 @@ void test_network_failure_while_locked_aborts_session(void) {
 
     SessionConfig cfg = {};
     cfg.durationType = DUR_FIXED;
-    cfg.fixedDuration = 600;
+    cfg.durationFixed = 600;
     cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
     engine.startSession(cfg);
     engine.tick(); 
@@ -402,7 +414,7 @@ void test_start_session_fails_if_network_unstable(void) {
     
     SessionConfig cfg = {};
     cfg.durationType = DUR_FIXED;
-    cfg.fixedDuration = 60;
+    cfg.durationFixed = 60;
     
     int result = engine.startSession(cfg);
     

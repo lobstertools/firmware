@@ -11,11 +11,11 @@
 const SystemDefaults defaults = { 5, 10, 240, 10000, 4, 5, 30000, 3, 60 };
 
 const SessionPresets presets = { 
-    300, 600, 900, 1800, 3600, 7200, // Ranges
-    300, 900,                        // Penalty Range
-    60, 120,                         // Payback Range
-    14400, 14400, 3600,              // Limits (Ceilings)
-    10, 10, 10                       // Absolute Minimums (Floors)
+    300, 600,   // Short
+    900, 1800,  // Medium
+    3600, 7200, // Long
+    14400,      // maxSessionDuration
+    10          // minSessionDuration
 };
 
 // --- Helper ---
@@ -37,11 +37,15 @@ void test_abort_with_reward_penalty_enforces_penalty_box(void) {
     // 1. Setup: Strict Deterrents
     DeterrentConfig strictConfig = { 
         true,               // enableStreaks
+        
         true,               // enableRewardCode (Triggers Penalty Box)
-        DETERRENT_FIXED,    // penaltyStrategy
+        DETERRENT_FIXED,    // rewardPenaltyStrategy
+        300, 900,           // rewardPenaltyMin, rewardPenaltyMax
         300,                // rewardPenalty (5 mins)
+        
         true,               // enablePaybackTime
-        DETERRENT_FIXED,    // paybackStrategy
+        DETERRENT_FIXED,    // paybackTimeStrategy
+        60, 120,            // paybackTimeMin, paybackTimeMax
         60                  // paybackTime
     };
 
@@ -53,7 +57,7 @@ void test_abort_with_reward_penalty_enforces_penalty_box(void) {
     // 2. Start and Lock Session
     SessionConfig cfg = {};
     cfg.durationType = DUR_FIXED;
-    cfg.fixedDuration = 600; // 10 mins
+    cfg.durationFixed = 600; // (10 mins)
     cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
     
     engine.startSession(cfg);
@@ -90,11 +94,17 @@ void test_abort_with_reward_penalty_enforces_penalty_box(void) {
 void test_abort_without_reward_penalty_skips_penalty_box(void) {
     // 1. Setup: No Deterrents (Safe Mode)
     DeterrentConfig safeConfig = { 
-        false,                 // enableStreaks (No reset)
-        false,                 // enableRewardCode (NO Penalty Box)
-        DETERRENT_FIXED, 300,  // Ignored
-        false,                 // enablePaybackTime (No Debt)
-        DETERRENT_FIXED, 60    // Ignored
+        false,              // enableStreaks (No reset)
+        
+        false,              // enableRewardCode (NO Penalty Box)
+        DETERRENT_FIXED,    // rewardPenaltyStrategy
+        300, 900,           // rewardPenaltyMin, rewardPenaltyMax
+        300,                // rewardPenalty
+        
+        false,              // enablePaybackTime (No Debt)
+        DETERRENT_FIXED,    // paybackTimeStrategy
+        60, 120,            // paybackTimeMin, paybackTimeMax
+        60                  // paybackTime
     };
 
     MockSessionHAL hal;
@@ -105,7 +115,7 @@ void test_abort_without_reward_penalty_skips_penalty_box(void) {
     // 2. Start and Lock
     SessionConfig cfg = {};
     cfg.durationType = DUR_FIXED;
-    cfg.fixedDuration = 600;
+    cfg.durationFixed = 600;
     cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
     
     engine.startSession(cfg);
@@ -135,7 +145,6 @@ void test_abort_without_reward_penalty_skips_penalty_box(void) {
     
     // Note: StandardRules does NOT increment 'aborted' count if streaks are disabled,
     // as it treats it as a non-consequential event, or we can check implementation.
-    // Looking at StandardRules.h: "if (deterrents.enableStreaks) { stats.aborted++; }"
     // So aborted count should NOT increment here.
     TEST_ASSERT_EQUAL_UINT32(0, engine.getStats().aborted);
 }

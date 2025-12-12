@@ -60,9 +60,9 @@ void test_wifi_pass_empty_allowed(void) {
 
 void test_parse_valid_fixed_config(void) {
     JsonDocument doc;
-    doc["durationType"] = "fixed";
-    doc["duration"] = 600;
-    doc["triggerStrategy"] = "buttonTrigger";
+    doc["durationType"] = "DUR_FIXED"; 
+    doc["durationFixed"] = 600; 
+    doc["triggerStrategy"] = "STRAT_BUTTON_TRIGGER";
 
     SessionConfig cfg;
     std::string err;
@@ -71,7 +71,7 @@ void test_parse_valid_fixed_config(void) {
 
     TEST_ASSERT_TRUE(res);
     TEST_ASSERT_EQUAL(DUR_FIXED, cfg.durationType);
-    TEST_ASSERT_EQUAL_UINT32(600, cfg.fixedDuration);
+    TEST_ASSERT_EQUAL_UINT32(600, cfg.durationFixed); 
     TEST_ASSERT_EQUAL(STRAT_BUTTON_TRIGGER, cfg.triggerStrategy);
 }
 
@@ -84,38 +84,42 @@ void test_parse_invalid_duration_type(void) {
     bool res = WebValidators::parseSessionConfig(doc, 0x0F, cfg, err);
 
     TEST_ASSERT_FALSE(res);
-    TEST_ASSERT_EQUAL_STRING("Invalid durationType.", err.c_str());
+    TEST_ASSERT_EQUAL_STRING("Invalid durationType: infinite", err.c_str());
 }
 
 void test_parse_channel_mask_enforcement(void) {
     JsonDocument doc;
-    JsonObject delays = doc["channelDelays"].to<JsonObject>();
-    delays["ch1"] = 10;
-    delays["ch2"] = 10; // Requesting delay on Ch2
+    
+    JsonArray delays = doc["channelDelays"].to<JsonArray>();
+    delays.add(10); // Index 0: Channel 1
+    delays.add(10); // Index 1: Channel 2 (Requesting delay here)
 
     SessionConfig cfg;
     std::string err;
     // Hardware mask 0x01 (Only Ch1 enabled, Ch2 disabled)
+    // Binary: 0001
     uint8_t hardwareMask = 0x01; 
 
     bool res = WebValidators::parseSessionConfig(doc, hardwareMask, cfg, err);
 
     TEST_ASSERT_FALSE_MESSAGE(res, "Should reject delay for disabled channel");
-    TEST_ASSERT_EQUAL_STRING("Cannot set delay for disabled/missing channel: 2", err.c_str());
+    
+    // Implementation uses std::to_string(count) where count is the index (1)
+    TEST_ASSERT_EQUAL_STRING("Cannot set delay for disabled/missing channel index: 1", err.c_str());
 }
 
 void test_parse_random_range_sanity(void) {
     JsonDocument doc;
-    doc["durationType"] = "random";
-    doc["minDuration"] = 500;
-    doc["maxDuration"] = 100; // Invalid: Min > Max
+    doc["durationType"] = "DUR_RANDOM"; 
+    doc["durationMin"] = 500;
+    doc["durationMax"] = 100; // Invalid: Min > Max
 
     SessionConfig cfg;
     std::string err;
     bool res = WebValidators::parseSessionConfig(doc, 0x0F, cfg, err);
 
     TEST_ASSERT_FALSE(res);
-    TEST_ASSERT_EQUAL_STRING("minDuration cannot be greater than maxDuration.", err.c_str());
+    TEST_ASSERT_EQUAL_STRING("durationMin cannot be greater than durationMax.", err.c_str());
 }
 
 // ============================================================================

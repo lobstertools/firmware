@@ -14,25 +14,22 @@ const SessionPresets presets = {
     300, 600,   // Short
     900, 1800,  // Medium
     3600, 7200, // Long
-    300, 900,   // Penalty
-    60, 120,    // Payback Range
-    14400,      // Limit Lock Max (The Clamp Target)
-    14400,      // Limit Penalty Max
-    3600,       // Limit Payback Max
-    // --- Absolute Minimums (Floors) ---
-    10,         // minLockDuration
-    10,         // minRewardPenaltyDuration
-    10          // minPaybackTime
+    14400,      // maxSessionDuration
+    10          // minSessionDuration
 };
 
 // Base config: Fixed Strategy
 const DeterrentConfig configFixed = { 
     true,               // enableStreaks
+    
     true,               // enableRewardCode
-    DETERRENT_FIXED,    // penaltyStrategy
+    DETERRENT_FIXED,    // rewardPenaltyStrategy (Renamed)
+    300, 900,           // rewardPenaltyMin, rewardPenaltyMax
     500,                // rewardPenalty (Fixed Value)
+    
     true,               // enablePaybackTime
-    DETERRENT_FIXED,    // paybackStrategy
+    DETERRENT_FIXED,    // paybackTimeStrategy (Renamed)
+    60, 120,            // paybackTimeMin, paybackTimeMax
     60                  // paybackTime
 };
 
@@ -69,7 +66,7 @@ void test_start_request_rejects_below_minimum(void) {
     StandardRules rules;
     SessionStats stats = {0};
 
-    // Request 5s (Below minLockDuration of 10s)
+    // Request 5s (Below minSessionDuration of 10s)
     uint32_t duration = rules.processStartRequest(5, presets, configFixed, stats);
 
     TEST_ASSERT_EQUAL_UINT32(0, duration); // Should be rejected
@@ -95,9 +92,9 @@ void test_abort_strategy_random(void) {
 
     // Setup: Random Strategy
     DeterrentConfig configRandom = configFixed;
-    configRandom.penaltyStrategy = DETERRENT_RANDOM;
+    configRandom.rewardPenaltyStrategy = DETERRENT_RANDOM;
 
-    // Presets Penalty Range: 300 - 900
+    // Penalty Range in config: 300 - 900
     // MockSessionHAL.getRandom returns (min+max)/2 => (300+900)/2 = 600
     
     // Act
@@ -116,10 +113,9 @@ void test_abort_applies_random_payback(void) {
     // Setup: Enable Random Payback Strategy
     DeterrentConfig configRandomPayback = configFixed; // Copy base
     configRandomPayback.enablePaybackTime = true;
-    configRandomPayback.paybackStrategy = DETERRENT_RANDOM;
+    configRandomPayback.paybackTimeStrategy = DETERRENT_RANDOM;
 
-    // Note: 'presets' is defined at the top of test_rules_logic.cpp
-    // Payback Range in presets is: 60 (min), 120 (max)
+    // Payback Range in config: 60 (min), 120 (max)
     // MockHAL calculates random as (min+max)/2 => (60+120)/2 = 90.
     
     // Act: Abort
