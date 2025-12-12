@@ -43,46 +43,46 @@ StandardRules rules;
  * Place this in main.cpp and call it during setup().
  */
 void printFirmwareDiagnostics() {
-    // Access the HAL singleton for logging
-    Esp32SessionHAL& hal = Esp32SessionHAL::getInstance();
-    char logBuf[128];
+  // Access the HAL singleton for logging
+  Esp32SessionHAL &hal = Esp32SessionHAL::getInstance();
+  char logBuf[128];
 
-    hal.log("==========================================================================");
-    hal.log("                       FIRMWARE IDENTITY                                  ");
-    hal.log("==========================================================================");
+  hal.log("==========================================================================");
+  hal.log("                       FIRMWARE IDENTITY                                  ");
+  hal.log("==========================================================================");
 
-    // -------------------------------------------------------------------------
-    // SECTION: IDENTITY
-    // -------------------------------------------------------------------------
-    hal.log("[ VERSION INFO ]");
+  // -------------------------------------------------------------------------
+  // SECTION: IDENTITY
+  // -------------------------------------------------------------------------
+  hal.log("[ VERSION INFO ]");
 
-    // Device Name
-    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Device Name", String(DEVICE_NAME).c_str());
-    hal.log(logBuf);
+  // Device Name
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Device Name", String(DEVICE_NAME).c_str());
+  hal.log(logBuf);
 
-    // Firmware Version
-    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Firmware Version", String(DEVICE_VERSION).c_str());
-    hal.log(logBuf);
+  // Firmware Version
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Firmware Version", String(DEVICE_VERSION).c_str());
+  hal.log(logBuf);
 
-    // -------------------------------------------------------------------------
-    // SECTION: BUILD METADATA
-    // -------------------------------------------------------------------------
-    hal.log("");
-    hal.log("[ BUILD DETAILS ]");
+  // -------------------------------------------------------------------------
+  // SECTION: BUILD METADATA
+  // -------------------------------------------------------------------------
+  hal.log("");
+  hal.log("[ BUILD DETAILS ]");
 
-    // Compilation Date
-    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Build Date", __DATE__);
-    hal.log(logBuf);
+  // Compilation Date
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Build Date", __DATE__);
+  hal.log(logBuf);
 
-    // Compilation Time
-    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Build Time", __TIME__);
-    hal.log(logBuf);
+  // Compilation Time
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Build Time", __TIME__);
+  hal.log(logBuf);
 
-    // C++ Standard
-    snprintf(logBuf, sizeof(logBuf), " %-25s : %ld", "C++ Standard", __cplusplus);
-    hal.log(logBuf);
+  // C++ Standard
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %ld", "C++ Standard", __cplusplus);
+  hal.log(logBuf);
 
-    hal.log("==========================================================================");
+  hal.log("==========================================================================");
 }
 
 // =================================================================
@@ -135,10 +135,10 @@ void setup() {
   // 6. Diagnostics
   hal.printStartupDiagnostics();
   hal.tick();
-  
+
   sessionEngine->printStartupDiagnostics();
   hal.tick();
-  
+
   network.printStartupDiagnostics();
   hal.tick();
 

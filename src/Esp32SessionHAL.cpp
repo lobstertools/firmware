@@ -20,15 +20,9 @@
 #include "SettingsManager.h"
 
 #define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
-#define BYTE_TO_BINARY(byte)  \
-  ((byte) & 0x80 ? '1' : '0'), \
-  ((byte) & 0x40 ? '1' : '0'), \
-  ((byte) & 0x20 ? '1' : '0'), \
-  ((byte) & 0x10 ? '1' : '0'), \
-  ((byte) & 0x08 ? '1' : '0'), \
-  ((byte) & 0x04 ? '1' : '0'), \
-  ((byte) & 0x02 ? '1' : '0'), \
-  ((byte) & 0x01 ? '1' : '0')
+#define BYTE_TO_BINARY(byte)                                                                                                               \
+  ((byte) & 0x80 ? '1' : '0'), ((byte) & 0x40 ? '1' : '0'), ((byte) & 0x20 ? '1' : '0'), ((byte) & 0x10 ? '1' : '0'),                      \
+      ((byte) & 0x08 ? '1' : '0'), ((byte) & 0x04 ? '1' : '0'), ((byte) & 0x02 ? '1' : '0'), ((byte) & 0x01 ? '1' : '0')
 
 // =================================================================================
 // SECTION: STATIC GLOBALS (Required for ISRs/C-APIs)
@@ -55,11 +49,9 @@ static void IRAM_ATTR failsafe_timer_callback(void *arg) {
 // =================================================================================
 
 Esp32SessionHAL::Esp32SessionHAL()
-    : _triggerActionPending(false), _abortActionPending(false), _shortPressPending(false), 
-      _pcbPressed(false), _extPressed(false), _pressStartTime(0),
-      _cachedState(READY), _logBufferIndex(0),
-      _queueHead(0), _queueTail(0), _statusLed(JLed(STATUS_LED_PIN)), _lastHealthCheck(0), _bootStartTime(0), _bootMarkedStable(false),
-      _enabledChannelsMask(0x0F) {
+    : _triggerActionPending(false), _abortActionPending(false), _shortPressPending(false), _pcbPressed(false), _extPressed(false),
+      _pressStartTime(0), _cachedState(READY), _logBufferIndex(0), _queueHead(0), _queueTail(0), _statusLed(JLed(STATUS_LED_PIN)),
+      _lastHealthCheck(0), _bootStartTime(0), _bootMarkedStable(false), _enabledChannelsMask(0x0F) {
   // OneButton Setup (Pin, ActiveLow, Pullup)
   _pcbButton = OneButton(PCB_BUTTON_PIN, true, true);
 
@@ -106,14 +98,14 @@ void Esp32SessionHAL::initialize() {
   // 5. Button Attachments
   // We use detailed handlers to track the "Pressed" state for telemetry
   // while preserving the original Click/Double/Long logic.
-  
+
   // -- PCB Button --
   _pcbButton.attachPress(handlePcbPressStart);        // State: DOWN
   _pcbButton.attachClick(handlePcbClick);             // State: UP + Action: Short
   _pcbButton.attachDoubleClick(handlePcbDoubleClick); // State: UP + Action: Trigger
   _pcbButton.setPressMs(g_systemDefaults.longPressDuration * 1000);
-  _pcbButton.attachLongPressStart(handlePcbLongStart);// Action: Abort
-  _pcbButton.attachLongPressStop(handlePcbLongStop);  // State: UP
+  _pcbButton.attachLongPressStart(handlePcbLongStart); // Action: Abort
+  _pcbButton.attachLongPressStop(handlePcbLongStop);   // State: UP
 
   // -- EXT Button --
 #ifdef EXT_BUTTON_PIN
@@ -185,9 +177,7 @@ bool Esp32SessionHAL::isChannelEnabled(int channelIndex) const {
   return (_enabledChannelsMask >> channelIndex) & 1;
 }
 
-bool Esp32SessionHAL::isButtonPressed() const {
-  return _pcbPressed || _extPressed;
-}
+bool Esp32SessionHAL::isButtonPressed() const { return _pcbPressed || _extPressed; }
 
 uint32_t Esp32SessionHAL::getCurrentPressDurationMs() const {
   if (!isButtonPressed() || _pressStartTime == 0) {
@@ -253,82 +243,78 @@ void Esp32SessionHAL::processLogQueue() {
 }
 
 void Esp32SessionHAL::printStartupDiagnostics() {
-    char logBuf[128];
+  char logBuf[128];
 
-    log("==========================================================================");
-    log("                            DEVICE DIAGNOSTICS                           ");
-    log("==========================================================================");
+  log("==========================================================================");
+  log("                            DEVICE DIAGNOSTICS                           ");
+  log("==========================================================================");
 
-    // -------------------------------------------------------------------------
-    // SECTION: SYSTEM HEALTH
-    // -------------------------------------------------------------------------
-    log("[ SYSTEM HEALTH ]");
-    
-    // Heap Memory
-    uint32_t freeHeap = ESP.getFreeHeap();
-    snprintf(logBuf, sizeof(logBuf), " %-25s : %u bytes", "Free Heap", freeHeap);
+  // -------------------------------------------------------------------------
+  // SECTION: SYSTEM HEALTH
+  // -------------------------------------------------------------------------
+  log("[ SYSTEM HEALTH ]");
+
+  // Heap Memory
+  uint32_t freeHeap = ESP.getFreeHeap();
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %u bytes", "Free Heap", freeHeap);
+  log(logBuf);
+
+  // Temperature (Built-in sensor)
+  float temp = temperatureRead();
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %.1f C", "CPU Temp", temp);
+  log(logBuf);
+
+  // Crash Counters
+  int crashes = SettingsManager::getCrashCount();
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %d", "Recorded Crashes", crashes);
+  log(logBuf);
+
+  // -------------------------------------------------------------------------
+  // SECTION: GPIO CONFIGURATION
+  // -------------------------------------------------------------------------
+  log(""); // Spacer
+  log("[ GPIO & PERIPHERALS ]");
+
+  // Buttons
+  snprintf(logBuf, sizeof(logBuf), " %-25s : GPIO %d", "PCB Button", PCB_BUTTON_PIN);
+  log(logBuf);
+
+#ifdef EXT_BUTTON_PIN
+  if (EXT_BUTTON_PIN != -1) {
+    snprintf(logBuf, sizeof(logBuf), " %-25s : GPIO %d (Active Low)", "Ext. Safety Switch", EXT_BUTTON_PIN);
+  } else {
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Ext. Safety Switch", "DISABLED");
+  }
+#else
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Ext. Safety Switch", "NOT DEFINED");
+#endif
+  log(logBuf);
+
+  // Status LED
+  snprintf(logBuf, sizeof(logBuf), " %-25s : GPIO %d", "Status LED", STATUS_LED_PIN);
+  log(logBuf);
+
+  // -------------------------------------------------------------------------
+  // SECTION: CHANNEL OUTPUTS
+  // -------------------------------------------------------------------------
+  log(""); // Spacer
+  log("[ CHANNEL STATUS ]");
+
+  // Global Mask
+  snprintf(logBuf, sizeof(logBuf), " %-25s : 0x%02X (Binary: " BYTE_TO_BINARY_PATTERN ")", "Hardware Mask", _enabledChannelsMask,
+           BYTE_TO_BINARY(_enabledChannelsMask));
+  log(logBuf);
+
+  // Individual Pins
+  for (int i = 0; i < MAX_CHANNELS; i++) {
+    // Read actual physical state of the pin
+    int state = digitalRead(HARDWARE_PINS[i]);
+    bool enabledInMask = (_enabledChannelsMask >> i) & 1;
+
+    snprintf(logBuf, sizeof(logBuf), " %-25s : GPIO %d | State: %s | Mask: %s", (String("Channel ") + String(i + 1)).c_str(),
+             HARDWARE_PINS[i], state == HIGH ? "HIGH (ON)" : "LOW (OFF)", enabledInMask ? "ENABLED" : "MASKED");
     log(logBuf);
-
-    // Temperature (Built-in sensor)
-    float temp = temperatureRead();
-    snprintf(logBuf, sizeof(logBuf), " %-25s : %.1f C", "CPU Temp", temp);
-    log(logBuf);
-
-    // Crash Counters
-    int crashes = SettingsManager::getCrashCount();
-    snprintf(logBuf, sizeof(logBuf), " %-25s : %d", "Recorded Crashes", crashes);
-    log(logBuf);
-    
-    // -------------------------------------------------------------------------
-    // SECTION: GPIO CONFIGURATION
-    // -------------------------------------------------------------------------
-    log(""); // Spacer
-    log("[ GPIO & PERIPHERALS ]");
-
-    // Buttons
-    snprintf(logBuf, sizeof(logBuf), " %-25s : GPIO %d", "PCB Button", PCB_BUTTON_PIN);
-    log(logBuf);
-
-    #ifdef EXT_BUTTON_PIN
-    if (EXT_BUTTON_PIN != -1) {
-        snprintf(logBuf, sizeof(logBuf), " %-25s : GPIO %d (Active Low)", "Ext. Safety Switch", EXT_BUTTON_PIN);
-    } else {
-        snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Ext. Safety Switch", "DISABLED");
-    }
-    #else
-        snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Ext. Safety Switch", "NOT DEFINED");
-    #endif
-    log(logBuf);
-
-    // Status LED
-    snprintf(logBuf, sizeof(logBuf), " %-25s : GPIO %d", "Status LED", STATUS_LED_PIN);
-    log(logBuf);
-
-    // -------------------------------------------------------------------------
-    // SECTION: CHANNEL OUTPUTS
-    // -------------------------------------------------------------------------
-    log(""); // Spacer
-    log("[ CHANNEL STATUS ]");
-
-    // Global Mask
-    snprintf(logBuf, sizeof(logBuf), " %-25s : 0x%02X (Binary: " BYTE_TO_BINARY_PATTERN ")", 
-             "Hardware Mask", _enabledChannelsMask, BYTE_TO_BINARY(_enabledChannelsMask));
-    log(logBuf);
-
-    // Individual Pins
-    for (int i = 0; i < MAX_CHANNELS; i++) {
-        // Read actual physical state of the pin
-        int state = digitalRead(HARDWARE_PINS[i]); 
-        bool enabledInMask = (_enabledChannelsMask >> i) & 1;
-        
-        snprintf(logBuf, sizeof(logBuf), " %-25s : GPIO %d | State: %s | Mask: %s", 
-                 (String("Channel ") + String(i + 1)).c_str(), 
-                 HARDWARE_PINS[i],
-                 state == HIGH ? "HIGH (ON)" : "LOW (OFF)",
-                 enabledInMask ? "ENABLED" : "MASKED");
-        log(logBuf);
-    }
-
+  }
 }
 
 // =================================================================================
@@ -550,20 +536,20 @@ void Esp32SessionHAL::checkPressState() {
 // --- PCB Button Handlers ---
 
 void Esp32SessionHAL::handlePcbPressStart() {
-  Esp32SessionHAL& inst = getInstance();
+  Esp32SessionHAL &inst = getInstance();
   inst._pcbPressed = true;
   inst.checkPressState();
 }
 
 void Esp32SessionHAL::handlePcbClick() {
-  Esp32SessionHAL& inst = getInstance();
+  Esp32SessionHAL &inst = getInstance();
   inst._pcbPressed = false;
   inst.checkPressState();
   inst.setShortPressPending();
 }
 
 void Esp32SessionHAL::handlePcbDoubleClick() {
-  Esp32SessionHAL& inst = getInstance();
+  Esp32SessionHAL &inst = getInstance();
   inst._pcbPressed = false;
   inst.checkPressState();
   inst.setTriggerPending();
@@ -571,12 +557,12 @@ void Esp32SessionHAL::handlePcbDoubleClick() {
 
 void Esp32SessionHAL::handlePcbLongStart() {
   // Note: Press flag remains TRUE during long press
-  Esp32SessionHAL& inst = getInstance();
+  Esp32SessionHAL &inst = getInstance();
   inst.setAbortPending(); // Original Action
 }
 
 void Esp32SessionHAL::handlePcbLongStop() {
-  Esp32SessionHAL& inst = getInstance();
+  Esp32SessionHAL &inst = getInstance();
   inst._pcbPressed = false;
   inst.checkPressState();
 }
@@ -584,31 +570,29 @@ void Esp32SessionHAL::handlePcbLongStop() {
 // --- EXT Button Handlers ---
 
 void Esp32SessionHAL::handleExtPressStart() {
-  Esp32SessionHAL& inst = getInstance();
+  Esp32SessionHAL &inst = getInstance();
   inst._extPressed = true;
   inst.checkPressState();
 }
 
 void Esp32SessionHAL::handleExtClick() {
-  Esp32SessionHAL& inst = getInstance();
+  Esp32SessionHAL &inst = getInstance();
   inst._extPressed = false;
   inst.checkPressState();
   inst.setShortPressPending();
 }
 
 void Esp32SessionHAL::handleExtDoubleClick() {
-  Esp32SessionHAL& inst = getInstance();
+  Esp32SessionHAL &inst = getInstance();
   inst._extPressed = false;
   inst.checkPressState();
   inst.setTriggerPending();
 }
 
-void Esp32SessionHAL::handleExtLongStart() {
-  getInstance().setAbortPending();
-}
+void Esp32SessionHAL::handleExtLongStart() { getInstance().setAbortPending(); }
 
 void Esp32SessionHAL::handleExtLongStop() {
-  Esp32SessionHAL& inst = getInstance();
+  Esp32SessionHAL &inst = getInstance();
   inst._extPressed = false;
   inst.checkPressState();
 }

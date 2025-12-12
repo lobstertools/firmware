@@ -10,8 +10,8 @@
  */
 #include <ArduinoJson.h>
 #include <WiFi.h>
-#include <string.h>
 #include <esp_timer.h> // For uptime
+#include <string.h>
 
 #include "Config.h"
 #include "Esp32SessionHAL.h"
@@ -161,7 +161,8 @@ void WebManager::handleFactoryReset(AsyncWebServerRequest *request) {
 // =================================================================================
 
 void WebManager::handleArm(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-  if (index + len != total) return;
+  if (index + len != total)
+    return;
 
   JsonDocument doc;
   DeserializationError error = deserializeJson(doc, (const char *)data, len);
@@ -214,10 +215,13 @@ void WebManager::handleAbort(AsyncWebServerRequest *request) {
     DeviceState s = _engine->getState();
     // TS Expects DeviceState enum string: 'ABORTED', 'COMPLETED', 'READY'
     JsonDocument doc;
-    if (s == ABORTED) doc["status"] = "ABORTED";
-    else if (s == COMPLETED) doc["status"] = "COMPLETED";
-    else doc["status"] = "READY";
-    
+    if (s == ABORTED)
+      doc["status"] = "ABORTED";
+    else if (s == COMPLETED)
+      doc["status"] = "COMPLETED";
+    else
+      doc["status"] = "READY";
+
     String rJson;
     serializeJson(doc, rJson);
     Esp32SessionHAL::getInstance().unlockState();
@@ -233,24 +237,36 @@ void WebManager::handleAbort(AsyncWebServerRequest *request) {
 
 const char *stateToString(DeviceState s) {
   switch (s) {
-    case READY: return "READY";
-    case ARMED: return "ARMED";
-    case LOCKED: return "LOCKED";
-    case ABORTED: return "ABORTED";
-    case COMPLETED: return "COMPLETED";
-    case TESTING: return "TESTING";
-    default: return "READY";
+  case READY:
+    return "READY";
+  case ARMED:
+    return "ARMED";
+  case LOCKED:
+    return "LOCKED";
+  case ABORTED:
+    return "ABORTED";
+  case COMPLETED:
+    return "COMPLETED";
+  case TESTING:
+    return "TESTING";
+  default:
+    return "READY";
   }
 }
 
 const char *durTypeToString(DurationType d) {
-    switch(d) {
-        case DUR_RANDOM: return "DUR_RANDOM";
-        case DUR_RANGE_SHORT: return "DUR_RANGE_SHORT";
-        case DUR_RANGE_MEDIUM: return "DUR_RANGE_MEDIUM";
-        case DUR_RANGE_LONG: return "DUR_RANGE_LONG";
-        default: return "DUR_FIXED";
-    }
+  switch (d) {
+  case DUR_RANDOM:
+    return "DUR_RANDOM";
+  case DUR_RANGE_SHORT:
+    return "DUR_RANGE_SHORT";
+  case DUR_RANGE_MEDIUM:
+    return "DUR_RANGE_MEDIUM";
+  case DUR_RANGE_LONG:
+    return "DUR_RANGE_LONG";
+  default:
+    return "DUR_FIXED";
+  }
 }
 
 void WebManager::handleStatus(AsyncWebServerRequest *request) {
@@ -264,7 +280,7 @@ void WebManager::handleStatus(AsyncWebServerRequest *request) {
   SessionTimers t = _engine->getTimers();
   SessionStats stats = _engine->getStats();
   SessionConfig cfg = _engine->getActiveConfig();
-  
+
   // Hardware reading
   bool btnPressed = Esp32SessionHAL::getInstance().isButtonPressed();
   int rssi = WiFi.RSSI();
@@ -292,9 +308,10 @@ void WebManager::handleStatus(AsyncWebServerRequest *request) {
   cObj["triggerStrategy"] = (cfg.triggerStrategy == STRAT_BUTTON_TRIGGER) ? "STRAT_BUTTON_TRIGGER" : "STRAT_AUTO_COUNTDOWN";
   cObj["hideTimer"] = cfg.hideTimer;
   cObj["disableLED"] = cfg.disableLED;
-  
+
   JsonArray cDelays = cObj["channelDelays"].to<JsonArray>();
-  for(int i=0; i<4; i++) cDelays.add(cfg.channelDelays[i]);
+  for (int i = 0; i < 4; i++)
+    cDelays.add(cfg.channelDelays[i]);
 
   // 3. Timers (Matching SessionTimers Interface)
   JsonObject tObj = doc["timers"].to<JsonObject>();
@@ -304,9 +321,10 @@ void WebManager::handleStatus(AsyncWebServerRequest *request) {
   tObj["penaltyRemaining"] = t.penaltyRemaining;
   tObj["testRemaining"] = t.testRemaining;
   tObj["triggerTimeout"] = t.triggerTimeout;
-  
+
   JsonArray tDelays = tObj["channelDelays"].to<JsonArray>();
-  for(int i=0; i<4; i++) tDelays.add(t.channelDelays[i]);
+  for (int i = 0; i < 4; i++)
+    tDelays.add(t.channelDelays[i]);
 
   // 4. Stats
   JsonObject sObj = doc["stats"].to<JsonObject>();
@@ -323,8 +341,10 @@ void WebManager::handleStatus(AsyncWebServerRequest *request) {
   tel["rssi"] = rssi;
   tel["freeHeap"] = heap;
   tel["uptime"] = uptime;
-  if(isnan(temp)) tel["internalTempC"] = "N/A";
-  else tel["internalTempC"] = temp;
+  if (isnan(temp))
+    tel["internalTempC"] = "N/A";
+  else
+    tel["internalTempC"] = temp;
 
   serializeJson(doc, *response);
   request->send(response);
@@ -342,7 +362,7 @@ void WebManager::handleDetails(AsyncWebServerRequest *request) {
   snprintf(idBuf, sizeof(idBuf), "lobster-lock-%02X%02X%02X", macRaw[3], macRaw[4], macRaw[5]);
 
   JsonDocument doc;
-  
+
   // -- Root ID
   doc["id"] = idBuf;
 
@@ -396,7 +416,7 @@ void WebManager::handleDetails(AsyncWebServerRequest *request) {
     p["mediumMax"] = presets.mediumMax;
     p["longMin"] = presets.longMin;
     p["longMax"] = presets.longMax;
-    p["minSessionDuration"] = presets.minSessionDuration; 
+    p["minSessionDuration"] = presets.minSessionDuration;
     p["maxSessionDuration"] = presets.maxSessionDuration;
 
     // -- DeterrentConfig Interface
@@ -409,7 +429,7 @@ void WebManager::handleDetails(AsyncWebServerRequest *request) {
     d["rewardPenalty"] = det.rewardPenalty;
     d["enablePaybackTime"] = det.enablePaybackTime;
     d["paybackTimeStrategy"] = (det.paybackTimeStrategy == DETERRENT_FIXED) ? "DETERRENT_FIXED" : "DETERRENT_RANDOM";
-    d["paybackTimeMin"] = det.paybackTimeMin; 
+    d["paybackTimeMin"] = det.paybackTimeMin;
     d["paybackTimeMax"] = det.paybackTimeMax;
     d["paybackTime"] = det.paybackTime;
 
@@ -421,7 +441,7 @@ void WebManager::handleDetails(AsyncWebServerRequest *request) {
 
   // -- System Defaults (Mocking or retrieving from constants if available)
   JsonObject def = doc["defaults"].to<JsonObject>();
-  def["longPressDuration"] = 2000; 
+  def["longPressDuration"] = 2000;
   def["extButtonSignalDuration"] = 50;
   def["testModeDuration"] = 10000;
   def["keepAliveInterval"] = 5000;
@@ -483,7 +503,8 @@ void WebManager::handleReward(AsyncWebServerRequest *request) {
 // =================================================================================
 
 void WebManager::handleUpdateWifi(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
-  if (index + len != total) return;
+  if (index + len != total)
+    return;
 
   JsonDocument doc;
   DeserializationError error = deserializeJson(doc, (const char *)data, len);

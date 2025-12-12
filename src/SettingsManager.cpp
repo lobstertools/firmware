@@ -32,10 +32,18 @@ void SettingsManager::log(const char *key, const char *val) { Esp32SessionHAL::g
 void SettingsManager::wipeAll() {
   log("Settings", "Performing Full Factory Wipe...");
 
-  wifiPrefs.begin("wifi-creds", false);   wifiPrefs.clear();   wifiPrefs.end();
-  provPrefs.begin("provisioning", false); provPrefs.clear();   provPrefs.end();
-  sessionPrefs.begin("session", false);   sessionPrefs.clear(); sessionPrefs.end();
-  bootPrefs.begin("boot", false);         bootPrefs.clear();   bootPrefs.end();
+  wifiPrefs.begin("wifi-creds", false);
+  wifiPrefs.clear();
+  wifiPrefs.end();
+  provPrefs.begin("provisioning", false);
+  provPrefs.clear();
+  provPrefs.end();
+  sessionPrefs.begin("session", false);
+  sessionPrefs.clear();
+  sessionPrefs.end();
+  bootPrefs.begin("boot", false);
+  bootPrefs.clear();
+  bootPrefs.end();
 
   log("Settings", "Factory Wipe Complete.");
 }
@@ -62,14 +70,20 @@ void SettingsManager::getWifiSSID(char *buf, size_t maxLen) {
   wifiPrefs.begin("wifi-creds", true);
   String s = wifiPrefs.getString("ssid", "");
   wifiPrefs.end();
-  if (maxLen > 0) { strncpy(buf, s.c_str(), maxLen); buf[maxLen - 1] = '\0'; }
+  if (maxLen > 0) {
+    strncpy(buf, s.c_str(), maxLen);
+    buf[maxLen - 1] = '\0';
+  }
 }
 
 void SettingsManager::getWifiPassword(char *buf, size_t maxLen) {
   wifiPrefs.begin("wifi-creds", true);
   String p = wifiPrefs.getString("pass", "");
   wifiPrefs.end();
-  if (maxLen > 0) { strncpy(buf, p.c_str(), maxLen); buf[maxLen - 1] = '\0'; }
+  if (maxLen > 0) {
+    strncpy(buf, p.c_str(), maxLen);
+    buf[maxLen - 1] = '\0';
+  }
 }
 
 // =================================================================================
@@ -112,15 +126,29 @@ void SettingsManager::setSessionLimits(uint32_t minDuration, uint32_t maxDuratio
 
 void SettingsManager::setDurationPreset(DurationType type, uint32_t min, uint32_t max) {
   provPrefs.begin("provisioning", false);
-  const char* keyMin = "";
-  const char* keyMax = "";
-  const char* label = "";
+  const char *keyMin = "";
+  const char *keyMax = "";
+  const char *label = "";
 
   switch (type) {
-    case DUR_RANGE_SHORT:  keyMin = "shMin"; keyMax = "shMax"; label = "Short Preset"; break;
-    case DUR_RANGE_MEDIUM: keyMin = "mdMin"; keyMax = "mdMax"; label = "Medium Preset"; break;
-    case DUR_RANGE_LONG:   keyMin = "lgMin"; keyMax = "lgMax"; label = "Long Preset"; break;
-    default: provPrefs.end(); return;
+  case DUR_RANGE_SHORT:
+    keyMin = "shMin";
+    keyMax = "shMax";
+    label = "Short Preset";
+    break;
+  case DUR_RANGE_MEDIUM:
+    keyMin = "mdMin";
+    keyMax = "mdMax";
+    label = "Medium Preset";
+    break;
+  case DUR_RANGE_LONG:
+    keyMin = "lgMin";
+    keyMax = "lgMax";
+    label = "Long Preset";
+    break;
+  default:
+    provPrefs.end();
+    return;
   }
 
   provPrefs.putUInt(keyMin, min);
@@ -146,7 +174,7 @@ void SettingsManager::setPaybackRange(uint32_t min, uint32_t max) {
   provPrefs.putUInt("payMin", min);
   provPrefs.putUInt("payMax", max);
   provPrefs.end();
-  
+
   char logBuf[64];
   snprintf(logBuf, sizeof(logBuf), "Payback Range: %u - %u s", min, max);
   log("Settings", logBuf);
@@ -164,7 +192,7 @@ void SettingsManager::setRewardRange(uint32_t min, uint32_t max) {
   provPrefs.putUInt("penMin", min);
   provPrefs.putUInt("penMax", max);
   provPrefs.end();
-  
+
   char logBuf[64];
   snprintf(logBuf, sizeof(logBuf), "Reward Pen Range: %u - %u s", min, max);
   log("Settings", logBuf);
@@ -181,31 +209,31 @@ void SettingsManager::loadProvisioningConfig(DeterrentConfig &config, SessionPre
   channelMask = provPrefs.getUChar("chMask", 0x0F);
 
   // 2. Deterrent Config - Flags
-  config.enableStreaks     = provPrefs.getBool("enableStreaks", config.enableStreaks);
-  config.enableRewardCode  = provPrefs.getBool("enableCode", config.enableRewardCode);
+  config.enableStreaks = provPrefs.getBool("enableStreaks", config.enableStreaks);
+  config.enableRewardCode = provPrefs.getBool("enableCode", config.enableRewardCode);
   config.enablePaybackTime = provPrefs.getBool("enablePayback", config.enablePaybackTime);
 
   // 3. Deterrent Config - Strategies & Values
   config.paybackTimeStrategy = (DeterrentStrategy)provPrefs.getUChar("payStrat", (uint8_t)DETERRENT_FIXED);
-  config.paybackTime         = provPrefs.getUInt("paybackSeconds", config.paybackTime);
-  config.paybackTimeMin      = provPrefs.getUInt("payMin", 300);
-  config.paybackTimeMax      = provPrefs.getUInt("payMax", 900);
+  config.paybackTime = provPrefs.getUInt("paybackSeconds", config.paybackTime);
+  config.paybackTimeMin = provPrefs.getUInt("payMin", 300);
+  config.paybackTimeMax = provPrefs.getUInt("payMax", 900);
 
   config.rewardPenaltyStrategy = (DeterrentStrategy)provPrefs.getUChar("rwdStrat", (uint8_t)DETERRENT_FIXED);
-  config.rewardPenalty         = provPrefs.getUInt("rwdPenaltySec", config.rewardPenalty);
-  config.rewardPenaltyMin      = provPrefs.getUInt("penMin", 300);
-  config.rewardPenaltyMax      = provPrefs.getUInt("penMax", 1800);
+  config.rewardPenalty = provPrefs.getUInt("rwdPenaltySec", config.rewardPenalty);
+  config.rewardPenaltyMin = provPrefs.getUInt("penMin", 300);
+  config.rewardPenaltyMax = provPrefs.getUInt("penMax", 1800);
 
   // 4. Session Presets - Generators
   // Default values are provided if NVS is empty
-  presets.shortMin = provPrefs.getUInt("shMin", 300);   // 5m
-  presets.shortMax = provPrefs.getUInt("shMax", 1800);  // 30m
-  
+  presets.shortMin = provPrefs.getUInt("shMin", 300);  // 5m
+  presets.shortMax = provPrefs.getUInt("shMax", 1800); // 30m
+
   presets.mediumMin = provPrefs.getUInt("mdMin", 1800); // 30m
   presets.mediumMax = provPrefs.getUInt("mdMax", 7200); // 2h
 
-  presets.longMin = provPrefs.getUInt("lgMin", 7200);   // 2h
-  presets.longMax = provPrefs.getUInt("lgMax", 21600);  // 6h
+  presets.longMin = provPrefs.getUInt("lgMin", 7200);  // 2h
+  presets.longMax = provPrefs.getUInt("lgMax", 21600); // 6h
 
   // 5. Session Presets - Global Safety Limits
   presets.maxSessionDuration = provPrefs.getUInt("maxSessionDur", presets.maxSessionDuration);
@@ -263,13 +291,16 @@ uint32_t SettingsManager::setRewardPenaltyDuration(uint32_t seconds) {
 // =================================================================================
 
 void SettingsManager::setChannelEnabled(int channelIndex, bool enabled) {
-  if (channelIndex < 0 || channelIndex >= 4) return;
+  if (channelIndex < 0 || channelIndex >= 4)
+    return;
 
   provPrefs.begin("provisioning", false);
   uint8_t currentMask = provPrefs.getUChar("chMask", 0x0F);
 
-  if (enabled) currentMask |= (1 << channelIndex);
-  else         currentMask &= ~(1 << channelIndex);
+  if (enabled)
+    currentMask |= (1 << channelIndex);
+  else
+    currentMask &= ~(1 << channelIndex);
 
   provPrefs.putUChar("chMask", currentMask);
   provPrefs.end();

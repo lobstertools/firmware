@@ -26,7 +26,7 @@ private:
   volatile bool _triggerActionPending;
   volatile bool _abortActionPending;
   volatile bool _shortPressPending;
-  
+
   // -- Button State Tracking --
   volatile bool _pcbPressed;
   volatile bool _extPressed;
@@ -64,11 +64,11 @@ private:
 
   // --- Static Interrupt/Callback Handlers ---
   // PCB Handlers
-  static void handlePcbPressStart(); // Tracks button down
-  static void handlePcbClick();      // Tracks button up + Short Press Action
-  static void handlePcbDoubleClick();// Tracks button up + Trigger Action
-  static void handlePcbLongStart();  // Abort Action
-  static void handlePcbLongStop();   // Tracks button up
+  static void handlePcbPressStart();  // Tracks button down
+  static void handlePcbClick();       // Tracks button up + Short Press Action
+  static void handlePcbDoubleClick(); // Tracks button up + Trigger Action
+  static void handlePcbLongStart();   // Abort Action
+  static void handlePcbLongStop();    // Tracks button up
 
   // External Handlers
   static void handleExtPressStart();
@@ -103,7 +103,7 @@ public:
 
   // --- Used by BLE provisioning & Telemetry
   JLed getStatusLed() const { return _statusLed; }
-  
+
   // Returns true if EITHER the PCB or External button is currently held down.
   bool isButtonPressed() const;
 

@@ -67,7 +67,6 @@
 #define PROV_PAYBACK_MIN_DURATION_UUID "5a160013-8334-469b-a316-c340cf29188f"
 #define PROV_PAYBACK_MAX_DURATION_UUID "5a160014-8334-469b-a316-c340cf29188f"
 
-
 // =================================================================================
 // SECTION: CLASS IMPLEMENTATION
 // =================================================================================
@@ -191,25 +190,37 @@ public:
       SettingsManager::setWifiPassword(val.c_str());
       log("BLE", "Password Received");
       // Signal completion - Triggers Reboot
-      if (_credentialsReceivedPtr) *_credentialsReceivedPtr = true;
-    } 
-    
+      if (_credentialsReceivedPtr)
+        *_credentialsReceivedPtr = true;
+    }
+
     // --- Toggles & Fixed Values ---
-    else if (uuid == PROV_ENABLE_REWARD_CODE_CHAR_UUID) SettingsManager::setRewardCodeEnabled((bool)data[0]);
-    else if (uuid == PROV_ENABLE_STREAKS_CHAR_UUID) SettingsManager::setStreaksEnabled((bool)data[0]);
-    else if (uuid == PROV_ENABLE_PAYBACK_TIME_CHAR_UUID) SettingsManager::setPaybackEnabled((bool)data[0]);
-    else if (uuid == PROV_PAYBACK_TIME_CHAR_UUID) SettingsManager::setPaybackDuration(bytesToUint32(data));
-    else if (uuid == PROV_REWARD_PENALTY_CHAR_UUID) SettingsManager::setRewardPenaltyDuration(bytesToUint32(data));
-    
+    else if (uuid == PROV_ENABLE_REWARD_CODE_CHAR_UUID)
+      SettingsManager::setRewardCodeEnabled((bool)data[0]);
+    else if (uuid == PROV_ENABLE_STREAKS_CHAR_UUID)
+      SettingsManager::setStreaksEnabled((bool)data[0]);
+    else if (uuid == PROV_ENABLE_PAYBACK_TIME_CHAR_UUID)
+      SettingsManager::setPaybackEnabled((bool)data[0]);
+    else if (uuid == PROV_PAYBACK_TIME_CHAR_UUID)
+      SettingsManager::setPaybackDuration(bytesToUint32(data));
+    else if (uuid == PROV_REWARD_PENALTY_CHAR_UUID)
+      SettingsManager::setRewardPenaltyDuration(bytesToUint32(data));
+
     // --- Hardware ---
-    else if (uuid == PROV_CH1_ENABLE_UUID) SettingsManager::setChannelEnabled(0, (bool)data[0]);
-    else if (uuid == PROV_CH2_ENABLE_UUID) SettingsManager::setChannelEnabled(1, (bool)data[0]);
-    else if (uuid == PROV_CH3_ENABLE_UUID) SettingsManager::setChannelEnabled(2, (bool)data[0]);
-    else if (uuid == PROV_CH4_ENABLE_UUID) SettingsManager::setChannelEnabled(3, (bool)data[0]);
+    else if (uuid == PROV_CH1_ENABLE_UUID)
+      SettingsManager::setChannelEnabled(0, (bool)data[0]);
+    else if (uuid == PROV_CH2_ENABLE_UUID)
+      SettingsManager::setChannelEnabled(1, (bool)data[0]);
+    else if (uuid == PROV_CH3_ENABLE_UUID)
+      SettingsManager::setChannelEnabled(2, (bool)data[0]);
+    else if (uuid == PROV_CH4_ENABLE_UUID)
+      SettingsManager::setChannelEnabled(3, (bool)data[0]);
 
     // --- Strategies ---
-    else if (uuid == PROV_PAYBACK_STRATEGY_UUID) SettingsManager::setPaybackStrategy((DeterrentStrategy)data[0]);
-    else if (uuid == PROV_REWARD_STRATEGY_UUID) SettingsManager::setRewardStrategy((DeterrentStrategy)data[0]);
+    else if (uuid == PROV_PAYBACK_STRATEGY_UUID)
+      SettingsManager::setPaybackStrategy((DeterrentStrategy)data[0]);
+    else if (uuid == PROV_REWARD_STRATEGY_UUID)
+      SettingsManager::setRewardStrategy((DeterrentStrategy)data[0]);
 
     // --- Ranges (Read-Modify-Write) ---
     // Since we receive Min/Max individually but save them as pairs, we must:
@@ -217,53 +228,53 @@ public:
     // 2. Update the specific value we received.
     // 3. Save the pair back using the SettingsManager.
     else {
-        DeterrentConfig config;
-        SessionPresets presets;
-        uint8_t mask;
-        SettingsManager::loadProvisioningConfig(config, presets, mask);
-        uint32_t val = bytesToUint32(data);
+      DeterrentConfig config;
+      SessionPresets presets;
+      uint8_t mask;
+      SettingsManager::loadProvisioningConfig(config, presets, mask);
+      uint32_t val = bytesToUint32(data);
 
-        // 1. Global Session Safety Limits
-        if (uuid == PROV_MIN_SESSION_DURATION_UUID) {
-            SettingsManager::setSessionLimits(val, presets.maxSessionDuration);
-        } else if (uuid == PROV_MAX_SESSION_DURATION_UUID) {
-            SettingsManager::setSessionLimits(presets.minSessionDuration, val);
-        }
-        
-        // 2. Deterrent: Payback Range
-        else if (uuid == PROV_PAYBACK_MIN_DURATION_UUID) {
-            SettingsManager::setPaybackRange(val, config.paybackTimeMax);
-        } else if (uuid == PROV_PAYBACK_MAX_DURATION_UUID) {
-            SettingsManager::setPaybackRange(config.paybackTimeMin, val);
-        }
+      // 1. Global Session Safety Limits
+      if (uuid == PROV_MIN_SESSION_DURATION_UUID) {
+        SettingsManager::setSessionLimits(val, presets.maxSessionDuration);
+      } else if (uuid == PROV_MAX_SESSION_DURATION_UUID) {
+        SettingsManager::setSessionLimits(presets.minSessionDuration, val);
+      }
 
-        // 3. Deterrent: Reward Penalty Range
-        else if (uuid == PROV_REWARD_MIN_DURATION_UUID) {
-            SettingsManager::setRewardRange(val, config.rewardPenaltyMax);
-        } else if (uuid == PROV_REWARD_MAX_DURATION_UUID) {
-            SettingsManager::setRewardRange(config.rewardPenaltyMin, val);
-        }
+      // 2. Deterrent: Payback Range
+      else if (uuid == PROV_PAYBACK_MIN_DURATION_UUID) {
+        SettingsManager::setPaybackRange(val, config.paybackTimeMax);
+      } else if (uuid == PROV_PAYBACK_MAX_DURATION_UUID) {
+        SettingsManager::setPaybackRange(config.paybackTimeMin, val);
+      }
 
-        // 4. Session Presets: Short
-        else if (uuid == PROV_SHORT_MIN_UUID) {
-            SettingsManager::setDurationPreset(DUR_RANGE_SHORT, val, presets.shortMax);
-        } else if (uuid == PROV_SHORT_MAX_UUID) {
-            SettingsManager::setDurationPreset(DUR_RANGE_SHORT, presets.shortMin, val);
-        }
+      // 3. Deterrent: Reward Penalty Range
+      else if (uuid == PROV_REWARD_MIN_DURATION_UUID) {
+        SettingsManager::setRewardRange(val, config.rewardPenaltyMax);
+      } else if (uuid == PROV_REWARD_MAX_DURATION_UUID) {
+        SettingsManager::setRewardRange(config.rewardPenaltyMin, val);
+      }
 
-        // 5. Session Presets: Medium
-        else if (uuid == PROV_MEDIUM_MIN_UUID) {
-            SettingsManager::setDurationPreset(DUR_RANGE_MEDIUM, val, presets.mediumMax);
-        } else if (uuid == PROV_MEDIUM_MAX_UUID) {
-            SettingsManager::setDurationPreset(DUR_RANGE_MEDIUM, presets.mediumMin, val);
-        }
+      // 4. Session Presets: Short
+      else if (uuid == PROV_SHORT_MIN_UUID) {
+        SettingsManager::setDurationPreset(DUR_RANGE_SHORT, val, presets.shortMax);
+      } else if (uuid == PROV_SHORT_MAX_UUID) {
+        SettingsManager::setDurationPreset(DUR_RANGE_SHORT, presets.shortMin, val);
+      }
 
-        // 6. Session Presets: Long
-        else if (uuid == PROV_LONG_MIN_UUID) {
-            SettingsManager::setDurationPreset(DUR_RANGE_LONG, val, presets.longMax);
-        } else if (uuid == PROV_LONG_MAX_UUID) {
-            SettingsManager::setDurationPreset(DUR_RANGE_LONG, presets.longMin, val);
-        }
+      // 5. Session Presets: Medium
+      else if (uuid == PROV_MEDIUM_MIN_UUID) {
+        SettingsManager::setDurationPreset(DUR_RANGE_MEDIUM, val, presets.mediumMax);
+      } else if (uuid == PROV_MEDIUM_MAX_UUID) {
+        SettingsManager::setDurationPreset(DUR_RANGE_MEDIUM, presets.mediumMin, val);
+      }
+
+      // 6. Session Presets: Long
+      else if (uuid == PROV_LONG_MIN_UUID) {
+        SettingsManager::setDurationPreset(DUR_RANGE_LONG, val, presets.longMax);
+      } else if (uuid == PROV_LONG_MAX_UUID) {
+        SettingsManager::setDurationPreset(DUR_RANGE_LONG, presets.longMin, val);
+      }
     }
   }
 };
@@ -301,11 +312,11 @@ void NetworkManager::startBLEProvisioningBlocking() {
   createChar(PROV_ENABLE_REWARD_CODE_CHAR_UUID);
   createChar(PROV_ENABLE_STREAKS_CHAR_UUID);
   createChar(PROV_ENABLE_PAYBACK_TIME_CHAR_UUID);
-  
+
   // Base Values
   createChar(PROV_PAYBACK_TIME_CHAR_UUID);
   createChar(PROV_REWARD_PENALTY_CHAR_UUID);
-  
+
   // Hardware
   createChar(PROV_CH1_ENABLE_UUID);
   createChar(PROV_CH2_ENABLE_UUID);
@@ -315,12 +326,12 @@ void NetworkManager::startBLEProvisioningBlocking() {
   // Global Limits
   createChar(PROV_MIN_SESSION_DURATION_UUID);
   createChar(PROV_MAX_SESSION_DURATION_UUID);
-  
+
   // Deterrent Strategies & Ranges
   createChar(PROV_PAYBACK_STRATEGY_UUID);
   createChar(PROV_PAYBACK_MIN_DURATION_UUID);
   createChar(PROV_PAYBACK_MAX_DURATION_UUID);
-  
+
   createChar(PROV_REWARD_STRATEGY_UUID);
   createChar(PROV_REWARD_MIN_DURATION_UUID);
   createChar(PROV_REWARD_MAX_DURATION_UUID);
@@ -406,90 +417,102 @@ void NetworkManager::connectOrRequestProvisioning() {
 }
 
 void NetworkManager::printStartupDiagnostics() {
-    char logBuf[128];
-    const char* boolStr[] = { "NO", "YES" };
-    
-    // Get HAL instance for raw logging
-    Esp32SessionHAL& hal = Esp32SessionHAL::getInstance();
+  char logBuf[128];
+  const char *boolStr[] = {"NO", "YES"};
 
-    hal.log("==========================================================================");
-    hal.log("                            NETWORK DIAGNOSTICS                           ");
-    hal.log("==========================================================================");
+  // Get HAL instance for raw logging
+  Esp32SessionHAL &hal = Esp32SessionHAL::getInstance();
 
-    // -------------------------------------------------------------------------
-    // SECTION: WI-FI STATE
-    // -------------------------------------------------------------------------
-    hal.log("[ WI-FI STATUS ]");
+  hal.log("==========================================================================");
+  hal.log("                            NETWORK DIAGNOSTICS                           ");
+  hal.log("==========================================================================");
 
-    // Connection State
-    wl_status_t status = WiFi.status();
-    const char* statusStr;
-    switch(status) {
-        case WL_CONNECTED:       statusStr = "CONNECTED"; break;
-        case WL_NO_SSID_AVAIL:   statusStr = "SSID NOT FOUND"; break;
-        case WL_CONNECT_FAILED:  statusStr = "FAILED"; break;
-        case WL_IDLE_STATUS:     statusStr = "IDLE"; break;
-        case WL_DISCONNECTED:    statusStr = "DISCONNECTED"; break;
-        default:                 statusStr = "UNKNOWN"; break;
-    }
-    
-    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Connection State", statusStr);
+  // -------------------------------------------------------------------------
+  // SECTION: WI-FI STATE
+  // -------------------------------------------------------------------------
+  hal.log("[ WI-FI STATUS ]");
+
+  // Connection State
+  wl_status_t status = WiFi.status();
+  const char *statusStr;
+  switch (status) {
+  case WL_CONNECTED:
+    statusStr = "CONNECTED";
+    break;
+  case WL_NO_SSID_AVAIL:
+    statusStr = "SSID NOT FOUND";
+    break;
+  case WL_CONNECT_FAILED:
+    statusStr = "FAILED";
+    break;
+  case WL_IDLE_STATUS:
+    statusStr = "IDLE";
+    break;
+  case WL_DISCONNECTED:
+    statusStr = "DISCONNECTED";
+    break;
+  default:
+    statusStr = "UNKNOWN";
+    break;
+  }
+
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Connection State", statusStr);
+  hal.log(logBuf);
+
+  // SSID (Only show if we have one loaded)
+  if (strlen(_wifiSSID) > 0) {
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Target SSID", _wifiSSID);
+    hal.log(logBuf);
+  } else {
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Target SSID", "-- NOT SET --");
+    hal.log(logBuf);
+  }
+
+  // Signal Strength (RSSI) - Only valid if connected
+  if (status == WL_CONNECTED) {
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %ld dBm", "Signal Strength", WiFi.RSSI());
+    hal.log(logBuf);
+  }
+
+  // Hardware MAC (Always available)
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Device MAC", WiFi.macAddress().c_str());
+  hal.log(logBuf);
+
+  // -------------------------------------------------------------------------
+  // SECTION: IP CONFIGURATION
+  // -------------------------------------------------------------------------
+  if (status == WL_CONNECTED) {
+    hal.log("");
+    hal.log("[ IP CONFIGURATION ]");
+
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Local IP", WiFi.localIP().toString().c_str());
     hal.log(logBuf);
 
-    // SSID (Only show if we have one loaded)
-    if (strlen(_wifiSSID) > 0) {
-        snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Target SSID", _wifiSSID);
-        hal.log(logBuf);
-    } else {
-        snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Target SSID", "-- NOT SET --");
-        hal.log(logBuf);
-    }
-    
-    // Signal Strength (RSSI) - Only valid if connected
-    if (status == WL_CONNECTED) {
-        snprintf(logBuf, sizeof(logBuf), " %-25s : %ld dBm", "Signal Strength", WiFi.RSSI());
-        hal.log(logBuf);
-    }
-
-    // Hardware MAC (Always available)
-    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Device MAC", WiFi.macAddress().c_str());
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Subnet Mask", WiFi.subnetMask().toString().c_str());
     hal.log(logBuf);
 
-    // -------------------------------------------------------------------------
-    // SECTION: IP CONFIGURATION
-    // -------------------------------------------------------------------------
-    if (status == WL_CONNECTED) {
-        hal.log(""); 
-        hal.log("[ IP CONFIGURATION ]");
-
-        snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Local IP", WiFi.localIP().toString().c_str());
-        hal.log(logBuf);
-
-        snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Subnet Mask", WiFi.subnetMask().toString().c_str());
-        hal.log(logBuf);
-
-        snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Gateway", WiFi.gatewayIP().toString().c_str());
-        hal.log(logBuf);
-
-        // mDNS Check
-        // Note: MDNS.begin returns true/false, but there isn't a direct "isRunning()" 
-        // getter exposed easily in standard ESP libraries, but we can imply it from success.
-        snprintf(logBuf, sizeof(logBuf), " %-25s : %s.local", "mDNS Hostname", "lobster-lock-[MAC]"); 
-        hal.log(logBuf);
-    }
-
-    // -------------------------------------------------------------------------
-    // SECTION: INTERNAL FLAGS
-    // -------------------------------------------------------------------------
-    hal.log(""); 
-    hal.log("[ LOGIC FLAGS ]");
-
-    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Credentials Loaded", boolStr[_wifiCredentialsExist]);
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Gateway", WiFi.gatewayIP().toString().c_str());
     hal.log(logBuf);
 
-    snprintf(logBuf, sizeof(logBuf), " %-25s : %d / %d", "Retry Counter", _wifiRetries, g_systemDefaults.wifiMaxRetries);
+    // mDNS Check
+    // Note: MDNS.begin returns true/false, but there isn't a direct "isRunning()"
+    // getter exposed easily in standard ESP libraries, but we can imply it from success.
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %s.local", "mDNS Hostname", "lobster-lock-[MAC]");
     hal.log(logBuf);
+  }
 
-    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Provisioning Request", boolStr[_triggerProvisioning]);
-    hal.log(logBuf);
+  // -------------------------------------------------------------------------
+  // SECTION: INTERNAL FLAGS
+  // -------------------------------------------------------------------------
+  hal.log("");
+  hal.log("[ LOGIC FLAGS ]");
+
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Credentials Loaded", boolStr[_wifiCredentialsExist]);
+  hal.log(logBuf);
+
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %d / %d", "Retry Counter", _wifiRetries, g_systemDefaults.wifiMaxRetries);
+  hal.log(logBuf);
+
+  snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Provisioning Request", boolStr[_triggerProvisioning]);
+  hal.log(logBuf);
 }

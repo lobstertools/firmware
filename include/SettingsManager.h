@@ -27,14 +27,14 @@ public:
   // --- Session Configuration ---
   // Sets global safety floor/ceiling
   static void setSessionLimits(uint32_t minDuration, uint32_t maxDuration);
-  
+
   // Sets ranges for DUR_RANGE_SHORT, DUR_RANGE_MEDIUM, DUR_RANGE_LONG
   static void setDurationPreset(DurationType type, uint32_t min, uint32_t max);
 
   // --- Deterrent Configuration ---
   static void setPaybackStrategy(DeterrentStrategy strategy);
   static void setPaybackRange(uint32_t min, uint32_t max);
-  
+
   static void setRewardStrategy(DeterrentStrategy strategy);
   static void setRewardRange(uint32_t min, uint32_t max);
 
