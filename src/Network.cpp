@@ -5,7 +5,6 @@
  *
  * Description:
  * Network management module. Handles Wi-Fi connection logic and BLE Provisioning.
- * Refactor: Object-Oriented implementation.
  * =================================================================================
  */
 #include <BLEDevice.h>
@@ -28,22 +27,46 @@
 
 #define PROV_SERVICE_UUID "5a160000-8334-469b-a316-c340cf29188f"
 
-// WiFi Credentials
+// --- WiFi Credentials ---
 #define PROV_SSID_CHAR_UUID "5a160001-8334-469b-a316-c340cf29188f"
 #define PROV_PASS_CHAR_UUID "5a160002-8334-469b-a316-c340cf29188f"
 
-// Deterrents
-#define PROV_ENABLE_REWARD_CODE_CHAR_UUID "5a160003-8334-469b-a316-c340cf29188f"
-#define PROV_ENABLE_STREAKS_CHAR_UUID "5a160004-8334-469b-a316-c340cf29188f"
-#define PROV_ENABLE_PAYBACK_TIME_CHAR_UUID "5a160005-8334-469b-a316-c340cf29188f"
-#define PROV_PAYBACK_TIME_CHAR_UUID "5a160006-8334-469b-a316-c340cf29188f"
-#define PROV_REWARD_PENALTY_CHAR_UUID "5a160007-8334-469b-a316-c340cf29188f"
-
-// Hardware Config
+// --- Hardware Config ---
 #define PROV_CH1_ENABLE_UUID "5a16000a-8334-469b-a316-c340cf29188f"
 #define PROV_CH2_ENABLE_UUID "5a16000b-8334-469b-a316-c340cf29188f"
 #define PROV_CH3_ENABLE_UUID "5a16000c-8334-469b-a316-c340cf29188f"
 #define PROV_CH4_ENABLE_UUID "5a16000d-8334-469b-a316-c340cf29188f"
+
+// --- Global Safety Limits ---
+#define PROV_MIN_SESSION_DURATION_UUID "5a160010-8334-469b-a316-c340cf29188f"
+#define PROV_MAX_SESSION_DURATION_UUID "5a160011-8334-469b-a316-c340cf29188f"
+
+// --- Duration Presets ---
+// Short
+#define PROV_SHORT_MIN_UUID "5a160020-8334-469b-a316-c340cf29188f"
+#define PROV_SHORT_MAX_UUID "5a160021-8334-469b-a316-c340cf29188f"
+// Medium
+#define PROV_MEDIUM_MIN_UUID "5a160022-8334-469b-a316-c340cf29188f"
+#define PROV_MEDIUM_MAX_UUID "5a160023-8334-469b-a316-c340cf29188f"
+// Long
+#define PROV_LONG_MIN_UUID "5a160024-8334-469b-a316-c340cf29188f"
+#define PROV_LONG_MAX_UUID "5a160025-8334-469b-a316-c340cf29188f"
+
+// --- Deterrents ---
+#define PROV_ENABLE_STREAKS_CHAR_UUID "5a160004-8334-469b-a316-c340cf29188f"
+
+#define PROV_ENABLE_REWARD_CODE_CHAR_UUID "5a160003-8334-469b-a316-c340cf29188f"
+#define PROV_REWARD_STRATEGY_UUID "5a160015-8334-469b-a316-c340cf29188f"
+#define PROV_REWARD_PENALTY_CHAR_UUID "5a160007-8334-469b-a316-c340cf29188f"
+#define PROV_REWARD_MIN_DURATION_UUID "5a160016-8334-469b-a316-c340cf29188f"
+#define PROV_REWARD_MAX_DURATION_UUID "5a160017-8334-469b-a316-c340cf29188f"
+
+#define PROV_ENABLE_PAYBACK_TIME_CHAR_UUID "5a160005-8334-469b-a316-c340cf29188f"
+#define PROV_PAYBACK_STRATEGY_UUID "5a160012-8334-469b-a316-c340cf29188f"
+#define PROV_PAYBACK_TIME_CHAR_UUID "5a160006-8334-469b-a316-c340cf29188f"
+#define PROV_PAYBACK_MIN_DURATION_UUID "5a160013-8334-469b-a316-c340cf29188f"
+#define PROV_PAYBACK_MAX_DURATION_UUID "5a160014-8334-469b-a316-c340cf29188f"
+
 
 // =================================================================================
 // SECTION: CLASS IMPLEMENTATION
@@ -158,7 +181,7 @@ public:
     if (len == 0)
       return;
 
-    // --- Delegate all logic to SettingsManager ---
+    // --- Credentials ---
     if (uuid == PROV_SSID_CHAR_UUID) {
       std::string val(data, data + len);
       SettingsManager::setWifiSSID(val.c_str());
@@ -167,28 +190,81 @@ public:
       std::string val(data, data + len);
       SettingsManager::setWifiPassword(val.c_str());
       log("BLE", "Password Received");
+      // Signal completion - Triggers Reboot
+      if (_credentialsReceivedPtr) *_credentialsReceivedPtr = true;
+    } 
+    
+    // --- Toggles & Fixed Values ---
+    else if (uuid == PROV_ENABLE_REWARD_CODE_CHAR_UUID) SettingsManager::setRewardCodeEnabled((bool)data[0]);
+    else if (uuid == PROV_ENABLE_STREAKS_CHAR_UUID) SettingsManager::setStreaksEnabled((bool)data[0]);
+    else if (uuid == PROV_ENABLE_PAYBACK_TIME_CHAR_UUID) SettingsManager::setPaybackEnabled((bool)data[0]);
+    else if (uuid == PROV_PAYBACK_TIME_CHAR_UUID) SettingsManager::setPaybackDuration(bytesToUint32(data));
+    else if (uuid == PROV_REWARD_PENALTY_CHAR_UUID) SettingsManager::setRewardPenaltyDuration(bytesToUint32(data));
+    
+    // --- Hardware ---
+    else if (uuid == PROV_CH1_ENABLE_UUID) SettingsManager::setChannelEnabled(0, (bool)data[0]);
+    else if (uuid == PROV_CH2_ENABLE_UUID) SettingsManager::setChannelEnabled(1, (bool)data[0]);
+    else if (uuid == PROV_CH3_ENABLE_UUID) SettingsManager::setChannelEnabled(2, (bool)data[0]);
+    else if (uuid == PROV_CH4_ENABLE_UUID) SettingsManager::setChannelEnabled(3, (bool)data[0]);
 
-      // Signal completion
-      if (_credentialsReceivedPtr)
-        *_credentialsReceivedPtr = true;
-    } else if (uuid == PROV_ENABLE_REWARD_CODE_CHAR_UUID)
-      SettingsManager::setRewardCodeEnabled((bool)data[0]);
-    else if (uuid == PROV_ENABLE_STREAKS_CHAR_UUID)
-      SettingsManager::setStreaksEnabled((bool)data[0]);
-    else if (uuid == PROV_ENABLE_PAYBACK_TIME_CHAR_UUID)
-      SettingsManager::setPaybackEnabled((bool)data[0]);
-    else if (uuid == PROV_PAYBACK_TIME_CHAR_UUID)
-      SettingsManager::setPaybackDuration(bytesToUint32(data));
-    else if (uuid == PROV_REWARD_PENALTY_CHAR_UUID)
-      SettingsManager::setRewardPenaltyDuration(bytesToUint32(data));
-    else if (uuid == PROV_CH1_ENABLE_UUID)
-      SettingsManager::setChannelEnabled(0, (bool)data[0]);
-    else if (uuid == PROV_CH2_ENABLE_UUID)
-      SettingsManager::setChannelEnabled(1, (bool)data[0]);
-    else if (uuid == PROV_CH3_ENABLE_UUID)
-      SettingsManager::setChannelEnabled(2, (bool)data[0]);
-    else if (uuid == PROV_CH4_ENABLE_UUID)
-      SettingsManager::setChannelEnabled(3, (bool)data[0]);
+    // --- Strategies ---
+    else if (uuid == PROV_PAYBACK_STRATEGY_UUID) SettingsManager::setPaybackStrategy((DeterrentStrategy)data[0]);
+    else if (uuid == PROV_REWARD_STRATEGY_UUID) SettingsManager::setRewardStrategy((DeterrentStrategy)data[0]);
+
+    // --- Ranges (Read-Modify-Write) ---
+    // Since we receive Min/Max individually but save them as pairs, we must:
+    // 1. Load the current config to get the "other" value of the pair.
+    // 2. Update the specific value we received.
+    // 3. Save the pair back using the SettingsManager.
+    else {
+        DeterrentConfig config;
+        SessionPresets presets;
+        uint8_t mask;
+        SettingsManager::loadProvisioningConfig(config, presets, mask);
+        uint32_t val = bytesToUint32(data);
+
+        // 1. Global Session Safety Limits
+        if (uuid == PROV_MIN_SESSION_DURATION_UUID) {
+            SettingsManager::setSessionLimits(val, presets.maxLockDuration);
+        } else if (uuid == PROV_MAX_SESSION_DURATION_UUID) {
+            SettingsManager::setSessionLimits(presets.minLockDuration, val);
+        }
+        
+        // 2. Deterrent: Payback Range
+        else if (uuid == PROV_PAYBACK_MIN_DURATION_UUID) {
+            SettingsManager::setPaybackRange(val, config.paybackTimeMax);
+        } else if (uuid == PROV_PAYBACK_MAX_DURATION_UUID) {
+            SettingsManager::setPaybackRange(config.paybackTimeMin, val);
+        }
+
+        // 3. Deterrent: Reward Penalty Range
+        else if (uuid == PROV_REWARD_MIN_DURATION_UUID) {
+            SettingsManager::setRewardRange(val, config.rewardPenaltyMax);
+        } else if (uuid == PROV_REWARD_MAX_DURATION_UUID) {
+            SettingsManager::setRewardRange(config.rewardPenaltyMin, val);
+        }
+
+        // 4. Session Presets: Short
+        else if (uuid == PROV_SHORT_MIN_UUID) {
+            SettingsManager::setDurationPreset(DUR_RANGE_SHORT, val, presets.shortMax);
+        } else if (uuid == PROV_SHORT_MAX_UUID) {
+            SettingsManager::setDurationPreset(DUR_RANGE_SHORT, presets.shortMin, val);
+        }
+
+        // 5. Session Presets: Medium
+        else if (uuid == PROV_MEDIUM_MIN_UUID) {
+            SettingsManager::setDurationPreset(DUR_RANGE_MEDIUM, val, presets.mediumMax);
+        } else if (uuid == PROV_MEDIUM_MAX_UUID) {
+            SettingsManager::setDurationPreset(DUR_RANGE_MEDIUM, presets.mediumMin, val);
+        }
+
+        // 6. Session Presets: Long
+        else if (uuid == PROV_LONG_MIN_UUID) {
+            SettingsManager::setDurationPreset(DUR_RANGE_LONG, val, presets.longMax);
+        } else if (uuid == PROV_LONG_MAX_UUID) {
+            SettingsManager::setDurationPreset(DUR_RANGE_LONG, presets.longMin, val);
+        }
+    }
   }
 };
 
@@ -207,7 +283,7 @@ void NetworkManager::startBLEProvisioningBlocking() {
 
   BLEDevice::init(DEVICE_NAME);
   BLEServer *pServer = BLEDevice::createServer();
-  BLEService *pService = pServer->createService(BLEUUID(PROV_SERVICE_UUID), 35);
+  BLEService *pService = pServer->createService(BLEUUID(PROV_SERVICE_UUID), 90); // Increased handles for new chars
 
   ProvisioningCallbacks *callbacks = new ProvisioningCallbacks(&localCredentialsReceived);
 
@@ -217,17 +293,45 @@ void NetworkManager::startBLEProvisioningBlocking() {
     return p;
   };
 
+  // Credentials
   createChar(PROV_SSID_CHAR_UUID);
   createChar(PROV_PASS_CHAR_UUID);
+
+  // Feature Toggles
   createChar(PROV_ENABLE_REWARD_CODE_CHAR_UUID);
   createChar(PROV_ENABLE_STREAKS_CHAR_UUID);
   createChar(PROV_ENABLE_PAYBACK_TIME_CHAR_UUID);
+  
+  // Base Values
   createChar(PROV_PAYBACK_TIME_CHAR_UUID);
   createChar(PROV_REWARD_PENALTY_CHAR_UUID);
+  
+  // Hardware
   createChar(PROV_CH1_ENABLE_UUID);
   createChar(PROV_CH2_ENABLE_UUID);
   createChar(PROV_CH3_ENABLE_UUID);
   createChar(PROV_CH4_ENABLE_UUID);
+
+  // Global Limits
+  createChar(PROV_MIN_SESSION_DURATION_UUID);
+  createChar(PROV_MAX_SESSION_DURATION_UUID);
+  
+  // Deterrent Strategies & Ranges
+  createChar(PROV_PAYBACK_STRATEGY_UUID);
+  createChar(PROV_PAYBACK_MIN_DURATION_UUID);
+  createChar(PROV_PAYBACK_MAX_DURATION_UUID);
+  
+  createChar(PROV_REWARD_STRATEGY_UUID);
+  createChar(PROV_REWARD_MIN_DURATION_UUID);
+  createChar(PROV_REWARD_MAX_DURATION_UUID);
+
+  // New Duration Presets
+  createChar(PROV_SHORT_MIN_UUID);
+  createChar(PROV_SHORT_MAX_UUID);
+  createChar(PROV_MEDIUM_MIN_UUID);
+  createChar(PROV_MEDIUM_MAX_UUID);
+  createChar(PROV_LONG_MIN_UUID);
+  createChar(PROV_LONG_MAX_UUID);
 
   pService->start();
 
