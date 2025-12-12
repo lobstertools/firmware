@@ -225,9 +225,9 @@ public:
 
         // 1. Global Session Safety Limits
         if (uuid == PROV_MIN_SESSION_DURATION_UUID) {
-            SettingsManager::setSessionLimits(val, presets.maxLockDuration);
+            SettingsManager::setSessionLimits(val, presets.maxSessionDuration);
         } else if (uuid == PROV_MAX_SESSION_DURATION_UUID) {
-            SettingsManager::setSessionLimits(presets.minLockDuration, val);
+            SettingsManager::setSessionLimits(presets.minSessionDuration, val);
         }
         
         // 2. Deterrent: Payback Range

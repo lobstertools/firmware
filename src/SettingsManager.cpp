@@ -101,8 +101,8 @@ void SettingsManager::setPaybackEnabled(bool enabled) {
 
 void SettingsManager::setSessionLimits(uint32_t minDuration, uint32_t maxDuration) {
   provPrefs.begin("provisioning", false);
-  provPrefs.putUInt("minLockDur", minDuration);
-  provPrefs.putUInt("maxLockDur", maxDuration);
+  provPrefs.putUInt("minSessionDur", minDuration);
+  provPrefs.putUInt("maxSessionDur", maxDuration);
   provPrefs.end();
 
   char logBuf[64];
@@ -208,12 +208,12 @@ void SettingsManager::loadProvisioningConfig(DeterrentConfig &config, SessionPre
   presets.longMax = provPrefs.getUInt("lgMax", 21600);  // 6h
 
   // 5. Session Presets - Global Safety Limits
-  presets.maxLockDuration = provPrefs.getUInt("maxLockDur", presets.maxLockDuration);
-  presets.minLockDuration = provPrefs.getUInt("minLockDur", presets.minLockDuration);
+  presets.maxSessionDuration = provPrefs.getUInt("maxSessionDur", presets.maxSessionDuration);
+  presets.minSessionDuration = provPrefs.getUInt("minSessionkDur", presets.minSessionDuration);
 
   // Sanity check to prevent logic errors in global limits
-  if (presets.maxLockDuration < presets.minLockDuration) {
-    presets.maxLockDuration = presets.minLockDuration;
+  if (presets.maxSessionDuration < presets.minSessionDuration) {
+    presets.maxSessionDuration = presets.minSessionDuration;
   }
 
   provPrefs.end();
