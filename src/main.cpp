@@ -99,30 +99,10 @@ void setup() {
 
   hal.tick();
 
-  // A. Deterrents (Start with Globals/Defaults)
+  // 2. Load Deterrents & Session Presets
   DeterrentConfig loadedDeterrents = {};
+  SessionPresets sessionPresets = {};
   uint8_t loadedChannelMask = 0x0F;
-
-  // B. Session Presets (Define Defaults Locally)
-  SessionPresets sessionPresets = {
-      // Session Ranges
-      20 * 60, 45 * 60, 60 * 60, 90 * 60, 120 * 60, 180 * 60,
-
-      // Deterrent Ranges
-      15 * 60, 180 * 60, 5 * 60, 45 * 60,
-
-      // Safety Ceilings
-      14400, // limitLockMax (4 hours)
-      14400, // limitPenaltyMax (4 hours)
-      3600,  // limitPaybackMax (1 hour)
-
-      // Absolute Minimums
-      10, // minLockDuration
-      10, // minRewardPenaltyDuration
-      10  // minPaybackTime
-  };
-
-  // C. Load from NVS (Overwrites defaults if keys exist)
   SettingsManager::loadProvisioningConfig(loadedDeterrents, sessionPresets, loadedChannelMask);
 
   // 3. Initialize Engine
@@ -164,7 +144,7 @@ void setup() {
 
   hal.log("==========================================================================");
 
-  // 6. Start Master Timer
+  // 7. Start Master Timer
   hal.logKeyValue("Session", "Attaching master 1-second ticker.");
   oneSecondMasterTicker.attach(1, []() {
     portENTER_CRITICAL_ISR(&timerMux);
@@ -172,7 +152,7 @@ void setup() {
     portEXIT_CRITICAL_ISR(&timerMux);
   });
 
-  // 7. Start Web API
+  // 8. Start Web API
   web.begin(sessionEngine);
 }
 
