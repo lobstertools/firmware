@@ -17,7 +17,7 @@ public:
     {
         // A. Validate Input against Profile Minimums (Sanity)
         // This prevents 0 or tiny values that might glitch the timer logic
-        if (baseDuration < presets.minLockDuration) {
+        if (baseDuration < presets.minSessionDuration) {
             return 0; // Invalid
         }
 
@@ -28,8 +28,8 @@ public:
         }
 
         // C. Clamp to Profile Maximum
-        if (finalDuration > presets.limitLockMax) {
-             finalDuration = presets.limitLockMax;
+        if (finalDuration > presets.maxSessionDuration) {
+             finalDuration = presets.maxSessionDuration;
         }
         
         return finalDuration;
@@ -66,11 +66,11 @@ public:
 
         if (deterrents.enablePaybackTime) {
             uint32_t paybackToAdd = 0;
-            if (deterrents.paybackStrategy == DETERRENT_FIXED) {
+            if (deterrents.paybackTimeStrategy == DETERRENT_FIXED) {
                 paybackToAdd = deterrents.paybackTime;
             } else {
-                uint32_t minP = presets.paybackMin;
-                uint32_t maxP = presets.paybackMax;
+                uint32_t minP = deterrents.paybackTimeMin;
+                uint32_t maxP = deterrents.paybackTimeMax;
                 if (minP > maxP) { uint32_t t = minP; minP = maxP; maxP = t; }
                 paybackToAdd = hal.getRandom(minP, maxP);
             }
@@ -79,11 +79,11 @@ public:
 
         if (deterrents.enableRewardCode) {
             result.enterPenaltyBox = true;
-            if (deterrents.penaltyStrategy == DETERRENT_FIXED) {
+            if (deterrents.rewardPenaltyStrategy == DETERRENT_FIXED) {
                 result.penaltyDuration = deterrents.rewardPenalty;
             } else {
-                uint32_t minP = presets.penaltyMin;
-                uint32_t maxP = presets.penaltyMax;
+                uint32_t minP = deterrents.rewardPenaltyMin;
+                uint32_t maxP = deterrents.rewardPenaltyMax;
                 if (minP > maxP) { uint32_t t = minP; minP = maxP; maxP = t; }
                 result.penaltyDuration = hal.getRandom(minP, maxP);
             }

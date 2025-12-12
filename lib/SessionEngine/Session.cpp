@@ -111,9 +111,9 @@ void SessionEngine::printStartupDiagnostics() {
     _hal.log(""); 
     _hal.log("[ CONFIGURATION LIMITS ]");
 
-    snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Absolute Min Lock", _presets.minLockDuration);
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Absolute Min Lock", _presets.minSessionDuration);
     _hal.log(logBuf);
-    snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Absolute Max Lock", _presets.limitLockMax);
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Absolute Max Lock", _presets.maxSessionDuration);
     _hal.log(logBuf);
 
     // Ranges
@@ -135,7 +135,7 @@ void SessionEngine::printStartupDiagnostics() {
 
     if (_deterrents.enableRewardCode) {
         snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Penalty Strategy", 
-            _deterrents.penaltyStrategy == DETERRENT_FIXED ? "FIXED" : "RANDOM");
+            _deterrents.rewardPenaltyStrategy == DETERRENT_FIXED ? "FIXED" : "RANDOM");
         _hal.log(logBuf);
         snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Base Penalty", _deterrents.rewardPenalty);
         _hal.log(logBuf);
@@ -450,10 +450,10 @@ uint32_t SessionEngine::resolveBaseDuration(const SessionConfig &config) {
   uint32_t baseDuration = 0;
 
   if (config.durationType == DUR_FIXED) {
-    baseDuration = config.fixedDuration;
+    baseDuration = config.durationFixed;
   } else {
-    uint32_t minVal = config.minDuration;
-    uint32_t maxVal = config.maxDuration;
+    uint32_t minVal = config.durationMin;
+    uint32_t maxVal = config.durationMax;
 
     switch (config.durationType) {
       case DUR_RANGE_SHORT:
@@ -472,10 +472,10 @@ uint32_t SessionEngine::resolveBaseDuration(const SessionConfig &config) {
     }
 
     // Basic sanity clamps before RNG
-    if (maxVal > _presets.limitLockMax) maxVal = _presets.limitLockMax;
+    if (maxVal > _presets.maxSessionDuration) maxVal = _presets.maxSessionDuration;
     if (minVal > maxVal) minVal = maxVal; 
     if (maxVal < minVal) { uint32_t temp = maxVal; maxVal = minVal; minVal = temp; }
-    if (minVal < _presets.minLockDuration) minVal = _presets.minLockDuration;
+    if (minVal < _presets.minSessionDuration) minVal = _presets.minSessionDuration;
     if (maxVal == 0) maxVal = minVal + 60;
 
     baseDuration = _hal.getRandom(minVal, maxVal);
@@ -535,9 +535,10 @@ int SessionEngine::startSession(const SessionConfig &config) {
   // 5. Validate Penalty against Profile
   // Only validate specific value if strategy is FIXED.
   if (_deterrents.enableRewardCode) {
-    if (_deterrents.penaltyStrategy == DETERRENT_FIXED) {
+    if (_deterrents.rewardPenaltyStrategy == DETERRENT_FIXED) {
       uint32_t penaltyDuration = _deterrents.rewardPenalty;
-      if (penaltyDuration < _presets.penaltyMin || penaltyDuration > _presets.penaltyMax) {
+      // Fixed: Use DeterrentConfig for limits, not Presets
+      if (penaltyDuration < _deterrents.rewardPenaltyMin || penaltyDuration > _deterrents.rewardPenaltyMax) {
         logKeyValue("Session", "Start Failed: Penalty Out of Range");
         return 400;
       }
@@ -550,7 +551,7 @@ int SessionEngine::startSession(const SessionConfig &config) {
   
   // Initialize penalty duration.
   // If FIXED, we know it now. If RANDOM, it's calculated on Abort.
-  if (_deterrents.enableRewardCode && _deterrents.penaltyStrategy == DETERRENT_FIXED) {
+  if (_deterrents.enableRewardCode && _deterrents.rewardPenaltyStrategy == DETERRENT_FIXED) {
     _timers.penaltyDuration = _deterrents.rewardPenalty;
   } else {
     _timers.penaltyDuration = 0; 
