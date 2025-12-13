@@ -94,7 +94,6 @@ void NetworkManager::connectToWiFi() {
     return;
 
   log("Network", "Connecting...");
-  WiFi.mode(WIFI_STA);
   WiFi.begin(_wifiSSID, _wifiPass);
 }
 
@@ -379,6 +378,10 @@ void NetworkManager::connectOrRequestProvisioning() {
   // Create Timer
   _wifiReconnectTimer = xTimerCreate("wifiTimer", pdMS_TO_TICKS(2000), pdFALSE, (void *)0, NetworkManager::onWifiTimer);
 
+  log("Network", "Booting the network stack.");
+
+  WiFi.mode(WIFI_STA);
+
   SettingsManager::getWifiSSID(_wifiSSID, sizeof(_wifiSSID));
   SettingsManager::getWifiPassword(_wifiPass, sizeof(_wifiPass));
 
@@ -412,6 +415,7 @@ void NetworkManager::connectOrRequestProvisioning() {
     _triggerProvisioning = true;
   } else {
     // No creds? Flag immediately.
+    log("Network", "No WiFi credentials found. Requesting Provisioning...");
     _triggerProvisioning = true;
   }
 }
@@ -474,7 +478,7 @@ void NetworkManager::printStartupDiagnostics() {
     hal.log(logBuf);
   }
 
-  // Hardware MAC (Always available)
+  // Hardware MAC
   snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Device MAC", WiFi.macAddress().c_str());
   hal.log(logBuf);
 
