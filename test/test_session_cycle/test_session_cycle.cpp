@@ -312,6 +312,32 @@ void test_start_rejected_by_rules_logic(void) {
     TEST_ASSERT_EQUAL(400, res); 
 }
 
+void test_start_auto_countdown_zeros_disabled_channels(void) {
+    MockSessionHAL hal;
+    StandardRules rules;
+    SessionEngine engine(hal, rules, defaults, presets, deterrents);
+    engageSafetyInterlock(hal, engine);
+
+    // Setup: Disable Channel 2 (Index 1)
+    // Mask: Ch1=1, Ch2=0, Ch3=1, Ch4=1 -> 1101 -> 0x0D
+    hal.setChannelMask(0x0D); 
+
+    SessionConfig cfg = {};
+    cfg.durationType = DUR_FIXED;
+    cfg.durationFixed = 60;
+    cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
+    cfg.channelDelays[0] = 10; // Enabled
+    cfg.channelDelays[1] = 20; // Disabled -> Should become 0
+    cfg.channelDelays[2] = 30; // Enabled
+
+    engine.startSession(cfg);
+
+    // Assert
+    TEST_ASSERT_EQUAL_UINT32(10, engine.getTimers().channelDelays[0]);
+    TEST_ASSERT_EQUAL_UINT32(0,  engine.getTimers().channelDelays[1]); // Zeroed!
+    TEST_ASSERT_EQUAL_UINT32(30, engine.getTimers().channelDelays[2]);
+}
+
 // ============================================================================
 // MAIN RUNNER
 // ============================================================================
@@ -341,6 +367,7 @@ int main(void) {
     RUN_TEST(test_completion_and_reset_generates_reward);
     RUN_TEST(test_penalty_box_auto_completion);
     RUN_TEST(test_start_rejected_by_rules_logic);
+    RUN_TEST(test_start_auto_countdown_zeros_disabled_channels);
 
     return UNITY_END();
 }

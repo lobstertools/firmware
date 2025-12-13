@@ -620,7 +620,11 @@ int SessionEngine::startSession(const SessionConfig &config) {
   _timers.penaltyRemaining = 0;
 
   for (int i = 0; i < MAX_CHANNELS; i++) {
-    _timers.channelDelays[i] = _activeConfig.channelDelays[i];
+    if (config.triggerStrategy == STRAT_AUTO_COUNTDOWN && !_hal.isChannelEnabled(i)) {
+         _timers.channelDelays[i] = 0;
+    } else {
+        _timers.channelDelays[i] = _activeConfig.channelDelays[i];
+    }
   }
 
   char logBuf[256];

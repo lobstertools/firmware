@@ -14,6 +14,9 @@ public:
     // --- Hardware Control ---
     virtual void setHardwareSafetyMask(uint8_t mask) = 0;
     
+    // Check if a specific channel is physically enabled (e.g. via DIP switch or Provisioning)
+    virtual bool isChannelEnabled(int channelIndex) const = 0;
+
     // --- Input Events ---
     // Returns true if the physical trigger (e.g. Double Click) was activated
     // since the last check. Reads and clears the flag (Consume).

@@ -27,11 +27,10 @@ public:
     uint32_t currentMillis = 1000; 
     std::vector<std::string> logs;
     
-    // Safety Switch State
-    // _mockSafetyRaw represents the physical switch state.
-    // _mockSafetyValid represents the processed (debounced/grace period) logical state.
+    // Hardware 
     bool _mockSafetyRaw = false; 
     bool _mockSafetyValid = false;
+    uint8_t _mockChannelMask = 0x0F;
 
     // Input Event States
     bool _triggerActionPending = false;
@@ -41,7 +40,7 @@ public:
     // Network State
     bool _networkProvisioningRequested = false;
     bool _enteredProvisioningMode = false;
-
+    
     // RNG State
     uint32_t _rngSeed = 12345;
 
@@ -83,6 +82,15 @@ public:
 
     void setHardwareSafetyMask(uint8_t mask) override {
         lastSafetyMask = mask;
+    }
+
+    bool isChannelEnabled(int channelIndex) const override {
+        if (channelIndex < 0 || channelIndex >= 4) return false;
+        return (_mockChannelMask >> channelIndex) & 1;
+    }
+
+    void setChannelMask(uint8_t mask) {
+        _mockChannelMask = mask;
     }
 
     // --- Safety Interlock ---
