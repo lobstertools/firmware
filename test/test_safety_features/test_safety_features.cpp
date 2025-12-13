@@ -224,6 +224,48 @@ void test_ui_watchdog_timeout_aborts_session(void) {
     TEST_ASSERT_EQUAL(ABORTED, engine.getState());
 }
 
+/**
+ * Scenario: Validates that a hardware Long Press triggers an abort 
+ * even if the Safety Interlock has not yet granted permission (e.g., during stabilization).
+ */
+void test_hardware_abort_works_without_validated_hardware(void) {
+    MockSessionHAL hal;
+    StandardRules rules;
+    SessionEngine engine(hal, rules, defaults, presets, deterrents);
+
+    // 1. Force the engine into a LOCKED state (simulating a reboot recovery)
+    engine.loadState(LOCKED);
+    
+    // 2. Connect the Safety Interlock, but do NOT advance time.
+    // Result: Physical connection is TRUE, but Stable Timer hasn't finished.
+    // Therefore: isHardwarePermitted() will be FALSE.
+    hal.setSafetyInterlock(true);
+
+    // 3. Simulate the User Panic Button (Long Press)
+    hal.simulateLongPress();
+
+    // 4. Tick the engine
+    engine.tick();
+
+    // 5. Verification
+    // We expect TWO abort signals to have fired internally:
+    // A. "Safety Interlock Disconnected" (triggered because permission wasn't stable yet)
+    // B. "Manual Long-Press" (triggered because we pressed the button)
+    
+    // We verify 'B' occurred by checking the logs. 
+    // If the check was wrapped in 'if (isHardwarePermitted)', this log would be missing.
+    bool foundManualAbort = false;
+    for (const auto& logLine : hal.logs) {
+        if (logLine.find("Abort Source: Manual Long-Press") != std::string::npos) {
+            foundManualAbort = true;
+            break;
+        }
+    }
+
+    TEST_ASSERT_TRUE_MESSAGE(foundManualAbort, "Manual Long-Press was ignored due to lack of hardware permission!");
+    TEST_ASSERT_EQUAL(ABORTED, engine.getState());
+}
+
 // ============================================================================
 // EXTENDED REBOOT SCENARIOS
 // ============================================================================
@@ -432,6 +474,7 @@ int main(void) {
     RUN_TEST(test_watchdog_petting_prevents_timeout);
     RUN_TEST(test_watchdog_petting_prevents_timeout_and_resets_strikes);
     RUN_TEST(test_ui_watchdog_timeout_aborts_session);
+    RUN_TEST(test_hardware_abort_works_without_validated_hardware);
 
     // 2. Reboot Scenarios
     RUN_TEST(test_reboot_from_locked_enforces_penalty);
