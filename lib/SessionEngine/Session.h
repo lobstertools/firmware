@@ -54,8 +54,8 @@ public:
     const DeterrentConfig& getDeterrents() const { return _deterrents; }
 
     // --- Safety Accessor ---
-    // Returns true only if the hardware (pedal/button) is connected and stable.
-    bool isHardwarePermitted() const { return _isHardwarePermitted; }
+    // Returns true if the HAL reports the safety interlock is valid (physically safe or within grace period).
+    bool isHardwarePermitted() const { return _hal.isSafetyInterlockValid(); }
 
     // --- State Setters (for Loading from NVS) ---
     void loadState(DeviceState s) { _state = s; }
@@ -85,11 +85,6 @@ private:
     unsigned long _lastKeepAliveTime;
     int _currentKeepAliveStrikes;
 
-    // --- Safety Interlock State ---
-    bool _isHardwarePermitted;       // The "Green Light" for operations
-    unsigned long _safetyStableStartTime; // Timestamp when connection became stable
-    bool _lastInterlockRawState;     // For edge detection
-
     // =========================================================================
     // SECTION: STATE TRANSITION SYSTEM (Internal Events)
     // =========================================================================
@@ -106,7 +101,7 @@ private:
     // SECTION: LOGIC HELPERS
     // =========================================================================
     
-    void updateSafetyInterlock(); // Polls hardware safety switch
+    void updateSafetyInterlock(); // Polls HAL for processed safety status
     void checkNetworkHealth();    // Polls network status
 
     void processAutoCountdown();

@@ -41,11 +41,6 @@ SessionEngine::SessionEngine(ISessionHAL& hal,
     
     _lastKeepAliveTime = 0;
     _currentKeepAliveStrikes = 0;
-    
-    // Safety Interlock Init
-    _isHardwarePermitted = false;
-    _safetyStableStartTime = 0;
-    _lastInterlockRawState = false;
 }
 
 // =================================================================================
@@ -65,10 +60,6 @@ void SessionEngine::logKeyValue(const char *key, const char *value) {
     snprintf(tempBuf, sizeof(tempBuf), " %-8s : %s", key, value);
     _hal.log(tempBuf);
 }
-
-/* * In Session.cpp 
- * Add this method. (Ensure it is also declared in Session.h)
- */
 
 void SessionEngine::printStartupDiagnostics() {
     char logBuf[128];
@@ -96,8 +87,9 @@ void SessionEngine::printStartupDiagnostics() {
     snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Current Mode", sStr);
     _hal.log(logBuf);
 
-    // Safety Interlock
-    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Interlock Permitted", boolStr[_isHardwarePermitted]);
+    // Safety Interlock - Query HAL directly
+    bool isPermitted = _hal.isSafetyInterlockValid();
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Interlock Permitted", boolStr[isPermitted]);
     _hal.log(logBuf);
 
     // Watchdogs
@@ -250,43 +242,18 @@ void SessionEngine::changeState(DeviceState newState) {
 // =================================================================================
 
 void SessionEngine::updateSafetyInterlock() {
-    // 1. Poll Hardware
-    bool isConnected = _hal.isSafetyInterlockEngaged();
+    // 1. Delegate Logic to HAL
+    // The HAL tracks stabilization and grace periods internally.
+    bool isSafe = _hal.isSafetyInterlockValid();
 
-    // 2. Handle State Changes (Debounce / Stability Logic)
-    if (isConnected) {
-        if (!_lastInterlockRawState) {
-            // Edge: Just connected. Start timer.
-            _safetyStableStartTime = _hal.getMillis();
-            logKeyValue("Safety", "Interlock Connected. Validating...");
-        }
-        
-        // Convert seconds config to ms
-        unsigned long requiredStableMs = _sysDefaults.extButtonSignalDuration * 1000; 
-
-        // If not yet permitted, check if duration has passed
-        if (!_isHardwarePermitted && (_hal.getMillis() - _safetyStableStartTime >= requiredStableMs)) {
-            _isHardwarePermitted = true;
-            logKeyValue("Safety", "Interlock Verified. Hardware Permitted.");
-        }
-    } else {
-        // Disconnected
-        if (_lastInterlockRawState) {
-             logKeyValue("Safety", "Interlock Disconnected!");
-        }
-        // Immediate revocation of permission
-        _isHardwarePermitted = false; 
-        _safetyStableStartTime = 0;
-    }
-
-    _lastInterlockRawState = isConnected;
-
-    // 3. ENFORCE SAFETY (The "Kill Switch")
-    // If we are in an active state and permission is lost -> ABORT
-    if (!_isHardwarePermitted) {
-        if (_state == LOCKED || _state == ARMED || _state == TESTING) {
-            logKeyValue("Safety", "Critical: Interlock lost during session.");
-            abort("Safety Interlock Disconnected");
+    // 2. ENFORCE SAFETY (The "Kill Switch")
+    // If HAL says "Invalid" (Timeout exceeded), we abort.
+    if (!isSafe) {
+        if (isCriticalState(_state)) {
+            // Only log if this is a new event (prevent log spamming handled by state change)
+            // The HAL's logging handles verbose debugging.
+            logKeyValue("Safety", "Critical: Interlock invalid/disconnected.");
+            abort("Safety Disconnect");
         }
     }
 }
@@ -359,8 +326,6 @@ void SessionEngine::processAutoCountdown() {
  */
 void SessionEngine::processButtonTriggerWait() {
   // 1. POLL THE HAL: Did the user double-click?
-  // This replaces the old 'push' trigger() call from hardware.
-  // The HAL implementation should return true ONCE per event (consume the flag).
   if (_hal.checkTriggerAction()) {
       enterLockedState("Button Double-Click");
       return;
@@ -504,8 +469,8 @@ uint32_t SessionEngine::resolveBaseDuration(const SessionConfig &config) {
  */
 int SessionEngine::startSession(const SessionConfig &config) {
   // 1. Safety Check First
-  if (!_isHardwarePermitted) {
-    logKeyValue("Session", "Start Failed: Safety Interlock not engaged.");
+  if (!_hal.isSafetyInterlockValid()) {
+    logKeyValue("Session", "Start Failed: Safety Interlock not valid.");
     return 412; // HTTP Precondition Failed
   }
 
@@ -686,8 +651,8 @@ void SessionEngine::petWatchdog() {
 
 int SessionEngine::startTest() {
   // Safety Check
-  if (!_isHardwarePermitted) {
-      logKeyValue("Session", "Test Failed: Safety Interlock not engaged.");
+  if (!_hal.isSafetyInterlockValid()) {
+      logKeyValue("Session", "Test Failed: Safety Interlock not valid.");
       return 412;
   }
 

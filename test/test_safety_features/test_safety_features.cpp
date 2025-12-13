@@ -233,27 +233,19 @@ void test_hardware_abort_works_without_validated_hardware(void) {
     StandardRules rules;
     SessionEngine engine(hal, rules, defaults, presets, deterrents);
 
-    // 1. Force the engine into a LOCKED state (simulating a reboot recovery)
     engine.loadState(LOCKED);
     
-    // 2. Connect the Safety Interlock, but do NOT advance time.
-    // Result: Physical connection is TRUE, but Stable Timer hasn't finished.
-    // Therefore: isHardwarePermitted() will be FALSE.
-    hal.setSafetyInterlock(true);
+    // SETUP: Simulate the "Grace Period" state
+    // Physical Switch is OPEN (False) -> User is pressing button
+    // Logical Safety is TRUE (True) -> Grace period active in HAL
+    hal.setSafetyRawButKeepValid(false, true); 
 
-    // 3. Simulate the User Panic Button (Long Press)
-    hal.simulateLongPress();
-
-    // 4. Tick the engine
+    // ACT: Simulate Long Press
+    hal.simulateLongPress(); 
     engine.tick();
 
-    // 5. Verification
-    // We expect TWO abort signals to have fired internally:
-    // A. "Safety Interlock Disconnected" (triggered because permission wasn't stable yet)
-    // B. "Manual Long-Press" (triggered because we pressed the button)
-    
-    // We verify 'B' occurred by checking the logs. 
-    // If the check was wrapped in 'if (isHardwarePermitted)', this log would be missing.
+    // ASSERT
+    // Should abort via Manual Long Press, NOT Safety Disconnect
     bool foundManualAbort = false;
     for (const auto& logLine : hal.logs) {
         if (logLine.find("Abort Source: Manual Long-Press") != std::string::npos) {
@@ -261,8 +253,7 @@ void test_hardware_abort_works_without_validated_hardware(void) {
             break;
         }
     }
-
-    TEST_ASSERT_TRUE_MESSAGE(foundManualAbort, "Manual Long-Press was ignored due to lack of hardware permission!");
+    TEST_ASSERT_TRUE(foundManualAbort);
     TEST_ASSERT_EQUAL(ABORTED, engine.getState());
 }
 

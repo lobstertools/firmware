@@ -28,7 +28,8 @@ public:
     std::vector<std::string> logs;
     
     // Safety Switch State
-    bool _isInterlockEngaged = false; 
+    bool _mockSafetyRaw = false; 
+    bool _mockSafetyValid = false;
 
     // Input Event States
     bool _triggerActionPending = false;
@@ -42,7 +43,13 @@ public:
     // --- Helpers for Test Control ---
 
     void setSafetyInterlock(bool engaged) {
-        _isInterlockEngaged = engaged;
+        _mockSafetyRaw = engaged;
+        _mockSafetyValid = engaged;
+    }
+
+    void setSafetyRawButKeepValid(bool rawState, bool validState) {
+        _mockSafetyRaw = rawState;
+        _mockSafetyValid = validState;
     }
 
     void simulateDoublePress() {
@@ -72,8 +79,13 @@ public:
     }
 
     // --- Safety Interlock ---
+    
+    bool isSafetyInterlockValid() override {
+        return _mockSafetyValid;
+    }
+
     bool isSafetyInterlockEngaged() override {
-        return _isInterlockEngaged;
+        return _mockSafetyRaw;
     }
 
     // --- Input Events ---

@@ -1,7 +1,7 @@
 /*
  * =================================================================================
  * Project:   Lobster Lock - Self-Bondage Session Manager
- * File:      Esp32SessionHAL.cpp (Hardware.cpp)
+ * File:      src/Esp32SessionHAL.cpp
  *
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -51,7 +51,14 @@ static void IRAM_ATTR failsafe_timer_callback(void *arg) {
 Esp32SessionHAL::Esp32SessionHAL()
     : _triggerActionPending(false), _abortActionPending(false), _shortPressPending(false), _pcbPressed(false), _extPressed(false),
       _pressStartTime(0), _cachedState(READY), _logBufferIndex(0), _queueHead(0), _queueTail(0), _statusLed(JLed(STATUS_LED_PIN)),
-      _lastHealthCheck(0), _bootStartTime(0), _bootMarkedStable(false), _enabledChannelsMask(0x0F) {
+      _lastHealthCheck(0), _bootStartTime(0), _bootMarkedStable(false), _enabledChannelsMask(0x0F),
+      
+      // Safety Logic Init
+      _safetyStableStart(0), 
+      _safetyLostStart(0), 
+      _isSafetyValid(false), 
+      _lastSafetyRaw(false) 
+{
   // OneButton Setup (Pin, ActiveLow, Pullup)
   _pcbButton = OneButton(PCB_BUTTON_PIN, true, true);
 
@@ -139,11 +146,14 @@ void Esp32SessionHAL::tick() {
   if (!lockState()) {
     return;
   }
+  
+  // 1. Process Safety Logic (Before peripherals to ensure graceful aborts)
+  updateSafetyLogic();
 
-  // 1. Process Serial Logs (Internal Queue)
+  // 2. Process Serial Logs (Internal Queue)
   processLogQueue();
 
-  // 2. Tick Peripherals
+  // 3. Tick Peripherals
   _pcbButton.tick();
 #ifdef EXT_BUTTON_PIN
   _extButton.tick();
@@ -151,16 +161,86 @@ void Esp32SessionHAL::tick() {
 
   _statusLed.Update();
 
-  // 3. Periodic Health Checks (Every 60s)
+  // 4. Periodic Health Checks (Every 60s)
   if (millis() - _lastHealthCheck > 60000) {
     checkSystemHealth();
     _lastHealthCheck = millis();
   }
 
-  // 4. Maintenance
+  // 5. Maintenance
   markBootStability();
 
   unlockState();
+}
+
+// =================================================================================
+// SECTION: SAFETY LOGIC (Debounce / Grace Period)
+// =================================================================================
+
+void Esp32SessionHAL::updateSafetyLogic() {
+    // Read RAW hardware state (Inverse logic: NC Switch, LOW = Connected)
+    #ifdef EXT_BUTTON_PIN
+        // If pin is -1, assume safe (Dev Mode)
+        bool isConnectedRaw = (EXT_BUTTON_PIN != -1) ? (digitalRead(EXT_BUTTON_PIN) == LOW) : true;
+    #else
+        bool isConnectedRaw = true; 
+    #endif
+
+    unsigned long now = millis();
+
+    if (isConnectedRaw) {
+        // --- CASE: PHYSICALLY CONNECTED ---
+        _safetyLostStart = 0; // Clear loss timer
+
+        if (!_lastSafetyRaw) {
+            // Rising Edge: Just plugged in
+            _safetyStableStart = now;
+            logKeyValue("Safety", "Signal Detected. Stabilizing...");
+        }
+
+        // On-Delay: Wait for signal to be stable before granting permission
+        if (!_isSafetyValid) {
+            unsigned long stableTime = g_systemDefaults.extButtonSignalDuration * 1000;
+            if (now - _safetyStableStart >= stableTime) {
+                _isSafetyValid = true;
+                logKeyValue("Safety", "Interlock Verified. Hardware Permitted.");
+            }
+        }
+    } 
+    else {
+        // --- CASE: PHYSICALLY DISCONNECTED ---
+        // (Could be a cable cut OR a button press)
+
+        if (_isSafetyValid) {
+            // It WAS valid, now it's gone. Start Grace Period Timer.
+            if (_safetyLostStart == 0) {
+                _safetyLostStart = now;
+            }
+
+            // Off-Delay: Wait for LongPress duration + Buffer (e.g., 500ms)
+            // This ensures OneButton has time to detect the LongPress event
+            // before we declare the safety invalid.
+            unsigned long gracePeriod = (g_systemDefaults.longPressDuration * 1000) + 500;
+
+            if (now - _safetyLostStart > gracePeriod) {
+                // Time's up. It wasn't a button press. It's a disconnect.
+                _isSafetyValid = false;
+                _safetyStableStart = 0;
+                logKeyValue("Safety", "Interlock Signal Lost (Timeout).");
+            }
+            // Else: We are in the grace period. Keep _isSafetyValid = TRUE.
+        } 
+        else {
+            // It wasn't valid to begin with. Reset.
+            _safetyStableStart = 0;
+        }
+    }
+
+    _lastSafetyRaw = isConnectedRaw;
+}
+
+bool Esp32SessionHAL::isSafetyInterlockValid() {
+    return _isSafetyValid;
 }
 
 // =================================================================================
@@ -362,7 +442,8 @@ bool Esp32SessionHAL::isSafetyInterlockEngaged() {
   // Production: Normally Closed (NC) switch.
   // CLOSED (GND/LOW) = Safe/Connected.
   // OPEN (VCC/HIGH) = Unsafe/Disconnected.
-  return (digitalRead(EXT_BUTTON_PIN) == LOW);
+  if (EXT_BUTTON_PIN != -1) return (digitalRead(EXT_BUTTON_PIN) == LOW);
+  return true;
 #else
   return true; // Dev mode always safe
 #endif

@@ -28,10 +28,16 @@ public:
     virtual bool checkShortPressAction() = 0;
 
     // --- Safety Interlock ---
+    
+    // Returns true if hardware is physically safe OR within the allowed grace period.
+    // Returns false if the interlock is definitely broken/disconnected (timeout exceeded).
+    virtual bool isSafetyInterlockValid() = 0;
+
     // Returns true if the external safety/abort button is electrically connected (Safe).
-    // Returns false if disconnected (Unsafe).
+    // Returns false if disconnected (Unsafe). (Raw State)
     virtual bool isSafetyInterlockEngaged() = 0;
 
+    // --- Network ---
     // Returns true if the network layer has failed retries and needs reconfiguration.
     virtual bool isNetworkProvisioningRequested() = 0;
 

@@ -32,6 +32,12 @@ private:
   volatile bool _extPressed;
   unsigned long _pressStartTime; // Timestamp of press start
 
+  // --- Safety Logic State ---
+  unsigned long _safetyStableStart;
+  unsigned long _safetyLostStart;
+  bool _isSafetyValid;
+  bool _lastSafetyRaw;
+
   DeviceState _cachedState;
 
   // --- Log State (RAM + Serial) ---
@@ -61,6 +67,7 @@ private:
   void markBootStability();
   void processLogQueue();
   void checkPressState(); // Helper to manage start time logic
+  void updateSafetyLogic(); // Internal Debounce & Grace Period Logic
 
   // --- Static Interrupt/Callback Handlers ---
   // PCB Handlers
@@ -120,6 +127,8 @@ public:
   bool checkTriggerAction() override;
   bool checkAbortAction() override;
   bool checkShortPressAction() override;
+  
+  bool isSafetyInterlockValid() override;
   bool isSafetyInterlockEngaged() override;
 
   bool isNetworkProvisioningRequested() override;
