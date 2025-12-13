@@ -106,7 +106,7 @@ void test_armed_state_timeout(void) {
     cfg.triggerStrategy = STRAT_BUTTON_TRIGGER;
     engine.startSession(cfg);
 
-    for(int i=0; i < defaults.armedTimeoutSeconds + 5; i++) {
+    for(int i=0; i < defaults.armedTimeout + 5; i++) {
         engine.tick();
     }
 
