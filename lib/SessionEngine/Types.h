@@ -75,7 +75,7 @@ struct SystemDefaults {
   uint32_t bootLoopThreshold;
   uint32_t stableBootTime;
   uint32_t wifiMaxRetries;
-  uint32_t armedTimeoutSeconds;
+  uint32_t armedTimeout;
 };
 
 // --- State Structs ---

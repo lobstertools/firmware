@@ -571,7 +571,7 @@ int SessionEngine::startSession(const SessionConfig &config) {
   logKeyValue("Session", logBuf);
 
   if (config.triggerStrategy == STRAT_BUTTON_TRIGGER) {
-    _timers.triggerTimeout = _sysDefaults.armedTimeoutSeconds;
+    _timers.triggerTimeout = _sysDefaults.armedTimeout;
     logKeyValue("Session", "Waiting for Trigger...");
   } else {
     logKeyValue("Session", "Auto Sequence Started.");
