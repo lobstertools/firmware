@@ -57,7 +57,7 @@ Esp32SessionHAL::Esp32SessionHAL()
 
 #ifdef EXT_BUTTON_PIN
   if (EXT_BUTTON_PIN != -1) {
-    _extButton = OneButton(EXT_BUTTON_PIN, true, true);
+    _extButton = OneButton(EXT_BUTTON_PIN, false, true);
   }
 #endif
 
