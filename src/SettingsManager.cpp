@@ -318,21 +318,69 @@ void SettingsManager::setChannelEnabled(int channelIndex, bool enabled) {
 
 void SettingsManager::saveSessionState(const DeviceState &state, const SessionTimers &timers, const SessionStats &stats) {
   sessionPrefs.begin("session", false);
+
+  // 1. Save Device State
   sessionPrefs.putUChar("state", (uint8_t)state);
-  sessionPrefs.putBytes("timers", &timers, sizeof(SessionTimers));
-  sessionPrefs.putBytes("stats", &stats, sizeof(SessionStats));
+
+  // 2. Explode SessionTimers (Save fields individually)
+  sessionPrefs.putULong("t_lockDur", timers.lockDuration);
+  sessionPrefs.putULong("t_penDur", timers.penaltyDuration);
+  sessionPrefs.putULong("t_lockRem", timers.lockRemaining);
+  sessionPrefs.putULong("t_penRem", timers.penaltyRemaining);
+  sessionPrefs.putULong("t_testRem", timers.testRemaining);
+  sessionPrefs.putULong("t_trigOut", timers.triggerTimeout);
+  
+  // Save Array: Create unique keys for each channel delay (e.g., "t_delay0", "t_delay1")
+  char keyBuf[16];
+  for(int i = 0; i < MAX_CHANNELS; i++) {
+      snprintf(keyBuf, sizeof(keyBuf), "t_delay%d", i);
+      sessionPrefs.putULong(keyBuf, timers.channelDelays[i]);
+  }
+
+  // 3. Explode SessionStats (Save fields individually)
+  sessionPrefs.putULong("s_streaks", stats.streaks);
+  sessionPrefs.putULong("s_compl", stats.completed);
+  sessionPrefs.putULong("s_abort", stats.aborted);
+  sessionPrefs.putULong("s_payback", stats.paybackAccumulated);
+  sessionPrefs.putULong("s_total", stats.totalLockedTime);
+
   sessionPrefs.end();
 }
 
 bool SettingsManager::loadSessionState(DeviceState &state, SessionTimers &timers, SessionStats &stats) {
   sessionPrefs.begin("session", true);
+
+  // Check if state key exists (marker for valid session data)
   if (!sessionPrefs.isKey("state")) {
     sessionPrefs.end();
-    return false;
+    return false; 
   }
+
+  // 1. Load Device State
+  // Default to READY if corrupted/missing
   state = (DeviceState)sessionPrefs.getUChar("state", (uint8_t)READY);
-  sessionPrefs.getBytes("timers", &timers, sizeof(SessionTimers));
-  sessionPrefs.getBytes("stats", &stats, sizeof(SessionStats));
+
+  // 2. Load SessionTimers (Default to 0 if keys missing/new fields added)
+  timers.lockDuration = sessionPrefs.getULong("t_lockDur", 0);
+  timers.penaltyDuration = sessionPrefs.getULong("t_penDur", 0);
+  timers.lockRemaining = sessionPrefs.getULong("t_lockRem", 0);
+  timers.penaltyRemaining = sessionPrefs.getULong("t_penRem", 0);
+  timers.testRemaining = sessionPrefs.getULong("t_testRem", 0);
+  timers.triggerTimeout = sessionPrefs.getULong("t_trigOut", 0);
+
+  char keyBuf[16];
+  for(int i = 0; i < MAX_CHANNELS; i++) {
+      snprintf(keyBuf, sizeof(keyBuf), "t_delay%d", i);
+      timers.channelDelays[i] = sessionPrefs.getULong(keyBuf, 0);
+  }
+
+  // 3. Load SessionStats
+  stats.streaks = sessionPrefs.getULong("s_streaks", 0);
+  stats.completed = sessionPrefs.getULong("s_compl", 0);
+  stats.aborted = sessionPrefs.getULong("s_abort", 0);
+  stats.paybackAccumulated = sessionPrefs.getULong("s_payback", 0);
+  stats.totalLockedTime = sessionPrefs.getULong("s_total", 0);
+
   sessionPrefs.end();
   return true;
 }
