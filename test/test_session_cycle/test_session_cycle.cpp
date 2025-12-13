@@ -312,33 +312,6 @@ void test_start_rejected_by_rules_logic(void) {
     TEST_ASSERT_EQUAL(400, res); 
 }
 
-void test_start_fails_if_penalty_out_of_range(void) {
-    MockSessionHAL hal;
-    StandardRules rules;
-    
-    // 1. Setup: Fixed Penalty of 10s (Too Short!)
-    DeterrentConfig badConfig = deterrents;
-    badConfig.rewardPenaltyStrategy = DETERRENT_FIXED;
-    badConfig.rewardPenalty = 10; 
-    
-    // Limits are in badConfig (copied from 'deterrents' which has 300 min)
-    // 10 < 300 -> Invalid.
-    
-    SessionEngine engine(hal, rules, defaults, presets, badConfig);
-    engageSafetyInterlock(hal, engine);
-
-    SessionConfig cfg = {};
-    cfg.durationType = DUR_FIXED;
-    cfg.durationFixed = 600;
-
-    // 2. Act
-    int res = engine.startSession(cfg);
-
-    // 3. Assert
-    TEST_ASSERT_EQUAL(400, res); // Start Failed: Penalty Out of Range
-    TEST_ASSERT_EQUAL(READY, engine.getState());
-}
-
 // ============================================================================
 // MAIN RUNNER
 // ============================================================================
@@ -368,7 +341,6 @@ int main(void) {
     RUN_TEST(test_completion_and_reset_generates_reward);
     RUN_TEST(test_penalty_box_auto_completion);
     RUN_TEST(test_start_rejected_by_rules_logic);
-    RUN_TEST(test_start_fails_if_penalty_out_of_range);
 
     return UNITY_END();
 }

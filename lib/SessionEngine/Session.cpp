@@ -521,19 +521,6 @@ int SessionEngine::startSession(const SessionConfig &config) {
     return 400;
   }
 
-  // 5. Validate Penalty against Profile
-  // Only validate specific value if strategy is FIXED.
-  if (_deterrents.enableRewardCode) {
-    if (_deterrents.rewardPenaltyStrategy == DETERRENT_FIXED) {
-      uint32_t penaltyDuration = _deterrents.rewardPenalty;
-      // Fixed: Use DeterrentConfig for limits, not Presets
-      if (penaltyDuration < _deterrents.rewardPenaltyMin || penaltyDuration > _deterrents.rewardPenaltyMax) {
-        logKeyValue("Session", "Start Failed: Penalty Out of Range");
-        return 400;
-      }
-    }
-  }
-
   // 6. Commit State
   _activeConfig = config;
   _timers.lockDuration = finalLockDuration;
