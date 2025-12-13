@@ -280,6 +280,7 @@ void WebManager::handleStatus(AsyncWebServerRequest *request) {
   SessionTimers t = _engine->getTimers();
   SessionStats stats = _engine->getStats();
   SessionConfig cfg = _engine->getActiveConfig();
+  bool verified = _engine->isHardwarePermitted();
 
   // Hardware reading
   bool btnPressed = Esp32SessionHAL::getInstance().isButtonPressed();
@@ -287,7 +288,7 @@ void WebManager::handleStatus(AsyncWebServerRequest *request) {
   uint32_t heap = ESP.getFreeHeap();
   float temp = temperatureRead();
   int64_t uptime = esp_timer_get_time() / 1000; // micro to milli
-  bool verified = Esp32SessionHAL::getInstance().isSafetyInterlockEngaged();
+  
   uint32_t currentPressDurationMs = Esp32SessionHAL::getInstance().getCurrentPressDurationMs();
 
   Esp32SessionHAL::getInstance().unlockState();
