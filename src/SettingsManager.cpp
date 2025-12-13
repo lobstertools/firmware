@@ -237,7 +237,7 @@ void SettingsManager::loadProvisioningConfig(DeterrentConfig &config, SessionPre
 
   // 5. Session Presets - Global Safety Limits
   presets.maxSessionDuration = provPrefs.getUInt("maxSessionDur", presets.maxSessionDuration);
-  presets.minSessionDuration = provPrefs.getUInt("minSessionkDur", presets.minSessionDuration);
+  presets.minSessionDuration = provPrefs.getUInt("minSessionDur", presets.minSessionDuration);
 
   // Sanity check to prevent logic errors in global limits
   if (presets.maxSessionDuration < presets.minSessionDuration) {
