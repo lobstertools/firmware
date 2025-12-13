@@ -129,12 +129,32 @@ void SessionEngine::printStartupDiagnostics() {
         snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Penalty Strategy", 
             _deterrents.rewardPenaltyStrategy == DETERRENT_FIXED ? "FIXED" : "RANDOM");
         _hal.log(logBuf);
-        snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Base Penalty", _deterrents.rewardPenalty);
-        _hal.log(logBuf);
+
+        if (_deterrents.rewardPenaltyStrategy == DETERRENT_FIXED) {
+            snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Base Penalty", _deterrents.rewardPenalty);
+            _hal.log(logBuf);
+        } else {
+            snprintf(logBuf, sizeof(logBuf), " %-25s : %u - %u s", "Penalty Range", _deterrents.rewardPenaltyMin, _deterrents.rewardPenaltyMax);
+            _hal.log(logBuf);
+        }
     }
 
     snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Payback (Debt)", boolStr[_deterrents.enablePaybackTime]);
     _hal.log(logBuf);
+
+    if (_deterrents.enablePaybackTime) {
+        snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Payback Strategy", 
+            _deterrents.paybackTimeStrategy == DETERRENT_FIXED ? "FIXED" : "RANDOM");
+        _hal.log(logBuf);
+
+        if (_deterrents.paybackTimeStrategy == DETERRENT_FIXED) {
+            snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Base Payback", _deterrents.paybackTime);
+            _hal.log(logBuf);
+        } else {
+            snprintf(logBuf, sizeof(logBuf), " %-25s : %u - %u s", "Payback Range", _deterrents.paybackTimeMin, _deterrents.paybackTimeMax);
+            _hal.log(logBuf);
+        }
+    }
 
     // -------------------------------------------------------------------------
     // SECTION: STATISTICS
@@ -144,8 +164,13 @@ void SessionEngine::printStartupDiagnostics() {
 
     snprintf(logBuf, sizeof(logBuf), " %-25s : %u", "Sessions Completed", _stats.completed);
     _hal.log(logBuf);
-    snprintf(logBuf, sizeof(logBuf), " %-25s : %u", "Current Streak", _stats.streaks);
-    _hal.log(logBuf);
+
+    if (_deterrents.enableStreaks) {
+        snprintf(logBuf, sizeof(logBuf), " %-25s : %u", "Sessions Aborted", _stats.aborted);
+        _hal.log(logBuf);
+        snprintf(logBuf, sizeof(logBuf), " %-25s : %u", "Current Streak", _stats.streaks);
+        _hal.log(logBuf);
+    }
     
     char timeStr[64];
     formatSecondsInternal(_stats.totalLockedTime, timeStr, sizeof(timeStr));
@@ -157,7 +182,6 @@ void SessionEngine::printStartupDiagnostics() {
         snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Accumulated Debt", timeStr);
         _hal.log(logBuf);
     }
-
 }
 
 // =================================================================================
