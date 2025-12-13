@@ -55,6 +55,36 @@ void test_presets_min_greater_than_max_fails(void) {
     delete engine;
 }
 
+void test_presets_min_equal_max_fails(void) {
+    MockSessionHAL hal; StandardRules rules;
+    SessionPresets p = validPresets;
+    
+    // Invalid: Min == Max (Strict inequality check)
+    p.minSessionDuration = 1000; 
+    p.maxSessionDuration = 1000;
+
+    SessionEngine* engine = createEngine(hal, rules, p, validDeterrents);
+    SessionConfig req = { DUR_FIXED, 1000 }; 
+
+    TEST_ASSERT_EQUAL(400, engine->startSession(req));
+    delete engine;
+}
+
+void test_presets_exceed_absolute_hard_limit_fails(void) {
+    MockSessionHAL hal; StandardRules rules;
+    SessionPresets p = validPresets;
+    
+    // Invalid: Max exceeds 2 Weeks (1209600s)
+    p.maxSessionDuration = 1209601; 
+    p.minSessionDuration = 10;
+
+    SessionEngine* engine = createEngine(hal, rules, p, validDeterrents);
+    SessionConfig req = { DUR_FIXED, 600 }; 
+
+    TEST_ASSERT_EQUAL(400, engine->startSession(req));
+    delete engine;
+}
+
 void test_presets_range_inverted_fails(void) {
     MockSessionHAL hal; StandardRules rules;
     SessionPresets p = validPresets;
@@ -83,6 +113,7 @@ void test_presets_zero_min_fails(void) {
     TEST_ASSERT_EQUAL(400, engine->startSession(req));
     delete engine;
 }
+
 
 // ============================================================================
 // TEST GROUP: DETERRENT VALIDATION
@@ -161,8 +192,10 @@ int main(void) {
     
     // Presets
     RUN_TEST(test_presets_min_greater_than_max_fails);
+    RUN_TEST(test_presets_min_equal_max_fails);
     RUN_TEST(test_presets_range_inverted_fails);
     RUN_TEST(test_presets_zero_min_fails);
+    RUN_TEST(test_presets_exceed_absolute_hard_limit_fails);
 
     // Deterrents
     RUN_TEST(test_reward_fixed_zero_fails);

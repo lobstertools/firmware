@@ -41,6 +41,10 @@ SessionEngine::SessionEngine(ISessionHAL& hal,
     
     _lastKeepAliveTime = 0;
     _currentKeepAliveStrikes = 0;
+
+    // Generate the initial reward code upon startup.
+    // This ensures getRewardHistory() returns a valid code immediately in the READY state.
+    rotateAndGenerateReward();
 }
 
 // =================================================================================
@@ -578,9 +582,7 @@ int SessionEngine::startSession(const SessionConfig &config) {
     return 409;
   }
 
-  // 3. Validate Deterrent Configuration
-  // This ensures we don't start with invalid Random ranges (0 or Min > Max)
-  // or invalid Fixed penalties (0).
+  // 3. Configuration Validation
   if (!validateConfig(_deterrents, _presets)) {
       logKeyValue("Session", "Start Failed: Invalid System Configuration (Presets or Deterrents).");
       return 400; // Bad Request
