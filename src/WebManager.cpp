@@ -439,14 +439,14 @@ void WebManager::handleDetails(AsyncWebServerRequest *request) {
     return;
   }
 
-  // -- System Defaults (Mocking or retrieving from constants if available)
+  // -- System Defaults
   JsonObject def = doc["defaults"].to<JsonObject>();
-  def["longPressDuration"] = 2000;
-  def["extButtonSignalDuration"] = 50;
-  def["testModeDuration"] = 10000;
-  def["keepAliveInterval"] = 5000;
-  def["wifiMaxRetries"] = 10;
-  def["armedTimeoutSeconds"] = 300;
+  def["longPressDuration"] = g_systemDefaults.longPressDuration;
+  def["extButtonSignalDuration"] = g_systemDefaults.extButtonSignalDuration;
+  def["testModeDuration"] = g_systemDefaults.testModeDuration;
+  def["keepAliveInterval"] = g_systemDefaults.keepAliveInterval;
+  def["wifiMaxRetries"] = g_systemDefaults.wifiMaxRetries;
+  def["armedTimeout"] = g_systemDefaults.armedTimeout;
 
   String response;
   serializeJson(doc, response);
