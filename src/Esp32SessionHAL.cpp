@@ -562,6 +562,10 @@ void Esp32SessionHAL::checkBootLoop() {
 
     pinMode(STATUS_LED_PIN, OUTPUT);
     digitalWrite(STATUS_LED_PIN, HIGH);
+
+    // Try and erase all settings to reboot into provisioning mode
+    SettingsManager::wipeAll();
+
     for (int i = 0; i < 30; i++) {
       delay(1000);
     }
