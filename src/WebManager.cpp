@@ -480,6 +480,15 @@ void WebManager::handleLog(AsyncWebServerRequest *request) {
 void WebManager::handleReward(AsyncWebServerRequest *request) {
   if (Esp32SessionHAL::getInstance().lockState()) {
     const Reward *history = _engine->getRewardHistory();
+
+    // 1. Check for Null Pointer (Safety Feature: Rewards are hidden in active states)
+    if (history == nullptr) {
+        Esp32SessionHAL::getInstance().unlockState();
+        sendJsonError(request, 403, "Rewards are hidden during active session or penalty.");
+        return;
+    }
+
+    // 2. Serialize Data
     JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
 
@@ -490,8 +499,10 @@ void WebManager::handleReward(AsyncWebServerRequest *request) {
         r["checksum"] = history[i].checksum;
       }
     }
+
     String rJson;
     serializeJson(doc, rJson);
+    
     Esp32SessionHAL::getInstance().unlockState();
     request->send(200, "application/json", rJson);
   } else {

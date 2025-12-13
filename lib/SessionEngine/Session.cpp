@@ -76,8 +76,13 @@ bool SessionEngine::validateConfig(const DeterrentConfig& deterrents, const Sess
     
     // Global Limits must be sane
     if (presets.minSessionDuration == 0) return false;
-    if (presets.minSessionDuration > presets.maxSessionDuration) return false;
+    if (presets.minSessionDuration >= presets.maxSessionDuration) return false;
 
+    // Absolute Hard Limit (2 Weeks)
+    // 14 days * 24 hours * 3600 seconds = 1209600 seconds
+    const uint32_t ABSOLUTE_MAX_SESSION_SEC = 1209600;
+    if (presets.maxSessionDuration > ABSOLUTE_MAX_SESSION_SEC) return false;
+    
     // Generators: Min <= Max
     if (presets.shortMin > presets.shortMax) return false;
     if (presets.mediumMin > presets.mediumMax) return false;

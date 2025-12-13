@@ -47,7 +47,12 @@ public:
     const SessionTimers& getTimers() const { return _timers; }
     const SessionStats& getStats() const { return _stats; }
     const SessionConfig& getActiveConfig() const { return _activeConfig; }
-    const Reward* getRewardHistory() const { return _rewardHistory; }
+    const Reward* getRewardHistory() const { 
+        if (_state == READY || _state == COMPLETED) {
+            return _rewardHistory; 
+        }
+        return nullptr;
+    }
 
     // --- Configuration Accessors ---
     const SessionPresets& getPresets() const { return _presets; }

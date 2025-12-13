@@ -28,6 +28,8 @@ public:
     std::vector<std::string> logs;
     
     // Safety Switch State
+    // _mockSafetyRaw represents the physical switch state.
+    // _mockSafetyValid represents the processed (debounced/grace period) logical state.
     bool _mockSafetyRaw = false; 
     bool _mockSafetyValid = false;
 
@@ -40,13 +42,18 @@ public:
     bool _networkProvisioningRequested = false;
     bool _enteredProvisioningMode = false;
 
+    // RNG State
+    uint32_t _rngSeed = 12345;
+
     // --- Helpers for Test Control ---
 
     void setSafetyInterlock(bool engaged) {
         _mockSafetyRaw = engaged;
+        // Default behavior for simple tests: Logical state matches physical immediately
         _mockSafetyValid = engaged;
     }
 
+    // New helper specifically for the "Grace Period" test or timing simulations
     void setSafetyRawButKeepValid(bool rawState, bool validState) {
         _mockSafetyRaw = rawState;
         _mockSafetyValid = validState;
@@ -80,10 +87,12 @@ public:
 
     // --- Safety Interlock ---
     
+    // The Engine now checks THIS to see if operation is permitted
     bool isSafetyInterlockValid() override {
         return _mockSafetyValid;
     }
 
+    // Represents the raw physical state (for diagnostics)
     bool isSafetyInterlockEngaged() override {
         return _mockSafetyRaw;
     }
@@ -153,7 +162,19 @@ public:
         return currentMillis;
     }
 
+    /**
+       * Uses a simple Linear Congruential Generator (LCG) for the reward code range (0-3)
+     * to ensure the generated code varies, preventing collision loops.
+     * Falls back to "Average" for other ranges (durations) to preserve existing test logic.
+     */
     uint32_t getRandom(uint32_t min, uint32_t max) override {
-        return (min + max) / 2; // Deterministic average
+        // Specific case for Reward Code Generation
+        if (min == 0 && max == 3) {
+            _rngSeed = _rngSeed * 1103515245 + 12345;
+            return (_rngSeed / 65536) % 4;
+        }
+        
+        // Default behavior for durations (Deterministic Average)
+        return (min + max) / 2; 
     }
 };
