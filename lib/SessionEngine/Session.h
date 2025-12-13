@@ -63,7 +63,8 @@ public:
     void loadStats(SessionStats s) { _stats = s; }
 
     void printStartupDiagnostics();
-
+    bool validateConfig(const DeterrentConfig& deterrents, const SessionPresets& presets) const;
+    
 private:
     // --- Dependencies ---
     ISessionHAL& _hal;
@@ -106,7 +107,7 @@ private:
 
     void processAutoCountdown();
     void processButtonTriggerWait();
-    
+   
     uint32_t resolveBaseDuration(const SessionConfig &config);
     
     void enterLockedState(const char* source);

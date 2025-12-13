@@ -61,6 +61,59 @@ void SessionEngine::logKeyValue(const char *key, const char *value) {
     _hal.log(tempBuf);
 }
 
+/**
+ * Unified Configuration Validator.
+ * 1. Checks that Presets are logically sound (Min <= Max, Non-zero).
+ * 2. Checks that Deterrents respect the Global Safety Limits defined in Presets.
+ */
+bool SessionEngine::validateConfig(const DeterrentConfig& deterrents, const SessionPresets& presets) const {
+    
+    // --- 1. Session Presets Validation ---
+    
+    // Global Limits must be sane
+    if (presets.minSessionDuration == 0) return false;
+    if (presets.minSessionDuration > presets.maxSessionDuration) return false;
+
+    // Generators: Min <= Max
+    if (presets.shortMin > presets.shortMax) return false;
+    if (presets.mediumMin > presets.mediumMax) return false;
+    if (presets.longMin > presets.longMax) return false;
+
+    // --- 2. Deterrent Validation ---
+    
+    uint32_t globalMax = presets.maxSessionDuration;
+
+    // Reward Code
+    if (deterrents.enableRewardCode) {
+        if (deterrents.rewardPenaltyStrategy == DETERRENT_FIXED) {
+            // Fixed: Duration must be non-zero AND <= Global Max
+            if (deterrents.rewardPenalty == 0) return false;
+            if (deterrents.rewardPenalty > globalMax) return false; 
+        } else {
+            // Random: Min must be non-zero AND Min < Max AND Max <= Global Max
+            if (deterrents.rewardPenaltyMin == 0) return false;
+            if (deterrents.rewardPenaltyMin >= deterrents.rewardPenaltyMax) return false;
+            if (deterrents.rewardPenaltyMax > globalMax) return false;
+        }
+    }
+
+    // Payback Time
+    if (deterrents.enablePaybackTime) {
+        if (deterrents.paybackTimeStrategy == DETERRENT_FIXED) {
+            // Fixed: Duration must be non-zero AND <= Global Max
+            if (deterrents.paybackTime == 0) return false;
+            if (deterrents.paybackTime > globalMax) return false;
+        } else {
+            // Random: Min must be non-zero AND Min < Max AND Max <= Global Max
+            if (deterrents.paybackTimeMin == 0) return false;
+            if (deterrents.paybackTimeMin >= deterrents.paybackTimeMax) return false;
+            if (deterrents.paybackTimeMax > globalMax) return false;
+        }
+    }
+
+    return true;
+}
+
 void SessionEngine::printStartupDiagnostics() {
     char logBuf[128];
     const char* boolStr[] = { "NO", "YES" };
@@ -96,6 +149,21 @@ void SessionEngine::printStartupDiagnostics() {
     snprintf(logBuf, sizeof(logBuf), " %-25s : %d / %d", "Keep-Alive Strikes", 
              _currentKeepAliveStrikes, _sysDefaults.keepAliveMaxStrikes);
     _hal.log(logBuf);
+
+    // -------------------------------------------------------------------------
+    // SECTION: CONFIGURATION STATUS
+    // -------------------------------------------------------------------------
+    _hal.log(""); 
+    _hal.log("[ CONFIGURATION STATUS ]");
+
+    // RUN VALIDATION
+    bool configValid = validateConfig(_deterrents, _presets);
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Self-Check", configValid ? "PASS" : "FAIL (INVALID CONFIG)");
+    _hal.log(logBuf);
+
+    if (!configValid) {
+        _hal.log(" WARNING: System will reject session starts until configuration is fixed.");
+    }
 
     // -------------------------------------------------------------------------
     // SECTION: CONFIGURATION LIMITS (PRESETS)
@@ -182,6 +250,7 @@ void SessionEngine::printStartupDiagnostics() {
         snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Accumulated Debt", timeStr);
         _hal.log(logBuf);
     }
+
 }
 
 // =================================================================================
@@ -509,11 +578,18 @@ int SessionEngine::startSession(const SessionConfig &config) {
     return 409;
   }
 
-  // 3. Determine Base Duration (Mechanism)
+  // 3. Validate Deterrent Configuration
+  // This ensures we don't start with invalid Random ranges (0 or Min > Max)
+  // or invalid Fixed penalties (0).
+  if (!validateConfig(_deterrents, _presets)) {
+      logKeyValue("Session", "Start Failed: Invalid System Configuration (Presets or Deterrents).");
+      return 400; // Bad Request
+  }
+
+  // 4. Determine Base Duration (Mechanism)
   uint32_t baseDuration = resolveBaseDuration(config);
 
-  // 4. Delegate Policy Check to Rules Engine (Debt, Limits)
-  // The Rules Engine determines the final duration (e.g., adding debt).
+  // 5. Delegate Policy Check to Rules Engine (Debt, Limits)
   uint32_t finalLockDuration = _rules.processStartRequest(baseDuration, _presets, _deterrents, _stats);
 
   if (finalLockDuration == 0) {
