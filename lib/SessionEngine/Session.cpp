@@ -852,9 +852,7 @@ void SessionEngine::rotateAndGenerateReward() {
     codeSnippet[8] = '\0';
 
     char logBuf[128];
-    snprintf(logBuf, sizeof(logBuf), "New Reward Code Generated");
-    logKeyValue("Session", logBuf);
-    snprintf(logBuf, sizeof(logBuf), " %-20s : %s...", "Code Snippet", codeSnippet);
+    snprintf(logBuf, sizeof(logBuf), "New Reward Code Generated: %s...", codeSnippet);
     logKeyValue("Session", logBuf);
 }
 
