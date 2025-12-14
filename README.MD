@@ -44,6 +44,10 @@ Distributed under the Apache License 2.0. See `LICENSE` for more information.
     * `OneButton`: For debouncing and handling the abort pedal.
     * `JLed`: For creating non-blocking LED patterns.
 
+## API Documentation
+
+For complete details on the HTTP API, including endpoints, data structures, state machine logic, and usage examples, please refer to the **[API Documentation](lobster_lock_api_docs.md)**.
+
 ## Building and Uploading
 
 This project is managed with PlatformIO. Ensure you have the [PlatformIO Core CLI](https://platformio.org/install/cli) or the [VSCode Extension](https://platformio.org/platformio-ide) installed.
