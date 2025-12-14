@@ -904,8 +904,7 @@ void SessionEngine::rotateAndGenerateReward() {
 
         // Generate Code
         for (int i = 0; i < REWARD_CODE_LENGTH; ++i) {
-            // getRandom(0, 3) implies inclusive range 0..3
-            _rewardHistory[0].code[i] = chars[_hal.getRandom(0, 3)];
+            _rewardHistory[0].code[i] = chars[_hal.getRandom(0, 4)];
         }
         _rewardHistory[0].code[REWARD_CODE_LENGTH] = '\0';
 
