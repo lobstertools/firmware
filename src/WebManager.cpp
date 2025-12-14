@@ -173,6 +173,7 @@ void WebManager::handleStatus(AsyncWebServerRequest *request) {
 
   // Snapshot Data
   DeviceState s = _engine->getState();
+  SessionOutcome o = _engine->getOutcome();
   SessionTimers t = _engine->getTimers();
   SessionStats stats = _engine->getStats();
   SessionConfig cfg = _engine->getActiveConfig();
@@ -194,6 +195,7 @@ void WebManager::handleStatus(AsyncWebServerRequest *request) {
 
   // 1. Root Status
   doc["state"] = stateToString(s);
+  doc["outcome"] = outcomeToString(o);
   doc["verified"] = verified;
 
   // 2. Config Echo (Matching SessionConfig Interface)

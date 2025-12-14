@@ -44,6 +44,7 @@ public:
 
     // --- State Accessors (Read-Only) ---
     DeviceState getState() const { return _state; }
+    SessionOutcome getOutcome() const;
     const SessionTimers& getTimers() const { return _timers; }
     const SessionStats& getStats() const { return _stats; }
     const SessionConfig& getActiveConfig() const { return _activeConfig; }
@@ -89,6 +90,8 @@ private:
     SessionConfig _activeConfig;
     Reward _rewardHistory[REWARD_HISTORY_SIZE];
     
+    bool _isAbortedSession;
+
     // --- Watchdog State ---
     unsigned long _lastKeepAliveTime;
     int _currentKeepAliveStrikes;

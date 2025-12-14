@@ -13,6 +13,7 @@ enum DeviceState : uint8_t { READY, ARMED, LOCKED, ABORTED, COMPLETED, TESTING }
 enum TriggerStrategy : uint8_t { STRAT_AUTO_COUNTDOWN, STRAT_BUTTON_TRIGGER };
 enum DurationType : uint8_t { DUR_FIXED, DUR_RANDOM, DUR_RANGE_SHORT, DUR_RANGE_MEDIUM, DUR_RANGE_LONG };
 enum DeterrentStrategy : uint8_t { DETERRENT_FIXED, DETERRENT_RANDOM };
+enum SessionOutcome : uint8_t { OUTCOME_SUCCESS, OUTCOME_ABORTED, OUTCOME_UNKNOWN };
 
 // --- Constants ---
 
@@ -105,3 +106,4 @@ struct Reward {
 
 extern const char *stateToString(DeviceState s);
 extern const char *durTypeToString(DurationType d);
+extern const char *outcomeToString(SessionOutcome o);

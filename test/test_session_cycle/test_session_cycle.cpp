@@ -1,7 +1,7 @@
 /*
  * File: test/test_session_cycle/test_session_cycle.cpp
  * Description: Full integration test for a standard Session lifecycle.
- * Covers Auto-Countdown, Button-Trigger, and Duration Resolution logic.
+ * Covers Auto-Countdown, Button-Trigger, Duration Resolution, and Outcome logic.
  */
 #include <unity.h>
 #include "Session.h"
@@ -71,7 +71,10 @@ void test_full_cycle_auto_countdown(void) {
     TEST_ASSERT_EQUAL_UINT32(60, engine.getTimers().lockRemaining);
 
     for(int i=0; i<60; i++) engine.tick();
+    
+    // Verify Outcome Logic
     TEST_ASSERT_EQUAL(COMPLETED, engine.getState());
+    TEST_ASSERT_EQUAL(OUTCOME_SUCCESS, engine.getOutcome()); //
 }
 
 void test_full_cycle_button_trigger(void) {
@@ -114,7 +117,7 @@ void test_armed_state_timeout(void) {
 }
 
 // ============================================================================
-// DURATION RESOLUTION TESTS (Coverage Gaps Fix)
+// DURATION RESOLUTION TESTS
 // ============================================================================
 
 void test_resolve_duration_short_range(void) {
@@ -124,10 +127,9 @@ void test_resolve_duration_short_range(void) {
     engageSafetyInterlock(hal, engine);
 
     SessionConfig cfg = {};
-    cfg.durationType = DUR_RANGE_SHORT; // Target: 300 to 600
+    cfg.durationType = DUR_RANGE_SHORT; 
     cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
 
-    // (300+600)/2 = 450
     engine.startSession(cfg);
     TEST_ASSERT_EQUAL_UINT32(450, engine.getTimers().lockDuration);
 }
@@ -139,10 +141,9 @@ void test_resolve_duration_medium_range(void) {
     engageSafetyInterlock(hal, engine);
 
     SessionConfig cfg = {};
-    cfg.durationType = DUR_RANGE_MEDIUM; // Target: 900 to 1800
+    cfg.durationType = DUR_RANGE_MEDIUM; 
     cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
 
-    // (900+1800)/2 = 1350
     engine.startSession(cfg);
     TEST_ASSERT_EQUAL_UINT32(1350, engine.getTimers().lockDuration);
 }
@@ -154,10 +155,9 @@ void test_resolve_duration_long_range(void) {
     engageSafetyInterlock(hal, engine);
 
     SessionConfig cfg = {};
-    cfg.durationType = DUR_RANGE_LONG; // Target: 3600 to 7200
+    cfg.durationType = DUR_RANGE_LONG; 
     cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
 
-    // (3600+7200)/2 = 5400
     engine.startSession(cfg);
     TEST_ASSERT_EQUAL_UINT32(5400, engine.getTimers().lockDuration);
 }
@@ -174,7 +174,6 @@ void test_resolve_duration_random_custom(void) {
     cfg.durationMax = 200;
     cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
 
-    // (100+200)/2 = 150
     engine.startSession(cfg);
     TEST_ASSERT_EQUAL_UINT32(150, engine.getTimers().lockDuration);
 }
@@ -243,7 +242,7 @@ void test_start_test_mode_fails_unsafe(void) {
 }
 
 // ============================================================================
-// EXTRA COVERAGE (API, Penalty, Rules, LED)
+// EXTRA COVERAGE (API, Penalty, Rules, LED, OUTCOME)
 // ============================================================================
 
 void test_api_trigger_starts_locked_state(void) {
@@ -294,8 +293,15 @@ void test_penalty_box_auto_completion(void) {
     engine.tick(); 
     engine.abort("Test"); // ABORTED
 
+    // Verify Immediate Outcome in Penalty State
+    TEST_ASSERT_EQUAL(ABORTED, engine.getState());
+    TEST_ASSERT_EQUAL(OUTCOME_ABORTED, engine.getOutcome()); //
+
     for(int i=0; i<10; i++) engine.tick(); 
+    
+    // Verify Outcome AFTER Penalty is Served
     TEST_ASSERT_EQUAL(COMPLETED, engine.getState());
+    TEST_ASSERT_EQUAL(OUTCOME_ABORTED, engine.getOutcome()); //
 }
 
 void test_start_rejected_by_rules_logic(void) {
@@ -318,23 +324,20 @@ void test_start_auto_countdown_zeros_disabled_channels(void) {
     SessionEngine engine(hal, rules, defaults, presets, deterrents);
     engageSafetyInterlock(hal, engine);
 
-    // Setup: Disable Channel 2 (Index 1)
-    // Mask: Ch1=1, Ch2=0, Ch3=1, Ch4=1 -> 1101 -> 0x0D
     hal.setChannelMask(0x0D); 
 
     SessionConfig cfg = {};
     cfg.durationType = DUR_FIXED;
     cfg.durationFixed = 60;
     cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
-    cfg.channelDelays[0] = 10; // Enabled
-    cfg.channelDelays[1] = 20; // Disabled -> Should become 0
-    cfg.channelDelays[2] = 30; // Enabled
+    cfg.channelDelays[0] = 10; 
+    cfg.channelDelays[1] = 20; 
+    cfg.channelDelays[2] = 30; 
 
     engine.startSession(cfg);
 
-    // Assert
     TEST_ASSERT_EQUAL_UINT32(10, engine.getTimers().channelDelays[0]);
-    TEST_ASSERT_EQUAL_UINT32(0,  engine.getTimers().channelDelays[1]); // Zeroed!
+    TEST_ASSERT_EQUAL_UINT32(0,  engine.getTimers().channelDelays[1]); 
     TEST_ASSERT_EQUAL_UINT32(30, engine.getTimers().channelDelays[2]);
 }
 
@@ -344,35 +347,48 @@ void test_led_logic_with_disable_feature(void) {
     SessionEngine engine(hal, rules, defaults, presets, deterrents);
     engageSafetyInterlock(hal, engine);
 
-    // 1. Configure with LED Disabled
     SessionConfig cfg = {};
     cfg.durationType = DUR_FIXED;
     cfg.durationFixed = 60;
     cfg.triggerStrategy = STRAT_BUTTON_TRIGGER;
     cfg.disableLED = true; 
 
-    // Start -> ARMED
     engine.startSession(cfg);
     engine.tick(); 
     
-    // Verify: LED should be ON in ARMED state (Safety/Status visibility)
     TEST_ASSERT_EQUAL(ARMED, engine.getState());
     TEST_ASSERT_TRUE(hal.ledEnabled);
 
-    // Trigger -> LOCKED
     hal.simulateDoublePress();
     engine.tick();
 
-    // Verify: LED should be OFF in LOCKED state (Feature Active)
     TEST_ASSERT_EQUAL(LOCKED, engine.getState());
     TEST_ASSERT_FALSE(hal.ledEnabled);
 
-    // Finish Session -> COMPLETED
     for(int i=0; i<60; i++) engine.tick();
     
-    // Verify: LED should be ON in COMPLETED state
     TEST_ASSERT_EQUAL(COMPLETED, engine.getState());
     TEST_ASSERT_TRUE(hal.ledEnabled);
+}
+
+// Explicit test for Abort Immediate Outcome
+void test_outcome_immediate_abort(void) {
+    MockSessionHAL hal;
+    StandardRules rules;
+    SessionEngine engine(hal, rules, defaults, presets, deterrents);
+    engageSafetyInterlock(hal, engine);
+
+    SessionConfig cfg = {};
+    cfg.durationType = DUR_FIXED;
+    cfg.durationFixed = 60;
+    cfg.triggerStrategy = STRAT_BUTTON_TRIGGER;
+
+    engine.startSession(cfg);
+    engine.trigger("API");
+    engine.abort("Immediate");
+
+    TEST_ASSERT_EQUAL(ABORTED, engine.getState());
+    TEST_ASSERT_EQUAL(OUTCOME_ABORTED, engine.getOutcome()); //
 }
 
 // ============================================================================
@@ -386,7 +402,7 @@ int main(void) {
     RUN_TEST(test_full_cycle_button_trigger);
     RUN_TEST(test_armed_state_timeout);
     
-    // Duration Resolution (ALL Cases)
+    // Duration
     RUN_TEST(test_resolve_duration_short_range);
     RUN_TEST(test_resolve_duration_medium_range);
     RUN_TEST(test_resolve_duration_long_range);
@@ -399,13 +415,14 @@ int main(void) {
     RUN_TEST(test_test_mode_ignores_triggers);
     RUN_TEST(test_start_test_mode_fails_unsafe);
 
-    // Extras
+    // Extras & Outcome
     RUN_TEST(test_api_trigger_starts_locked_state);
     RUN_TEST(test_completion_and_reset_generates_reward);
-    RUN_TEST(test_penalty_box_auto_completion);
+    RUN_TEST(test_penalty_box_auto_completion); 
     RUN_TEST(test_start_rejected_by_rules_logic);
     RUN_TEST(test_start_auto_countdown_zeros_disabled_channels);
     RUN_TEST(test_led_logic_with_disable_feature);
+    RUN_TEST(test_outcome_immediate_abort);
 
     return UNITY_END();
 }

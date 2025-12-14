@@ -40,3 +40,11 @@ const char *durTypeToString(DurationType d) {
     return "DUR_FIXED";
   }
 }
+
+const char *outcomeToString(SessionOutcome o) {
+  switch (o) {
+    case OUTCOME_SUCCESS: return "SUCCESS";
+    case OUTCOME_ABORTED: return "ABORTED";
+    default: return "UNKNOWN";
+  }
+}

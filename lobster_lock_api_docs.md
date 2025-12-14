@@ -394,6 +394,7 @@ Returns complete session status including configuration, timers, stats, and tele
 ```json
 {
   "state": "LOCKED",
+  "outcome": "SUCCESS",
   "verified": true,
   "config": {
     "durationType": "DUR_FIXED",

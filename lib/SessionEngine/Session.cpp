@@ -34,6 +34,8 @@ SessionEngine::SessionEngine(ISessionHAL& hal,
       _deterrents(deterrents) 
 {
     _state = READY;
+    _isAbortedSession = false;
+
     memset(&_timers, 0, sizeof(_timers));
     memset(&_stats, 0, sizeof(_stats));
     memset(&_activeConfig, 0, sizeof(_activeConfig));
@@ -429,6 +431,19 @@ void SessionEngine::checkNetworkHealth() {
 // SECTION: TICK LOGIC HELPERS
 // =================================================================================
 
+SessionOutcome SessionEngine::getOutcome() const {
+    if (_state == ABORTED) {
+        return OUTCOME_ABORTED;
+    } 
+    else if (_state == COMPLETED) {
+        // If it is completed, we check our internal flag to see if we got here
+        // via a successful run or a penalty run.
+        return _isAbortedSession ? OUTCOME_ABORTED : OUTCOME_SUCCESS;
+    }
+    
+    return OUTCOME_UNKNOWN;
+}
+
 /**
  * Handles the "Auto Countdown" strategy.
  * Decrements delays and triggers lock when complete.
@@ -739,6 +754,7 @@ int SessionEngine::startSession(const SessionConfig &config) {
 
   // 7. Transition
   // This handles Logging, Safety Profile, and Saving
+  _isAbortedSession = false;
   changeState(ARMED); 
 
   return 200;
@@ -793,6 +809,8 @@ void SessionEngine::abort(const char *source) {
   char logBuf[100];
   snprintf(logBuf, sizeof(logBuf), "Abort Source: %s", source);
   logKeyValue("Session", logBuf);
+
+  _isAbortedSession = true;
 
   if (_state == LOCKED) {
     // DELEGATE: Rules determine consequences
@@ -850,6 +868,8 @@ int SessionEngine::startTest() {
       logKeyValue("Session", "Test Failed: Safety Interlock not valid.");
       return 412;
   }
+
+  _isAbortedSession = false;
 
   if (_state != READY) return 409;
   _timers.testRemaining = _sysDefaults.testModeDuration;
@@ -952,6 +972,7 @@ void SessionEngine::resetToReady(bool generateNewCode) {
   _timers.testRemaining = 0;
   _timers.triggerTimeout = 0;
   _activeConfig.hideTimer = false;
+  _isAbortedSession = false;
 
   for (int i = 0; i < MAX_CHANNELS; i++) {
     _activeConfig.channelDelays[i] = 0;
