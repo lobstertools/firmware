@@ -177,6 +177,59 @@ void test_deterrent_random_max_exceeds_preset_max_fails(void) {
     delete engine;
 }
 
+// --- PAYBACK VALIDATION TESTS ---
+
+void test_payback_random_min_zero_fails(void) {
+    MockSessionHAL hal; StandardRules rules;
+    DeterrentConfig d = validDeterrents;
+    d.enablePaybackTime = true;
+    d.paybackTimeStrategy = DETERRENT_RANDOM;
+    
+    // Invalid: Min is 0
+    d.paybackTimeMin = 0;
+    d.paybackTimeMax = 600;
+
+    SessionEngine* engine = createEngine(hal, rules, validPresets, d);
+    SessionConfig req = { DUR_FIXED, 600 }; 
+
+    TEST_ASSERT_EQUAL(400, engine->startSession(req));
+    delete engine;
+}
+
+void test_payback_random_inverted_range_fails(void) {
+    MockSessionHAL hal; StandardRules rules;
+    DeterrentConfig d = validDeterrents;
+    d.enablePaybackTime = true;
+    d.paybackTimeStrategy = DETERRENT_RANDOM;
+    
+    // Invalid: Min >= Max
+    d.paybackTimeMin = 600;
+    d.paybackTimeMax = 300;
+
+    SessionEngine* engine = createEngine(hal, rules, validPresets, d);
+    SessionConfig req = { DUR_FIXED, 600 }; 
+
+    TEST_ASSERT_EQUAL(400, engine->startSession(req));
+    delete engine;
+}
+
+void test_payback_random_max_exceeds_preset_max_fails(void) {
+    MockSessionHAL hal; StandardRules rules;
+    DeterrentConfig d = validDeterrents;
+    d.enablePaybackTime = true;
+    d.paybackTimeStrategy = DETERRENT_RANDOM;
+    
+    // Invalid: Max (15000) > Global Max (14400)
+    d.paybackTimeMin = 300;
+    d.paybackTimeMax = 15000;
+
+    SessionEngine* engine = createEngine(hal, rules, validPresets, d);
+    SessionConfig req = { DUR_FIXED, 600 }; 
+
+    TEST_ASSERT_EQUAL(400, engine->startSession(req));
+    delete engine;
+}
+
 // ============================================================================
 // TEST GROUP: SESSION REQUEST VALIDATION (New)
 // ============================================================================
@@ -246,7 +299,6 @@ void test_request_valid_combo_succeeds(void) {
     delete engine;
 }
 
-
 int main(void) {
     UNITY_BEGIN();
     
@@ -262,6 +314,11 @@ int main(void) {
     RUN_TEST(test_reward_random_inverted_range_fails);
     RUN_TEST(test_deterrent_fixed_exceeds_preset_max_fails);
     RUN_TEST(test_deterrent_random_max_exceeds_preset_max_fails);
+
+    // Payback Time (Random Strategy) Validation
+    RUN_TEST(test_payback_random_min_zero_fails);
+    RUN_TEST(test_payback_random_inverted_range_fails);
+    RUN_TEST(test_payback_random_max_exceeds_preset_max_fails);
 
     // Session Request Sanity
     RUN_TEST(test_request_fixed_zero_fails);
