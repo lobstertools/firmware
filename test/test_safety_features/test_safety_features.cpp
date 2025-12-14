@@ -14,22 +14,20 @@ const SessionPresets presets = {
     300, 600,    // Short Range
     900, 1800,   // Medium Range
     3600, 7200,  // Long Range
-    14400,       // maxSessionDuration
+    14400,       // maxSessionDuration (4 Hours)
     10           // minSessionDuration
 };
 
+// Define a permissive preset set for Failsafe testing (Max 2 weeks)
+const SessionPresets permissivePresets = { 
+    300, 600, 900, 1800, 3600, 7200, 
+    1209600,     // Max (14 Days) - Allows testing large failsafe tiers
+    10 
+};
+
 const DeterrentConfig deterrents = { 
-    true,            // enableStreaks
-    
-    true,            // enableRewardCode
-    DETERRENT_FIXED, // rewardPenaltyStrategy
-    300, 900,        // rewardPenaltyMin, rewardPenaltyMax
-    300,             // rewardPenalty
-    
-    true,            // enablePaybackTime
-    DETERRENT_FIXED, // paybackTimeStrategy
-    60, 120,         // paybackTimeMin, paybackTimeMax
-    60               // paybackTime
+    true, true, DETERRENT_FIXED, 300, 900, 300, 
+    true, DETERRENT_FIXED, 60, 120, 60 
 };
 
 // --- Helper ---
@@ -48,45 +46,33 @@ void tearDown(void) {}
 // ============================================================================
 
 void test_interlock_disconnect_during_lock(void) {
-    MockSessionHAL hal;
-    StandardRules rules;
+    MockSessionHAL hal; StandardRules rules;
     SessionEngine engine(hal, rules, defaults, presets, deterrents);
     engageSafetyInterlock(hal, engine);
 
-    // Start and Lock
     SessionConfig cfg = {};
     cfg.durationType = DUR_FIXED;
     cfg.durationFixed = 100;
     cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
     engine.startSession(cfg);
-    engine.tick(); // Lock it
+    engine.tick(); 
 
     TEST_ASSERT_EQUAL(LOCKED, engine.getState());
 
-    // ACT: Disconnect Safety
     hal.setSafetyInterlock(false);
-    engine.tick(); // Engine detects state change
+    engine.tick(); 
 
-    // ASSERT: Immediate Abort
     TEST_ASSERT_EQUAL(ABORTED, engine.getState());
     TEST_ASSERT_FALSE(engine.isHardwarePermitted());
-    TEST_ASSERT_EQUAL_HEX8(0x00, hal.lastSafetyMask); // All Pins OFF
+    TEST_ASSERT_EQUAL_HEX8(0x00, hal.lastSafetyMask); 
 }
 
 void test_start_fails_without_interlock(void) {
-    MockSessionHAL hal;
-    StandardRules rules;
+    MockSessionHAL hal; StandardRules rules;
     SessionEngine engine(hal, rules, defaults, presets, deterrents);
-
-    // Do NOT engage safety.
-    
-    SessionConfig cfg = {};
-    cfg.durationType = DUR_FIXED;
-    cfg.durationFixed = 60;
-
+    SessionConfig cfg = { DUR_FIXED, 60 };
     int result = engine.startSession(cfg);
-
-    TEST_ASSERT_EQUAL(412, result); // Precondition Failed
+    TEST_ASSERT_EQUAL(412, result); 
     TEST_ASSERT_EQUAL(READY, engine.getState());
 }
 
@@ -94,158 +80,88 @@ void test_start_fails_without_interlock(void) {
 // NEW TESTS: INPUT & WATCHDOGS
 // ============================================================================
 
-/**
- * Scenario: Hardware Long Press (Abort) is triggered during Lock.
- * Verifies logic: if (_hal.checkAbortAction()) { abort("Manual Long-Press"); }
- */
 void test_hardware_abort_trigger(void) {
-    MockSessionHAL hal;
-    StandardRules rules;
+    MockSessionHAL hal; StandardRules rules;
     SessionEngine engine(hal, rules, defaults, presets, deterrents);
     engageSafetyInterlock(hal, engine);
 
-    // 1. Start and Lock
-    SessionConfig cfg = {};
-    cfg.durationType = DUR_FIXED;
-    cfg.durationFixed = 600;
-    cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
+    SessionConfig cfg = { DUR_FIXED, 600, 0, 0, STRAT_AUTO_COUNTDOWN };
     engine.startSession(cfg);
     engine.tick(); 
     TEST_ASSERT_EQUAL(LOCKED, engine.getState());
 
-    // 2. Act: Simulate Long Press (Hardware Abort)
-    // This mocks the button ISR setting the internal flag
     hal.simulateLongPress(); 
-    engine.tick(); // Engine processes checkAbortAction()
-
-    // 3. Assert
+    engine.tick(); 
     TEST_ASSERT_EQUAL(ABORTED, engine.getState());
 }
 
-/**
- * Scenario: User interacts with the device (petWatchdog) before timeout.
- * Verifies logic: void SessionEngine::petWatchdog() resets strikes.
- */
 void test_watchdog_petting_prevents_timeout(void) {
-    MockSessionHAL hal;
-    StandardRules rules;
+    MockSessionHAL hal; StandardRules rules;
     SessionEngine engine(hal, rules, defaults, presets, deterrents);
     engageSafetyInterlock(hal, engine);
 
-    // 1. Start and Lock
-    SessionConfig cfg = {};
-    cfg.durationType = DUR_FIXED;
-    cfg.durationFixed = 600; 
-    cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
+    SessionConfig cfg = { DUR_FIXED, 600, 0, 0, STRAT_AUTO_COUNTDOWN };
     engine.startSession(cfg);
     engine.tick(); 
 
-    // 2. Run for a duration that WOULD cause a timeout if ignored.
-    // Config: 4 strikes * 10000ms = 40s timeout.
-    // We run for 60s total, but we pet the dog every 9s.
-    
     for(int i=0; i<6; i++) { 
-        hal.advanceTime(9000); // 9 seconds passed
-        engine.tick();         // Process time
-        
-        // ACT: Pet the watchdog
+        hal.advanceTime(9000); 
+        engine.tick();         
         engine.petWatchdog();
-        
-        TEST_ASSERT_EQUAL(LOCKED, engine.getState()); // Should stay locked
+        TEST_ASSERT_EQUAL(LOCKED, engine.getState()); 
     }
 }
 
-/**
- * Scenario: User interacts with the device (petWatchdog) AFTER a strike has occurred.
- */
 void test_watchdog_petting_prevents_timeout_and_resets_strikes(void) {
-    MockSessionHAL hal;
-    StandardRules rules;
+    MockSessionHAL hal; StandardRules rules;
     SessionEngine engine(hal, rules, defaults, presets, deterrents);
     engageSafetyInterlock(hal, engine);
 
-    // 1. Start and Lock
-    SessionConfig cfg = {};
-    cfg.durationType = DUR_FIXED;
-    cfg.durationFixed = 600; 
-    cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
+    SessionConfig cfg = { DUR_FIXED, 600, 0, 0, STRAT_AUTO_COUNTDOWN };
     engine.startSession(cfg);
     engine.tick(); 
 
-    // 2. Intentionally allow ONE strike to accumulate.
-    // Interval is 10s. We advance 11s.
     hal.advanceTime(11000); 
-    engine.tick(); // _currentKeepAliveStrikes becomes 1.
-
-    // Verify we haven't aborted yet (Max strikes = 4)
+    engine.tick(); 
     TEST_ASSERT_EQUAL(LOCKED, engine.getState());
 
-    // 3. ACT: Pet the watchdog
     engine.petWatchdog();
     
-    // 4. Verify strikes were actually reset.
-    // If they were NOT reset, accumulating 3 more strikes (total 4) would trigger ABORT.
-    // If they WERE reset, accumulating 3 strikes (total 3) leaves us LOCKED.
-    
     for(int i=0; i<3; i++) {
-        hal.advanceTime(10100); // 10.1s -> 1 strike per loop
+        hal.advanceTime(10100); 
         engine.tick();
     }
-    
     TEST_ASSERT_EQUAL(LOCKED, engine.getState());
 }
 
 void test_ui_watchdog_timeout_aborts_session(void) {
-    MockSessionHAL hal;
-    StandardRules rules;
+    MockSessionHAL hal; StandardRules rules;
     SessionEngine engine(hal, rules, defaults, presets, deterrents);
     engageSafetyInterlock(hal, engine);
 
-    // 1. Start and Lock
-    SessionConfig cfg = {};
-    cfg.durationType = DUR_FIXED;
-    cfg.durationFixed = 600; 
-    cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
+    SessionConfig cfg = { DUR_FIXED, 600, 0, 0, STRAT_AUTO_COUNTDOWN };
     engine.startSession(cfg);
-    engine.tick(); // Locked
+    engine.tick(); 
 
-    // 2. Advance time to simulate UI silence
-    // Defaults: Interval 10000ms (10s), Max Strikes 4.
     uint32_t interval = defaults.keepAliveInterval; 
     uint32_t strikes = defaults.keepAliveMaxStrikes;
     
-    // Simulate passing of time without UI interaction (strike accumulation)
     for(uint32_t i=0; i <= strikes; i++) {
         hal.advanceTime(interval + 100); 
         engine.tick();
     }
-
-    // 3. Assert Abort
     TEST_ASSERT_EQUAL(ABORTED, engine.getState());
 }
 
-/**
- * Scenario: Validates that a hardware Long Press triggers an abort 
- * even if the Safety Interlock has not yet granted permission (e.g., during stabilization).
- */
 void test_hardware_abort_works_without_validated_hardware(void) {
-    MockSessionHAL hal;
-    StandardRules rules;
+    MockSessionHAL hal; StandardRules rules;
     SessionEngine engine(hal, rules, defaults, presets, deterrents);
-
     engine.loadState(LOCKED);
     
-    // SETUP: Simulate the "Grace Period" state
-    // Physical Switch is OPEN (False) -> User is pressing button
-    // Logical Safety is TRUE (True) -> Grace period active in HAL
     hal.setSafetyRawButKeepValid(false, true); 
-
-    // ACT: Simulate Long Press
     hal.simulateLongPress(); 
     engine.tick();
 
-    // ASSERT
-    // Should abort via Manual Long Press, NOT Safety Disconnect
     bool foundManualAbort = false;
     for (const auto& logLine : hal.logs) {
         if (logLine.find("Abort Source: Manual Long-Press") != std::string::npos) {
@@ -262,77 +178,141 @@ void test_hardware_abort_works_without_validated_hardware(void) {
 // ============================================================================
 
 void test_reboot_from_locked_enforces_penalty(void) {
-    MockSessionHAL hal;
-    StandardRules rules;
+    MockSessionHAL hal; StandardRules rules;
     SessionEngine engine(hal, rules, defaults, presets, deterrents);
-
     engine.loadState(LOCKED); 
     engine.handleReboot();
-
     TEST_ASSERT_EQUAL(ABORTED, engine.getState());
     TEST_ASSERT_EQUAL_UINT32(300, engine.getTimers().penaltyRemaining); 
 }
 
 void test_reboot_from_armed_resets_to_ready(void) {
-    MockSessionHAL hal;
-    StandardRules rules;
+    MockSessionHAL hal; StandardRules rules;
     SessionEngine engine(hal, rules, defaults, presets, deterrents);
-
     engine.loadState(ARMED);
     engine.handleReboot();
-
     TEST_ASSERT_EQUAL(READY, engine.getState());
     TEST_ASSERT_EQUAL_UINT32(0, engine.getTimers().lockDuration);
 }
 
 void test_reboot_from_testing_resets_to_ready(void) {
-    MockSessionHAL hal;
-    StandardRules rules;
+    MockSessionHAL hal; StandardRules rules;
     SessionEngine engine(hal, rules, defaults, presets, deterrents);
-
     engine.loadState(TESTING);
     engine.handleReboot();
-
     TEST_ASSERT_EQUAL(READY, engine.getState());
 }
 
 void test_reboot_from_completed_resets_to_ready(void) {
-    MockSessionHAL hal;
-    StandardRules rules;
+    MockSessionHAL hal; StandardRules rules;
     SessionEngine engine(hal, rules, defaults, presets, deterrents);
-
     engine.loadState(COMPLETED);
     engine.handleReboot();
-
     TEST_ASSERT_EQUAL(READY, engine.getState());
 }
 
 void test_reboot_from_aborted_resumes_penalty(void) {
-    MockSessionHAL hal;
-    StandardRules rules;
+    MockSessionHAL hal; StandardRules rules;
     SessionEngine engine(hal, rules, defaults, presets, deterrents);
-
     engine.loadState(ABORTED);
     SessionTimers t = {0};
     t.penaltyDuration = 300;
     t.penaltyRemaining = 150; 
     engine.loadTimers(t);
-
     engine.handleReboot();
-
     TEST_ASSERT_EQUAL(ABORTED, engine.getState());
     TEST_ASSERT_EQUAL_UINT32(150, engine.getTimers().penaltyRemaining);
 }
 
 void test_reboot_from_ready_stays_ready(void) {
-    MockSessionHAL hal;
-    StandardRules rules;
+    MockSessionHAL hal; StandardRules rules;
     SessionEngine engine(hal, rules, defaults, presets, deterrents);
-
     engine.loadState(READY);
     engine.handleReboot();
-
     TEST_ASSERT_EQUAL(READY, engine.getState());
+}
+
+// ============================================================================
+// NEW FAILSAFE TIER TESTS (UPDATED WITH PERMISSIVE PRESETS)
+// ============================================================================
+
+void test_failsafe_tier_minimum_floor(void) {
+    MockSessionHAL hal; StandardRules rules;
+    // Uses permissivePresets to avoid clamping if we test edge cases, 
+    // though for 60s the default 'presets' would also work.
+    SessionEngine engine(hal, rules, defaults, permissivePresets, deterrents);
+    engageSafetyInterlock(hal, engine);
+
+    // 1. Start a very short session (60s)
+    // Should bump up to the minimum tier (4 hours = 14400s)
+    SessionConfig cfg = { DUR_FIXED, 60, 0, 0, STRAT_AUTO_COUNTDOWN };
+    
+    engine.startSession(cfg); 
+    engine.tick(); 
+
+    // Verify
+    TEST_ASSERT_TRUE(hal.failsafeArmed);
+    TEST_ASSERT_EQUAL_UINT32(14400, hal.lastFailsafeArmedSeconds);
+}
+
+void test_failsafe_tier_rounding_up(void) {
+    MockSessionHAL hal; StandardRules rules;
+    // MUST use permissivePresets, otherwise 18000s is clamped to 14400s by Rules
+    SessionEngine engine(hal, rules, defaults, permissivePresets, deterrents);
+    engageSafetyInterlock(hal, engine);
+
+    // 1. Start a session of 5 hours (18000s)
+    // Should round up to next tier (8 hours = 28800s)
+    SessionConfig cfg = { DUR_FIXED, 18000, 0, 0, STRAT_AUTO_COUNTDOWN };
+    
+    engine.startSession(cfg);
+    engine.tick(); 
+
+    // Verify
+    TEST_ASSERT_TRUE(hal.failsafeArmed);
+    TEST_ASSERT_EQUAL_UINT32(28800, hal.lastFailsafeArmedSeconds);
+}
+
+void test_failsafe_tier_exact_match(void) {
+    MockSessionHAL hal; StandardRules rules;
+    // MUST use permissivePresets
+    SessionEngine engine(hal, rules, defaults, permissivePresets, deterrents);
+    engageSafetyInterlock(hal, engine);
+
+    // 1. Start a session exactly 12 hours (43200s)
+    // Should stay at 12 hours
+    SessionConfig cfg = { DUR_FIXED, 43200, 0, 0, STRAT_AUTO_COUNTDOWN };
+    
+    engine.startSession(cfg);
+    engine.tick(); 
+
+    // Verify
+    TEST_ASSERT_TRUE(hal.failsafeArmed);
+    TEST_ASSERT_EQUAL_UINT32(43200, hal.lastFailsafeArmedSeconds);
+}
+
+void test_failsafe_disarms_on_completion(void) {
+    MockSessionHAL hal; StandardRules rules;
+    SessionEngine engine(hal, rules, defaults, permissivePresets, deterrents);
+    engageSafetyInterlock(hal, engine);
+
+    // Start
+    SessionConfig cfg = { DUR_FIXED, 60 };
+    engine.startSession(cfg);
+    engine.tick();
+    
+    // Assert Armed
+    TEST_ASSERT_TRUE(hal.failsafeArmed);
+
+    // Force completion
+    SessionTimers t = engine.getTimers();
+    t.lockRemaining = 1; 
+    engine.loadTimers(t);
+    engine.tick(); // Process decrement -> 0 -> Complete
+
+    // Assert Disarmed
+    TEST_ASSERT_EQUAL(COMPLETED, engine.getState());
+    TEST_ASSERT_FALSE(hal.failsafeArmed);
 }
 
 // ============================================================================
@@ -340,16 +320,11 @@ void test_reboot_from_ready_stays_ready(void) {
 // ============================================================================
 
 void test_channel_delay_masking(void) {
-    MockSessionHAL hal;
-    StandardRules rules;
+    MockSessionHAL hal; StandardRules rules;
     SessionEngine engine(hal, rules, defaults, presets, deterrents);
     engageSafetyInterlock(hal, engine);
 
-    SessionConfig cfg = {};
-    cfg.durationType = DUR_FIXED;
-    cfg.durationFixed = 60;
-    cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
-    
+    SessionConfig cfg = { DUR_FIXED, 60, 0, 0, STRAT_AUTO_COUNTDOWN };
     cfg.channelDelays[0] = 0; 
     cfg.channelDelays[1] = 5; 
     cfg.channelDelays[2] = 10;
@@ -367,15 +342,11 @@ void test_channel_delay_masking(void) {
 }
 
 void test_start_rejected_if_already_locked(void) {
-    MockSessionHAL hal;
-    StandardRules rules;
+    MockSessionHAL hal; StandardRules rules;
     SessionEngine engine(hal, rules, defaults, presets, deterrents);
     engageSafetyInterlock(hal, engine);
 
-    SessionConfig cfg = {};
-    cfg.durationType = DUR_FIXED;
-    cfg.durationFixed = 60;
-    cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
+    SessionConfig cfg = { DUR_FIXED, 60, 0, 0, STRAT_AUTO_COUNTDOWN };
     engine.startSession(cfg);
     engine.tick(); 
     TEST_ASSERT_EQUAL(LOCKED, engine.getState());
@@ -386,8 +357,7 @@ void test_start_rejected_if_already_locked(void) {
 }
 
 void test_network_failure_while_ready(void) {
-    MockSessionHAL hal;
-    StandardRules rules;
+    MockSessionHAL hal; StandardRules rules;
     SessionEngine engine(hal, rules, defaults, presets, deterrents);
     engageSafetyInterlock(hal, engine);
     
@@ -397,15 +367,11 @@ void test_network_failure_while_ready(void) {
 }
 
 void test_network_failure_while_locked_aborts_session(void) {
-    MockSessionHAL hal;
-    StandardRules rules;
+    MockSessionHAL hal; StandardRules rules;
     SessionEngine engine(hal, rules, defaults, presets, deterrents);
     engageSafetyInterlock(hal, engine);
 
-    SessionConfig cfg = {};
-    cfg.durationType = DUR_FIXED;
-    cfg.durationFixed = 600;
-    cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
+    SessionConfig cfg = { DUR_FIXED, 600, 0, 0, STRAT_AUTO_COUNTDOWN };
     engine.startSession(cfg);
     engine.tick(); 
     TEST_ASSERT_EQUAL(LOCKED, engine.getState());
@@ -418,8 +384,7 @@ void test_network_failure_while_locked_aborts_session(void) {
 }
 
 void test_network_provisioning_blocked_until_penalty_complete(void) {
-    MockSessionHAL hal;
-    StandardRules rules;
+    MockSessionHAL hal; StandardRules rules;
     SessionEngine engine(hal, rules, defaults, presets, deterrents);
     
     engine.loadState(ABORTED);
@@ -438,19 +403,13 @@ void test_network_provisioning_blocked_until_penalty_complete(void) {
 }
 
 void test_start_session_fails_if_network_unstable(void) {
-    MockSessionHAL hal;
-    StandardRules rules;
+    MockSessionHAL hal; StandardRules rules;
     SessionEngine engine(hal, rules, defaults, presets, deterrents);
     engageSafetyInterlock(hal, engine);
     
     hal.setNetworkProvisioningRequest(true);
-    
-    SessionConfig cfg = {};
-    cfg.durationType = DUR_FIXED;
-    cfg.durationFixed = 60;
-    
+    SessionConfig cfg = { DUR_FIXED, 60 };
     int result = engine.startSession(cfg);
-    
     TEST_ASSERT_EQUAL(503, result);
     TEST_ASSERT_EQUAL(READY, engine.getState());
 }
@@ -475,7 +434,13 @@ int main(void) {
     RUN_TEST(test_reboot_from_aborted_resumes_penalty);
     RUN_TEST(test_reboot_from_ready_stays_ready);
 
-    // 3. Hardware & Network
+    // 3. Failsafe Tier Logic
+    RUN_TEST(test_failsafe_tier_minimum_floor);
+    RUN_TEST(test_failsafe_tier_rounding_up);
+    RUN_TEST(test_failsafe_tier_exact_match);
+    RUN_TEST(test_failsafe_disarms_on_completion);
+
+    // 4. Hardware & Network
     RUN_TEST(test_channel_delay_masking);
     RUN_TEST(test_start_rejected_if_already_locked);
     RUN_TEST(test_network_failure_while_ready);

@@ -111,6 +111,8 @@ private:
     void updateSafetyInterlock(); // Polls HAL for processed safety status
     void checkNetworkHealth();    // Polls network status
 
+    uint32_t calculateFailsafeDuration(uint32_t baseSeconds) const;
+
     void processAutoCountdown();
     void processButtonTriggerWait();
    

@@ -307,7 +307,7 @@ bool SessionEngine::isCriticalState(DeviceState s) const {
 bool SessionEngine::requiresFailsafe(DeviceState s) const {
     // Only states where we are physically locked or potentially dangerous
     // ABORTED is excluded (it's a penalty box, but we don't need the 'Death Grip' hardware timer)
-    return (s == ARMED || s == LOCKED || s == TESTING);
+    return (s == LOCKED || s == TESTING);
 }
 
 bool SessionEngine::requiresKeepAlive(DeviceState s) const {
@@ -322,12 +322,17 @@ void SessionEngine::applyStateSafetyProfile() {
 
     // 2. Failsafe (Death Grip)
     if (requiresFailsafe(_state)) {
-        // Calculate the safety cap based on context
-        uint32_t safetyDuration = _timers.lockDuration;
-        if (_state == TESTING) safetyDuration = _sysDefaults.testModeDuration;
+        // Determine the intended duration based on state
+        uint32_t targetDuration = _timers.lockDuration;
+        if (_state == TESTING) targetDuration = _sysDefaults.testModeDuration;
         
-        // Arm the hardware timer
-        _hal.armFailsafeTimer(safetyDuration);
+        // Calculate the hardware safety tier (Logic moved here from HAL)
+        // This ensures the hardware timer is always >= session duration, 
+        // snapped to specific "safe" intervals (4h, 8h, etc.) to prevent infinite lock.
+        uint32_t failsafeSeconds = calculateFailsafeDuration(targetDuration);
+        
+        // Arm the hardware timer with the calculated tier
+        _hal.armFailsafeTimer(failsafeSeconds);
     } else {
         _hal.disarmFailsafeTimer();
     }
@@ -462,6 +467,32 @@ void SessionEngine::processButtonTriggerWait() {
     logKeyValue("Session", "Armed Timeout: Button not pressed in time. Aborting.");
     abort("Arm Timeout");
   }
+}
+
+uint32_t SessionEngine::calculateFailsafeDuration(uint32_t baseSeconds) const {
+  const uint32_t ONE_HOUR = 3600;
+  // Safety Logic: Tiers
+  // The timer MUST be longer than the session, but provide a hard ceiling
+  // in case software crashes.
+  const uint32_t SAFETY_TIERS[] = {
+      4 * ONE_HOUR,   // Min safe tier
+      8 * ONE_HOUR, 
+      12 * ONE_HOUR, 
+      24 * ONE_HOUR, 
+      48 * ONE_HOUR, 
+      168 * ONE_HOUR  // Max safe tier (1 week)
+  };
+  const int NUM_TIERS = sizeof(SAFETY_TIERS) / sizeof(SAFETY_TIERS[0]);
+
+  // Select Tier (Smallest tier >= requested seconds)
+  uint32_t armedSeconds = SAFETY_TIERS[NUM_TIERS - 1];
+  for (int i = 0; i < NUM_TIERS; i++) {
+    if (SAFETY_TIERS[i] >= baseSeconds) {
+      armedSeconds = SAFETY_TIERS[i];
+      break;
+    }
+  }
+  return armedSeconds;
 }
 
 // =================================================================================

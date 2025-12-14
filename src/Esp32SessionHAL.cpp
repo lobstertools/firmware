@@ -494,25 +494,17 @@ void Esp32SessionHAL::armFailsafeTimer(uint32_t seconds) {
     return;
   }
 
-  // Safety Logic: Tiers
-  const uint32_t ONE_HOUR = 3600;
-  const uint32_t SAFETY_TIERS[] = {4 * ONE_HOUR, 8 * ONE_HOUR, 12 * ONE_HOUR, 24 * ONE_HOUR, 48 * ONE_HOUR, 168 * ONE_HOUR};
-  const int NUM_TIERS = sizeof(SAFETY_TIERS) / sizeof(SAFETY_TIERS[0]);
+  // Verify 0 wasn't passed by mistake (which would fire immediately or fail)
+  if (seconds == 0) return;
 
-  // Select Tier (Smallest tier >= requested seconds)
-  uint32_t armedSeconds = SAFETY_TIERS[NUM_TIERS - 1];
-  for (int i = 0; i < NUM_TIERS; i++) {
-    if (SAFETY_TIERS[i] >= seconds) {
-      armedSeconds = SAFETY_TIERS[i];
-      break;
-    }
-  }
-
-  uint64_t timeout_us = (uint64_t)armedSeconds * 1000000ULL;
+  uint64_t timeout_us = (uint64_t)seconds * 1000000ULL;
+  
+  // Stop existing before starting new (standard ESP timer practice)
+  esp_timer_stop(s_failsafeTimer);
   esp_timer_start_once(s_failsafeTimer, timeout_us);
 
   char logBuf[64];
-  snprintf(logBuf, sizeof(logBuf), "Death Grip ARMED: %u s (Req: %u)", armedSeconds, seconds);
+  snprintf(logBuf, sizeof(logBuf), "Death Grip ARMED: %u s", seconds);
   logKeyValue("System", logBuf);
 }
 
@@ -676,9 +668,8 @@ void Esp32SessionHAL::handlePcbDoubleClick() {
 }
 
 void Esp32SessionHAL::handlePcbLongStart() {
-  // Note: Press flag remains TRUE during long press
   Esp32SessionHAL &inst = getInstance();
-  inst.setAbortPending(); // Original Action
+  inst.setAbortPending();
 }
 
 void Esp32SessionHAL::handlePcbLongStop() {

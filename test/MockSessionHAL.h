@@ -15,6 +15,7 @@ public:
     uint8_t lastSafetyMask = 0xFF; 
     uint32_t lastWatchdogTimeout = 0;
     bool failsafeArmed = false;
+    uint32_t lastFailsafeArmedSeconds = 0;
     uint32_t failsafeDuration = 0;
     bool keepAliveArmed = false;
     
@@ -151,11 +152,16 @@ public:
 
     void armFailsafeTimer(uint32_t seconds) override {
         failsafeArmed = true;
-        failsafeDuration = seconds;
+        lastFailsafeArmedSeconds = seconds;
+        char buf[64];
+        snprintf(buf, sizeof(buf), "MOCK: Failsafe ARMED %u", seconds);
+        log(buf);
     }
 
     void disarmFailsafeTimer() override {
         failsafeArmed = false;
+        lastFailsafeArmedSeconds = 0;
+        log("MOCK: Failsafe DISARMED");
     }
 
     // --- Storage ---
