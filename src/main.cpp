@@ -112,18 +112,25 @@ void setup() {
   DeviceState savedState = READY;
   SessionTimers savedTimers;
   SessionStats savedStats;
+  SessionConfig savedConfig;
 
   // Ensure structs are clean
   memset(&savedTimers, 0, sizeof(savedTimers));
   memset(&savedStats, 0, sizeof(savedStats));
+  memset(&savedConfig, 0, sizeof(savedConfig));
 
-  bool hasState = SettingsManager::loadSessionState(savedState, savedTimers, savedStats);
+  bool hasState = SettingsManager::loadSessionState(savedState, savedTimers, savedStats, savedConfig);
 
   if (hasState) {
     hal.logKeyValue("System", "Restoring state to Session Engine...");
+    
+    // Load ALL data into engine memory first
     sessionEngine->loadState(savedState);
     sessionEngine->loadTimers(savedTimers);
     sessionEngine->loadStats(savedStats);
+    sessionEngine->loadConfig(savedConfig); 
+    
+    // Now perform the logic checks (which might trigger a re-save)
     sessionEngine->handleReboot();
   } else {
     hal.logKeyValue("System", "No previous state. Starting fresh.");

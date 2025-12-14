@@ -316,13 +316,17 @@ void SettingsManager::setChannelEnabled(int channelIndex, bool enabled) {
 // SECTION: DYNAMIC SESSION STATE
 // =================================================================================
 
-void SettingsManager::saveSessionState(const DeviceState &state, const SessionTimers &timers, const SessionStats &stats) {
+/*
+ * Updated SettingsManager.cpp implementation
+ */
+
+void SettingsManager::saveSessionState(const DeviceState &state, const SessionTimers &timers, const SessionStats &stats, const SessionConfig &config) {
   sessionPrefs.begin("session", false);
 
   // 1. Save Device State
   sessionPrefs.putUChar("state", (uint8_t)state);
 
-  // 2. Explode SessionTimers (Save fields individually)
+  // 2. Save SessionTimers
   sessionPrefs.putULong("t_lockDur", timers.lockDuration);
   sessionPrefs.putULong("t_penDur", timers.penaltyDuration);
   sessionPrefs.putULong("t_lockRem", timers.lockRemaining);
@@ -330,37 +334,50 @@ void SettingsManager::saveSessionState(const DeviceState &state, const SessionTi
   sessionPrefs.putULong("t_testRem", timers.testRemaining);
   sessionPrefs.putULong("t_trigOut", timers.triggerTimeout);
   
-  // Save Array: Create unique keys for each channel delay (e.g., "t_delay0", "t_delay1")
+  // Timer Channel Delays
   char keyBuf[16];
   for(int i = 0; i < MAX_CHANNELS; i++) {
       snprintf(keyBuf, sizeof(keyBuf), "t_delay%d", i);
       sessionPrefs.putULong(keyBuf, timers.channelDelays[i]);
   }
 
-  // 3. Explode SessionStats (Save fields individually)
+  // 3. Save SessionStats
   sessionPrefs.putULong("s_streaks", stats.streaks);
   sessionPrefs.putULong("s_compl", stats.completed);
   sessionPrefs.putULong("s_abort", stats.aborted);
   sessionPrefs.putULong("s_payback", stats.paybackAccumulated);
   sessionPrefs.putULong("s_total", stats.totalLockedTime);
 
+  // 4. Save SessionConfig
+  sessionPrefs.putUChar("c_durType", (uint8_t)config.durationType);
+  sessionPrefs.putULong("c_durFix", config.durationFixed);
+  sessionPrefs.putULong("c_durMin", config.durationMin);
+  sessionPrefs.putULong("c_durMax", config.durationMax);
+  sessionPrefs.putUChar("c_trigStrat", (uint8_t)config.triggerStrategy);
+  sessionPrefs.putBool("c_hideTmr", config.hideTimer);
+  sessionPrefs.putBool("c_disLED", config.disableLED);
+
+  // Config Channel Delays (distinct from timer delays)
+  for(int i = 0; i < MAX_CHANNELS; i++) {
+      snprintf(keyBuf, sizeof(keyBuf), "c_delay%d", i);
+      sessionPrefs.putULong(keyBuf, config.channelDelays[i]);
+  }
+
   sessionPrefs.end();
 }
 
-bool SettingsManager::loadSessionState(DeviceState &state, SessionTimers &timers, SessionStats &stats) {
+bool SettingsManager::loadSessionState(DeviceState &state, SessionTimers &timers, SessionStats &stats, SessionConfig &config) {
   sessionPrefs.begin("session", true);
 
-  // Check if state key exists (marker for valid session data)
   if (!sessionPrefs.isKey("state")) {
     sessionPrefs.end();
     return false; 
   }
 
   // 1. Load Device State
-  // Default to READY if corrupted/missing
   state = (DeviceState)sessionPrefs.getUChar("state", (uint8_t)READY);
 
-  // 2. Load SessionTimers (Default to 0 if keys missing/new fields added)
+  // 2. Load SessionTimers
   timers.lockDuration = sessionPrefs.getULong("t_lockDur", 0);
   timers.penaltyDuration = sessionPrefs.getULong("t_penDur", 0);
   timers.lockRemaining = sessionPrefs.getULong("t_lockRem", 0);
@@ -380,6 +397,20 @@ bool SettingsManager::loadSessionState(DeviceState &state, SessionTimers &timers
   stats.aborted = sessionPrefs.getULong("s_abort", 0);
   stats.paybackAccumulated = sessionPrefs.getULong("s_payback", 0);
   stats.totalLockedTime = sessionPrefs.getULong("s_total", 0);
+
+  // 4. Load SessionConfig
+  config.durationType = (DurationType)sessionPrefs.getUChar("c_durType", (uint8_t)DUR_FIXED);
+  config.durationFixed = sessionPrefs.getULong("c_durFix", 0);
+  config.durationMin = sessionPrefs.getULong("c_durMin", 0);
+  config.durationMax = sessionPrefs.getULong("c_durMax", 0);
+  config.triggerStrategy = (TriggerStrategy)sessionPrefs.getUChar("c_trigStrat", (uint8_t)STRAT_AUTO_COUNTDOWN);
+  config.hideTimer = sessionPrefs.getBool("c_hideTmr", false);
+  config.disableLED = sessionPrefs.getBool("c_disLED", false);
+
+  for(int i = 0; i < MAX_CHANNELS; i++) {
+      snprintf(keyBuf, sizeof(keyBuf), "c_delay%d", i);
+      config.channelDelays[i] = sessionPrefs.getULong(keyBuf, 0);
+  }
 
   sessionPrefs.end();
   return true;

@@ -57,7 +57,7 @@ public:
     virtual void disarmFailsafeTimer() = 0;
 
     // --- Storage ---
-    virtual void saveState(const DeviceState& state, const SessionTimers& timers, const SessionStats& stats) = 0;
+    virtual void saveState(const DeviceState& state, const SessionTimers& timers, const SessionStats& stats, const SessionConfig& config) = 0;
     
     // --- Logging ---
     virtual void log(const char* message) = 0;

@@ -530,11 +530,11 @@ void Esp32SessionHAL::disarmFailsafeTimer() {
 
 // --- Storage ---
 
-void Esp32SessionHAL::saveState(const DeviceState &state, const SessionTimers &timers, const SessionStats &stats) {
+void Esp32SessionHAL::saveState(const DeviceState &state, const SessionTimers &timers, const SessionStats &stats, const SessionConfig &config) {
   updateLedPattern(state);
 
   // Delegate to SettingsManager
-  SettingsManager::saveSessionState(state, timers, stats);
+  SettingsManager::saveSessionState(state, timers, stats, config);
 }
 
 // --- Utils ---

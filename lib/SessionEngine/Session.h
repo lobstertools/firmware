@@ -66,6 +66,7 @@ public:
     void loadState(DeviceState s) { _state = s; }
     void loadTimers(SessionTimers t) { _timers = t; }
     void loadStats(SessionStats s) { _stats = s; }
+    void loadConfig(SessionConfig s) {_activeConfig = s;}
 
     void printStartupDiagnostics();
     bool validateConfig(const DeterrentConfig& deterrents, const SessionPresets& presets) const;

@@ -374,7 +374,7 @@ void SessionEngine::changeState(DeviceState newState) {
     applyStateSafetyProfile();
 
     // 3. Persist to NVS
-    _hal.saveState(_state, _timers, _stats);
+    _hal.saveState(_state, _timers, _stats, _activeConfig);
 }
 
 // =================================================================================
@@ -779,7 +779,7 @@ void SessionEngine::completeSession() {
   }
   
   // Save again to capture the stats update
-  _hal.saveState(_state, _timers, _stats);
+  _hal.saveState(_state, _timers, _stats, _activeConfig);
 }
 
 void SessionEngine::abort(const char *source) {

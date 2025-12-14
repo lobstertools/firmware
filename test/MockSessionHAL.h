@@ -23,6 +23,7 @@ public:
     DeviceState savedState;
     SessionTimers savedTimers;
     SessionStats savedStats;
+    SessionConfig savedConfig;
 
     // Simulation Variables
     uint32_t currentMillis = 1000; 
@@ -165,10 +166,12 @@ public:
     }
 
     // --- Storage ---
-    void saveState(const DeviceState& state, const SessionTimers& timers, const SessionStats& stats) override {
+    // Updated signature to include SessionMeta
+    void saveState(const DeviceState& state, const SessionTimers& timers, const SessionStats& stats, const SessionConfig& config) override {
         savedState = state;
         savedTimers = timers;
         savedStats = stats;
+        savedConfig = config;
     }
 
     // --- Logging ---
@@ -182,7 +185,7 @@ public:
     }
 
     /**
-       * Uses a simple Linear Congruential Generator (LCG) for the reward code range (0-3)
+     * Uses a simple Linear Congruential Generator (LCG) for the reward code range (0-3)
      * to ensure the generated code varies, preventing collision loops.
      * Falls back to "Average" for other ranges (durations) to preserve existing test logic.
      */
