@@ -143,7 +143,7 @@ public:
   void armFailsafeTimer(uint32_t seconds) override;
   void disarmFailsafeTimer() override;
 
-  void saveState(const DeviceState &state, const SessionTimers &timers, const SessionStats &stats) override;
+  void saveState(const DeviceState &state, const SessionTimers &timers, const SessionStats &stats, const SessionConfig &config);
   unsigned long getMillis() override;
   uint32_t getRandom(uint32_t min, uint32_t max) override;
 

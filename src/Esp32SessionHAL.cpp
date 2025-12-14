@@ -204,6 +204,8 @@ void Esp32SessionHAL::updateSafetyLogic() {
     // 3. Hardware Logic (Active Switch)
     // NC Switch: LOW = Connected/Safe, HIGH = Disconnected/Unsafe
     // We only reach here if EXT_BUTTON_PIN is defined and valid.
+    
+    #ifdef EXT_BUTTON_PIN 
     bool isConnectedRaw = (digitalRead(EXT_BUTTON_PIN) == LOW);
     unsigned long now = millis();
 
@@ -256,6 +258,7 @@ void Esp32SessionHAL::updateSafetyLogic() {
     }
 
     _lastSafetyRaw = isConnectedRaw;
+    #endif
 }
 
 bool Esp32SessionHAL::isSafetyInterlockValid() {
