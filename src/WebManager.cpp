@@ -87,76 +87,6 @@ void WebManager::registerEndpoints() {
 }
 
 // =================================================================================
-// SECTION: SYSTEM HANDLERS
-// =================================================================================
-
-void WebManager::handleRoot(AsyncWebServerRequest *request) {
-  String html = "<html><head><title>" + String(DEVICE_NAME) + "</title></head><body>";
-  html += "<h1>" + String(DEVICE_NAME) + " API</h1>";
-  html += "<h2>" + String(DEVICE_VERSION) + "</h2>";
-  request->send(200, "text/html", html);
-}
-
-void WebManager::handleHealth(AsyncWebServerRequest *request) {
-  JsonDocument doc;
-  doc["status"] = "ok";
-  doc["message"] = "Device is reachable.";
-  String response;
-  serializeJson(doc, response);
-  request->send(200, "application/json", response);
-}
-
-void WebManager::handleKeepAlive(AsyncWebServerRequest *request) {
-  if (Esp32SessionHAL::getInstance().lockState()) {
-    _engine->petWatchdog();
-    Esp32SessionHAL::getInstance().unlockState();
-    request->send(200);
-  } else {
-    sendJsonError(request, 503, "System Busy");
-  }
-}
-
-void WebManager::handleReboot(AsyncWebServerRequest *request) {
-  if (Esp32SessionHAL::getInstance().lockState()) {
-    DeviceState s = _engine->getState();
-
-    if (s != COMPLETED && s != READY) {
-      Esp32SessionHAL::getInstance().unlockState();
-      sendJsonError(request, 403, "Reboot denied. Device active.");
-      return;
-    }
-
-    log("WebAPI", "Reboot requested via API.");
-    request->send(200, "application/json", "{\"status\":\"rebooting\"}");
-
-    Esp32SessionHAL::getInstance().unlockState();
-    delay(1000);
-    ESP.restart();
-  } else {
-    sendJsonError(request, 503, "System Busy");
-  }
-}
-
-void WebManager::handleFactoryReset(AsyncWebServerRequest *request) {
-  if (Esp32SessionHAL::getInstance().lockState()) {
-    DeviceState s = _engine->getState();
-    if (s != READY && s != COMPLETED) {
-      Esp32SessionHAL::getInstance().unlockState();
-      sendJsonError(request, 409, "Cannot reset while active.");
-      return;
-    }
-    log("WebAPI", "Factory Reset initiated.");
-    SettingsManager::wipeAll();
-    request->send(200, "application/json", "{\"status\":\"resetting\"}");
-    Esp32SessionHAL::getInstance().unlockState();
-    delay(1000);
-    ESP.restart();
-  } else {
-    sendJsonError(request, 503, "System Busy");
-  }
-}
-
-// =================================================================================
 // SECTION: SESSION CONTROL
 // =================================================================================
 
@@ -479,6 +409,7 @@ void WebManager::handleLog(AsyncWebServerRequest *request) {
 
 void WebManager::handleReward(AsyncWebServerRequest *request) {
   if (Esp32SessionHAL::getInstance().lockState()) {
+
     const Reward *history = _engine->getRewardHistory();
 
     // 1. Check for Null Pointer (Safety Feature: Rewards are hidden in active states)
@@ -511,32 +442,112 @@ void WebManager::handleReward(AsyncWebServerRequest *request) {
 }
 
 // =================================================================================
-// SECTION: CONFIGURATION
+// SECTION: CONFIGURATION & SYSTEM HANDLERS
 // =================================================================================
+
+void WebManager::handleRoot(AsyncWebServerRequest *request) {
+  String html = "<html><head><title>" + String(DEVICE_NAME) + "</title></head><body>";
+  html += "<h1>" + String(DEVICE_NAME) + " API</h1>";
+  html += "<h2>" + String(DEVICE_VERSION) + "</h2>";
+  request->send(200, "text/html", html);
+}
+
+void WebManager::handleHealth(AsyncWebServerRequest *request) {
+  JsonDocument doc;
+  doc["status"] = "ok";
+  doc["message"] = "Device is reachable.";
+  String response;
+  serializeJson(doc, response);
+  request->send(200, "application/json", response);
+}
+
+void WebManager::handleKeepAlive(AsyncWebServerRequest *request) {
+  if (Esp32SessionHAL::getInstance().lockState()) {
+    _engine->petWatchdog();
+    Esp32SessionHAL::getInstance().unlockState();
+    request->send(200);
+  } else {
+    sendJsonError(request, 503, "System Busy");
+  }
+}
+
+void WebManager::handleReboot(AsyncWebServerRequest *request) {
+  if (Esp32SessionHAL::getInstance().lockState()) {
+
+    DeviceState s = _engine->getState();
+    if (s != COMPLETED && s != READY) {
+      Esp32SessionHAL::getInstance().unlockState();
+      sendJsonError(request, 403, "Reboot denied. Device active.");
+      return;
+    }
+
+    log("WebAPI", "Reboot requested via API.");
+    request->send(200, "application/json", "{\"status\":\"rebooting\"}");
+
+    Esp32SessionHAL::getInstance().unlockState();
+    delay(1000);
+    ESP.restart();
+  } else {
+    sendJsonError(request, 503, "System Busy");
+  }
+}
+
+void WebManager::handleFactoryReset(AsyncWebServerRequest *request) {
+  if (Esp32SessionHAL::getInstance().lockState()) {
+    
+    DeviceState s = _engine->getState();
+    if (s != READY) {
+      Esp32SessionHAL::getInstance().unlockState();
+      sendJsonError(request, 409, "Cannot reset while active.");
+      return;
+    }
+    
+    log("WebAPI", "Factory Reset initiated.");
+    SettingsManager::wipeAll();
+    request->send(200, "application/json", "{\"status\":\"resetting\"}");
+    Esp32SessionHAL::getInstance().unlockState();
+    delay(1000);
+    ESP.restart();
+  } else {
+    sendJsonError(request, 503, "System Busy");
+  }
+}
 
 void WebManager::handleUpdateWifi(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
   if (index + len != total)
     return;
 
-  JsonDocument doc;
-  DeserializationError error = deserializeJson(doc, (const char *)data, len);
+  if (Esp32SessionHAL::getInstance().lockState()) {
 
-  if (error) {
-    sendJsonError(request, 400, "Invalid JSON.");
-    return;
-  }
+    DeviceState s = _engine->getState();
+    if (s != READY) {
+      Esp32SessionHAL::getInstance().unlockState();
+      sendJsonError(request, 403, "Update WiFi denied. Device active.");
+      return;
+    }
 
-  const char *ssid = doc["ssid"];
-  const char *pass = doc["pass"];
-  std::string err;
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, (const char *)data, len);
 
-  if (!WebValidators::validateWifiCredentials(ssid, pass, err)) {
-    sendJsonError(request, 400, err);
-    return;
-  }
+    if (error) {
+      sendJsonError(request, 400, "Invalid JSON.");
+      return;
+    }
 
-  SettingsManager::setWifiSSID(ssid);
-  SettingsManager::setWifiPassword(pass);
+    const char *ssid = doc["ssid"];
+    const char *pass = doc["pass"];
+    std::string err;
 
-  request->send(200, "application/json", "{\"status\":\"saved\", \"message\":\"Reboot to apply.\"}");
+    if (!WebValidators::validateWifiCredentials(ssid, pass, err)) {
+      sendJsonError(request, 400, err);
+      return;
+    }
+
+    SettingsManager::setWifiSSID(ssid);
+    SettingsManager::setWifiPassword(pass);
+
+    request->send(200, "application/json", "{\"status\":\"saved\", \"message\":\"Reboot to apply.\"}");
+  } else {
+    sendJsonError(request, 503, "System Busy");
+  }    
 }
