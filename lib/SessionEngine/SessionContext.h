@@ -17,6 +17,9 @@ public:
     // Check if a specific channel is physically enabled (e.g. via DIP switch or Provisioning)
     virtual bool isChannelEnabled(int channelIndex) const = 0;
 
+    // When false, the LED should remain OFF regardless of internal state.
+    virtual void setLedEnabled(bool enabled) = 0;
+
     // --- Input Events ---
     // Returns true if the physical trigger (e.g. Double Click) was activated
     // since the last check. Reads and clears the flag (Consume).

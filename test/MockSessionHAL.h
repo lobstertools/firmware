@@ -31,6 +31,7 @@ public:
     bool _mockSafetyRaw = false; 
     bool _mockSafetyValid = false;
     uint8_t _mockChannelMask = 0x0F;
+    bool ledEnabled = true;
 
     // Input Event States
     bool _triggerActionPending = false;
@@ -91,6 +92,10 @@ public:
 
     void setChannelMask(uint8_t mask) {
         _mockChannelMask = mask;
+    }
+
+    void setLedEnabled(bool enabled) override {
+        ledEnabled = enabled;
     }
 
     // --- Safety Interlock ---

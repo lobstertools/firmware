@@ -243,7 +243,7 @@ void test_start_test_mode_fails_unsafe(void) {
 }
 
 // ============================================================================
-// EXTRA COVERAGE (API, Penalty, Rules)
+// EXTRA COVERAGE (API, Penalty, Rules, LED)
 // ============================================================================
 
 void test_api_trigger_starts_locked_state(void) {
@@ -338,6 +338,43 @@ void test_start_auto_countdown_zeros_disabled_channels(void) {
     TEST_ASSERT_EQUAL_UINT32(30, engine.getTimers().channelDelays[2]);
 }
 
+void test_led_logic_with_disable_feature(void) {
+    MockSessionHAL hal;
+    StandardRules rules;
+    SessionEngine engine(hal, rules, defaults, presets, deterrents);
+    engageSafetyInterlock(hal, engine);
+
+    // 1. Configure with LED Disabled
+    SessionConfig cfg = {};
+    cfg.durationType = DUR_FIXED;
+    cfg.durationFixed = 60;
+    cfg.triggerStrategy = STRAT_BUTTON_TRIGGER;
+    cfg.disableLED = true; 
+
+    // Start -> ARMED
+    engine.startSession(cfg);
+    engine.tick(); 
+    
+    // Verify: LED should be ON in ARMED state (Safety/Status visibility)
+    TEST_ASSERT_EQUAL(ARMED, engine.getState());
+    TEST_ASSERT_TRUE(hal.ledEnabled);
+
+    // Trigger -> LOCKED
+    hal.simulateDoublePress();
+    engine.tick();
+
+    // Verify: LED should be OFF in LOCKED state (Feature Active)
+    TEST_ASSERT_EQUAL(LOCKED, engine.getState());
+    TEST_ASSERT_FALSE(hal.ledEnabled);
+
+    // Finish Session -> COMPLETED
+    for(int i=0; i<60; i++) engine.tick();
+    
+    // Verify: LED should be ON in COMPLETED state
+    TEST_ASSERT_EQUAL(COMPLETED, engine.getState());
+    TEST_ASSERT_TRUE(hal.ledEnabled);
+}
+
 // ============================================================================
 // MAIN RUNNER
 // ============================================================================
@@ -368,6 +405,7 @@ int main(void) {
     RUN_TEST(test_penalty_box_auto_completion);
     RUN_TEST(test_start_rejected_by_rules_logic);
     RUN_TEST(test_start_auto_countdown_zeros_disabled_channels);
+    RUN_TEST(test_led_logic_with_disable_feature);
 
     return UNITY_END();
 }

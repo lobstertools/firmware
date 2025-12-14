@@ -503,6 +503,15 @@ void SessionEngine::tick() {
   // Calculate what the pins *should* be right now based on logic
   uint8_t targetMask = calculateSafetyMask();
   _hal.setHardwareSafetyMask(targetMask);
+
+  // 4. LED CONTROL
+  // The disable switch should ONLY affect the LOCKED state.
+  // In all other states (ARMED, READY, ABORTED, COMPLETED), the LED remains ON.
+  bool shouldLedBeEnabled = true;
+  if (_activeConfig.disableLED && _state == LOCKED) {
+      shouldLedBeEnabled = false;
+  }
+  _hal.setLedEnabled(shouldLedBeEnabled);
 }
 
 // =================================================================================

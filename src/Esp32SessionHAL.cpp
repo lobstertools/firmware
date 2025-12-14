@@ -50,14 +50,16 @@ static void IRAM_ATTR failsafe_timer_callback(void *arg) {
 
 Esp32SessionHAL::Esp32SessionHAL()
     : _triggerActionPending(false), _abortActionPending(false), _shortPressPending(false), _pcbPressed(false), _extPressed(false),
-      _pressStartTime(0), _cachedState(READY), _logBufferIndex(0), _queueHead(0), _queueTail(0), _statusLed(JLed(STATUS_LED_PIN)),
+      _pressStartTime(0), _cachedState((DeviceState)-1), _logBufferIndex(0), _queueHead(0), _queueTail(0), _statusLed(JLed(STATUS_LED_PIN)),
       _lastHealthCheck(0), _bootStartTime(0), _bootMarkedStable(false), _enabledChannelsMask(0x0F),
       
       // Safety Logic Init
       _safetyStableStart(0), 
       _safetyLostStart(0), 
       _isSafetyValid(false), 
-      _lastSafetyRaw(false) 
+      _lastSafetyRaw(false),
+      // LED Control Init
+      _isLedEnabled(true)
 {
   // OneButton Setup (Pin, ActiveLow, Pullup)
   _pcbButton = OneButton(PCB_BUTTON_PIN, true, true);
@@ -137,6 +139,10 @@ void Esp32SessionHAL::initialize() {
 
   // 7. Boot Checks
   checkBootLoop();
+  
+  // 8. Force Initial LED State
+  // Initialize to READY pattern (Breathe) so device is not dark on boot
+  _statusLed.Breathe(4000).Forever();
 }
 
 // --- Main Tick ---
@@ -264,6 +270,25 @@ uint32_t Esp32SessionHAL::getCurrentPressDurationMs() const {
     return 0;
   }
   return millis() - _pressStartTime;
+}
+
+// =================================================================================
+// SECTION: HARDWARE CONTROL
+// =================================================================================
+
+void Esp32SessionHAL::setLedEnabled(bool enabled) {
+    if (_isLedEnabled == enabled) return;
+    _isLedEnabled = enabled;
+
+    if (enabled) {
+        // If enabling, force a pattern refresh for the current cached state
+        DeviceState current = _cachedState;
+        _cachedState = (DeviceState)-1; // Invalidate cache to force updateLedPattern logic to run
+        updateLedPattern(current);
+    } else {
+        // If disabling, turn off immediately
+        _statusLed.Off().Forever();
+    }
 }
 
 // =================================================================================
@@ -518,35 +543,45 @@ uint32_t Esp32SessionHAL::getRandom(uint32_t min, uint32_t max) { return random(
 // =================================================================================
 
 void Esp32SessionHAL::updateLedPattern(DeviceState state) {
-  if (state != _cachedState) {
-    _cachedState = state;
+  bool stateChanged = (state != _cachedState);
+  _cachedState = state;
+
+  // 1. If LED is disabled, ensure it remains OFF and exit
+  if (!_isLedEnabled) {
+      // Force OFF if we just changed state or if we are here due to a toggle
+      _statusLed.Off().Forever();
+      return;
+  }
+
+  // 2. If LED is enabled and state changed, verify and apply pattern
+  if (stateChanged) {
     char logBuf[50];
     snprintf(logBuf, sizeof(logBuf), "LED Pattern: State %d", (int)state);
     logKeyValue("System", logBuf);
-  }
 
-  switch (state) {
-  case READY:
-    _statusLed.Breathe(4000).Forever();
-    break;
-  case ARMED:
-    _statusLed.Blink(250, 250).Forever();
-    break;
-  case LOCKED:
-    _statusLed.On().Forever();
-    break;
-  case ABORTED:
-    _statusLed.Blink(500, 500).Forever();
-    break;
-  case COMPLETED:
-    _statusLed.Blink(200, 200).Repeat(2).DelayAfter(3000).Forever();
-    break;
-  case TESTING:
-    _statusLed.FadeOn(750).FadeOff(750).Forever();
-    break;
-  default:
-    _statusLed.Off().Forever();
-    break;
+    switch (state) {
+    case READY:
+        _statusLed.Breathe(4000).Forever();
+        break;
+    case ARMED:
+        _statusLed.Blink(250, 250).Forever();
+        break;
+    case LOCKED:
+        _statusLed.On().Forever();
+        break;
+    case ABORTED:
+        _statusLed.Blink(500, 500).Forever();
+        break;
+    case COMPLETED:
+        _statusLed.Blink(200, 200).Repeat(2).DelayAfter(3000).Forever();
+        break;
+    case TESTING:
+        _statusLed.FadeOn(750).FadeOff(750).Forever();
+        break;
+    default:
+        _statusLed.Off().Forever();
+        break;
+    }
   }
 }
 

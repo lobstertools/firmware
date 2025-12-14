@@ -52,6 +52,9 @@ private:
   OneButton _extButton;
   JLed _statusLed;
 
+  // --- LED ----
+  bool _isLedEnabled;
+
   // --- Channel ---
   uint8_t _enabledChannelsMask;
 
@@ -128,6 +131,8 @@ public:
   bool checkAbortAction() override;
   bool checkShortPressAction() override;
   
+  void setLedEnabled(bool enabled) override;
+
   bool isSafetyInterlockValid() override;
   bool isSafetyInterlockEngaged() override;
 
