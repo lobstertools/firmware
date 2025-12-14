@@ -66,6 +66,39 @@ void SessionEngine::logKeyValue(const char *key, const char *value) {
 }
 
 /**
+ * Validates a specific Session Request.
+ * Performs sanity checks on user inputs (Duration and Delays).
+ */
+bool SessionEngine::validateSessionConfig(const SessionConfig& config) const {
+    
+    // 1. Duration Sanity Checks
+    if (config.durationType == DUR_FIXED) {
+        // Fixed duration must be non-zero
+        if (config.durationFixed == 0) return false;
+    } 
+    else if (config.durationType == DUR_RANDOM) {
+        // Min must be strictly less than Max
+        if (config.durationMin >= config.durationMax) return false;
+        
+        // Implicitly, Max must be greater than 0, which is covered by Min < Max if Min >= 0.
+        // (uint32_t is always >= 0).
+    }
+
+    // 2. Channel Delay Checks
+    // Limit: 1 Hour (3600 seconds) per channel
+    const uint32_t MAX_DELAY_SEC = 3600;
+
+    for (int i = 0; i < MAX_CHANNELS; i++) {
+        // uint32_t is always >= 0, so we only check the upper bound
+        if (config.channelDelays[i] > MAX_DELAY_SEC) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/**
  * Unified Configuration Validator.
  * 1. Checks that Presets are logically sound (Min <= Max, Non-zero).
  * 2. Checks that Deterrents respect the Global Safety Limits defined in Presets.
@@ -586,11 +619,19 @@ int SessionEngine::startSession(const SessionConfig &config) {
   }
 
   // 3. Configuration Validation
+  
+  // A. Check System Settings (Presets/Deterrents)
   if (!validateConfig(_deterrents, _presets)) {
       logKeyValue("Session", "Start Failed: Invalid System Configuration (Presets or Deterrents).");
       return 400; // Bad Request
   }
 
+  // B. Check Session Request (Input Sanity)
+  if (!validateSessionConfig(config)) {
+      logKeyValue("Session", "Start Failed: Invalid Session Config (Time/Delay limits).");
+      return 400; // Bad Request
+  }
+  
   // 4. Determine Base Duration (Mechanism)
   uint32_t baseDuration = resolveBaseDuration(config);
 

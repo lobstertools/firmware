@@ -69,6 +69,7 @@ public:
 
     void printStartupDiagnostics();
     bool validateConfig(const DeterrentConfig& deterrents, const SessionPresets& presets) const;
+    bool validateSessionConfig(const SessionConfig& config) const;
     
 private:
     // --- Dependencies ---

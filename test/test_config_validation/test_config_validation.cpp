@@ -1,7 +1,7 @@
 /*
  * File: test/test_config_validation.cpp
  * Description: Verifies that the Session Engine rejects invalid configurations
- * including Presets and Deterrents logic.
+ * including Presets, Deterrents, and Session Request logic.
  */
 #include <unity.h>
 #include "Session.h"
@@ -177,15 +177,75 @@ void test_deterrent_random_max_exceeds_preset_max_fails(void) {
     delete engine;
 }
 
-void test_valid_combo_succeeds(void) {
+// ============================================================================
+// TEST GROUP: SESSION REQUEST VALIDATION (New)
+// ============================================================================
+
+void test_request_fixed_zero_fails(void) {
     MockSessionHAL hal; StandardRules rules;
     SessionEngine* engine = createEngine(hal, rules, validPresets, validDeterrents);
-    SessionConfig req = { DUR_FIXED, 600 }; 
+    
+    // Invalid: Fixed duration is 0
+    SessionConfig req = { DUR_FIXED, 0 }; 
 
+    TEST_ASSERT_EQUAL(400, engine->startSession(req));
+    delete engine;
+}
+
+void test_request_random_inverted_range_fails(void) {
+    MockSessionHAL hal; StandardRules rules;
+    SessionEngine* engine = createEngine(hal, rules, validPresets, validDeterrents);
+    
+    // Invalid: Min (600) >= Max (300)
+    SessionConfig req;
+    req.durationType = DUR_RANDOM;
+    req.durationMin = 600;
+    req.durationMax = 300;
+
+    TEST_ASSERT_EQUAL(400, engine->startSession(req));
+    delete engine;
+}
+
+void test_request_random_equal_range_fails(void) {
+    MockSessionHAL hal; StandardRules rules;
+    SessionEngine* engine = createEngine(hal, rules, validPresets, validDeterrents);
+    
+    // Invalid: Min (300) == Max (300)
+    SessionConfig req;
+    req.durationType = DUR_RANDOM;
+    req.durationMin = 300;
+    req.durationMax = 300;
+
+    TEST_ASSERT_EQUAL(400, engine->startSession(req));
+    delete engine;
+}
+
+void test_request_delay_exceeds_limit_fails(void) {
+    MockSessionHAL hal; StandardRules rules;
+    SessionEngine* engine = createEngine(hal, rules, validPresets, validDeterrents);
+    
+    // Invalid: Channel 1 delay > 3600s
+    SessionConfig req = { DUR_FIXED, 600 };
+    req.channelDelays[0] = 300;
+    req.channelDelays[1] = 3601; // Fail (1hr + 1s)
+
+    TEST_ASSERT_EQUAL(400, engine->startSession(req));
+    delete engine;
+}
+
+void test_request_valid_combo_succeeds(void) {
+    MockSessionHAL hal; StandardRules rules;
+    SessionEngine* engine = createEngine(hal, rules, validPresets, validDeterrents);
+    
+    // Valid Request
+    SessionConfig req = { DUR_FIXED, 600 }; 
+    req.channelDelays[0] = 3600; // Exact max allowed
+    
     TEST_ASSERT_EQUAL(200, engine->startSession(req));
     TEST_ASSERT_EQUAL(ARMED, engine->getState());
     delete engine;
 }
+
 
 int main(void) {
     UNITY_BEGIN();
@@ -203,8 +263,12 @@ int main(void) {
     RUN_TEST(test_deterrent_fixed_exceeds_preset_max_fails);
     RUN_TEST(test_deterrent_random_max_exceeds_preset_max_fails);
 
-    // Success
-    RUN_TEST(test_valid_combo_succeeds);
+    // Session Request Sanity
+    RUN_TEST(test_request_fixed_zero_fails);
+    RUN_TEST(test_request_random_inverted_range_fails);
+    RUN_TEST(test_request_random_equal_range_fails);
+    RUN_TEST(test_request_delay_exceeds_limit_fails);
+    RUN_TEST(test_request_valid_combo_succeeds);
 
     return UNITY_END();
 }
