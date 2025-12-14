@@ -114,11 +114,11 @@ Configuration for a session.
 ```typescript
 {
   durationType: DurationType;
-  durationFixed: number;           // Milliseconds
-  durationMin: number;             // Milliseconds
-  durationMax: number;             // Milliseconds
+  durationFixed: number;           // (Seconds)
+  durationMin: number;             // (Seconds)
+  durationMax: number;             // (Seconds)
   triggerStrategy: TriggerStrategy;
-  channelDelays: [number, number, number, number];  // Milliseconds for each channel
+  channelDelays: [number, number, number, number];  // (Seconds) for each channel
   hideTimer: boolean;              // Hide remaining time
   disableLED: boolean;             // Disable status LED
 }
@@ -130,12 +130,13 @@ Current timing information.
 
 ```typescript
 {
-  lockDuration: number;            // Total lock duration (ms)
-  penaltyDuration: number;         // Total penalty duration (ms)
-  lockRemaining: number;           // Lock time remaining (ms)
-  penaltyRemaining: number;        // Penalty time remaining (ms)
-  testRemaining: number;           // Test mode time remaining (ms)
-  triggerTimeout: number;          // Time until trigger timeout (ms)
+  lockDuration: number;            // Total lock duration
+  debtServed: number;              // The amount of debt paid off when completing
+  penaltyDuration: number;         // Total penalty duration
+  lockRemaining: number;           // Lock time remaining
+  penaltyRemaining: number;        // Penalty time remaining
+  testRemaining: number;           // Test mode time remaining
+  triggerTimeout: number;          // Time until trigger timeout
   channelDelays: [number, number, number, number];
 }
 ```
@@ -149,8 +150,8 @@ Session statistics.
   streaks: number;                 // Current streak count
   completed: number;               // Completed sessions
   aborted: number;                 // Aborted sessions
-  paybackAccumulated: number;      // Accumulated payback time (ms)
-  totalLockedTime: number;         // Total time locked (ms)
+  paybackAccumulated: number;      // Accumulated payback time
+  totalLockedTime: number;         // Total time locked
 }
 ```
 
@@ -164,7 +165,7 @@ Real-time hardware telemetry.
   currentPressDurationMs: number;
   rssi: number;                    // WiFi signal strength (dBm)
   freeHeap: number;                // Free memory (bytes)
-  uptime: number;                  // Uptime in milliseconds
+  uptime: number;                  // Uptime in (Seconds)
   internalTempC: number | "N/A";   // Internal temperature
 }
 ```
@@ -175,7 +176,7 @@ Duration range presets.
 
 ```typescript
 {
-  shortMin: number;                // Milliseconds
+  shortMin: number;                // (Seconds)
   shortMax: number;
   mediumMin: number;
   mediumMax: number;
@@ -195,7 +196,7 @@ Deterrent and penalty configuration.
   enableStreaks: boolean;
   enableRewardCode: boolean;
   rewardPenaltyStrategy: DeterrentStrategy;
-  rewardPenaltyMin: number;        // Milliseconds
+  rewardPenaltyMin: number;        // (Seconds)
   rewardPenaltyMax: number;
   rewardPenalty: number;
   enablePaybackTime: boolean;
@@ -212,7 +213,7 @@ System-level default values.
 
 ```typescript
 {
-  longPressDuration: number;       // Milliseconds
+  longPressDuration: number;       // (Seconds)
   extButtonSignalDuration: number;
   testModeDuration: number;
   keepAliveInterval: number;
@@ -341,7 +342,7 @@ Arms the device with a new session configuration.
 - `503` - System busy
 
 **Notes:**
-- Duration values are in milliseconds
+- Duration values are in (Seconds)
 - `channelDelays` must be an array of 4 numbers
 - Device must be in `READY` state to arm
 
