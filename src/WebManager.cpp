@@ -213,6 +213,7 @@ void WebManager::handleStatus(AsyncWebServerRequest *request) {
   // 3. Timers (Matching SessionTimers Interface)
   JsonObject tObj = doc["timers"].to<JsonObject>();
   tObj["lockDuration"] = t.lockDuration;
+  tObj["debtServed"] = t.debtServed;
   tObj["penaltyDuration"] = t.penaltyDuration;
   tObj["lockRemaining"] = t.lockRemaining;
   tObj["penaltyRemaining"] = t.penaltyRemaining;

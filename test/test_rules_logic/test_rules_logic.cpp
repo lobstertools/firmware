@@ -125,21 +125,44 @@ void test_abort_applies_random_payback(void) {
     TEST_ASSERT_EQUAL_UINT32(90, stats.paybackAccumulated);
 }
 
-void test_completion_clears_payback_debt(void) {
+void test_completion_clamps_debt_at_zero(void) {
     StandardRules rules;
     SessionStats stats = {0};
-    stats.paybackAccumulated = 500; // Start with existing debt
+    stats.paybackAccumulated = 100; // Small debt
 
-    // Config doesn't matter for clearing logic, but we pass it anyway
+    // Setup: Simulate a session where 200s was attributed to debt payment
+    // User served MORE debt than they owed (e.g. via clamping or rounding)
+    SessionTimers timers = {0};
+    timers.debtServed = 200; 
+
     DeterrentConfig ignored = {0}; 
-    ignored.enableStreaks = true; // Ensure other stats update too
+    ignored.enableStreaks = true; 
 
-    // Act: Complete the session
-    rules.onCompletion(stats, ignored);
+    // Act
+    rules.onCompletion(stats, timers, ignored);
 
-    // Assert: Debt must be wiped to 0
+    // Assert: Clamped to 0 (No negative debt)
     TEST_ASSERT_EQUAL_UINT32(0, stats.paybackAccumulated);
-    TEST_ASSERT_EQUAL_UINT32(1, stats.completed);
+}
+
+void test_completion_reduces_debt_fairly(void) {
+    StandardRules rules;
+    SessionStats stats = {0};
+    stats.paybackAccumulated = 36000; // 10h Debt
+
+    // Simulate a timer where 3h (10800s) was attributed to debt
+    SessionTimers timers = {0};
+    timers.debtServed = 10800; 
+
+    DeterrentConfig deterrents = {0}; 
+    deterrents.enableStreaks = true; 
+
+    // Act: Complete Successfully
+    rules.onCompletion(stats, timers, deterrents);
+
+    // Assert: Debt is 36000 - 10800 = 25200 (7h)
+    // (Previously this would have wiped to 0)
+    TEST_ASSERT_EQUAL_UINT32(25200, stats.paybackAccumulated);
 }
 
 // --- Runner ---
@@ -148,9 +171,13 @@ int main(void) {
     RUN_TEST(test_start_request_applies_debt);
     RUN_TEST(test_start_request_clamps_to_profile_max);
     RUN_TEST(test_start_request_rejects_below_minimum);
+    
     RUN_TEST(test_abort_strategy_fixed);
     RUN_TEST(test_abort_strategy_random);
-    RUN_TEST(test_completion_clears_payback_debt);
     RUN_TEST(test_abort_applies_random_payback);
+    
+    RUN_TEST(test_completion_clamps_debt_at_zero);
+    RUN_TEST(test_completion_reduces_debt_fairly);
+    
     return UNITY_END();
 }

@@ -94,9 +94,63 @@ void test_reboot_chain_locked_to_paused_penalty(void) {
     delete engine;
 }
 
+/*
+ * File: test/test_reboot_recovery/test_reboot_recovery.cpp
+ * Add this test case to verify Fix 3 (Reboot = Zero Debt Paid)
+ */
+void test_reboot_results_in_zero_debt_paid(void) {
+    MockSessionHAL hal; StandardRules rules;
+    
+    // Config: Max 4h. Payback Enabled.
+    SessionPresets p = presets; p.maxSessionDuration = 14400;
+    DeterrentConfig d = deterrents; d.enablePaybackTime = true;
+    
+    // Setup: 10h Debt
+    SessionStats initialStats = {0};
+    initialStats.paybackAccumulated = 36000;
+
+    SessionEngine* engine = new SessionEngine(hal, rules, defaults, p, d);
+    engine->loadStats(initialStats);
+    hal.setSafetyInterlock(true);
+
+    // 1. Start Session (1h Base + 3h Debt = 4h Total)
+    SessionConfig req = { DUR_FIXED, 3600 }; 
+    engine->startSession(req);
+    engine->tick(); // ARMED -> LOCKED. This transition AUTOMATICALLY saves state to HAL.
+
+    // Verify Debt Portion is calculated correctly (internal state)
+    TEST_ASSERT_EQUAL_UINT32(10800, engine->getTimers().debtServed);
+
+    // 2. Simulate Reboot (Persistence of STATE, but Failure of SESSION)
+    // The mock HAL already has the latest state from the tick() call above.
+    SessionTimers savedTimers = hal.savedTimers;
+    SessionStats savedStats = hal.savedStats;
+    DeviceState savedState = hal.savedState;
+    SessionConfig savedConfig = hal.savedConfig;
+    
+    delete engine;
+    engine = new SessionEngine(hal, rules, defaults, p, d);
+    engine->loadState(savedState);
+    engine->loadTimers(savedTimers);
+    engine->loadStats(savedStats);
+    engine->loadConfig(savedConfig);
+    
+    // 3. Handle Reboot -> Should ABORT (Reboot punishment)
+    engine->handleReboot();
+
+    TEST_ASSERT_EQUAL(ABORTED, engine->getState());
+
+    // 4. Verify ZERO Debt Paid
+    // The debt must NOT have decreased. It might have increased due to penalty.
+    TEST_ASSERT_GREATER_OR_EQUAL(36000, engine->getStats().paybackAccumulated);
+    
+    delete engine;
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_reboot_locked_with_zero_time_aborts);
     RUN_TEST(test_reboot_chain_locked_to_paused_penalty);
+    RUN_TEST(test_reboot_results_in_zero_debt_paid);
     return UNITY_END();
 }

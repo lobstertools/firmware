@@ -40,8 +40,7 @@ public:
      * Called upon successful completion (timer reached 0).
      * Responsibility: Update streaks, clear debt, increment counters.
      */
-    virtual void onCompletion(SessionStats& stats, 
-                              const DeterrentConfig& deterrents) = 0;
+    virtual void onCompletion(SessionStats& stats, const SessionTimers& timers, const DeterrentConfig& deterrents) = 0;
 
     /**
      * Called upon Abort/Emergency Stop.

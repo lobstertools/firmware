@@ -81,6 +81,7 @@ struct SystemDefaults {
 // --- State Structs ---
 struct SessionTimers {
   uint32_t lockDuration;
+  uint32_t debtServed;
   uint32_t penaltyDuration;
   uint32_t lockRemaining;
   uint32_t penaltyRemaining;

@@ -166,7 +166,6 @@ public:
     }
 
     // --- Storage ---
-    // Updated signature to include SessionMeta
     void saveState(const DeviceState& state, const SessionTimers& timers, const SessionStats& stats, const SessionConfig& config) override {
         savedState = state;
         savedTimers = timers;

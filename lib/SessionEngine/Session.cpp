@@ -681,6 +681,13 @@ int SessionEngine::startSession(const SessionConfig &config) {
     return 400;
   }
 
+  // Calculate the portion that is strictly extra penalty
+  if (finalLockDuration > baseDuration) {
+    _timers.debtServed = finalLockDuration - baseDuration;
+  } else {
+    _timers.debtServed = 0;
+  }
+
   // 6. Commit State
   _activeConfig = config;
   _timers.lockDuration = finalLockDuration;
@@ -757,7 +764,7 @@ void SessionEngine::completeSession() {
   // Then process business logic
   if (previousState == LOCKED) {
     // DELEGATE: Rules update Stats (Streaks, Debt clear)
-    _rules.onCompletion(_stats, _deterrents);
+    _rules.onCompletion(_stats, _timers, _deterrents);
 
     char logBuf[100];
     snprintf(logBuf, sizeof(logBuf), "%-20s : %u", "New Streak", _stats.streaks);
