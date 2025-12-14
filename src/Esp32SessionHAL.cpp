@@ -184,14 +184,27 @@ void Esp32SessionHAL::tick() {
 // =================================================================================
 
 void Esp32SessionHAL::updateSafetyLogic() {
-    // Read RAW hardware state (Inverse logic: NC Switch, LOW = Connected)
+    // 1. Identify Mode
     #ifdef EXT_BUTTON_PIN
-        // If pin is -1, assume safe (Dev Mode)
-        bool isConnectedRaw = (EXT_BUTTON_PIN != -1) ? (digitalRead(EXT_BUTTON_PIN) == LOW) : true;
+        bool isDevMode = (EXT_BUTTON_PIN == -1);
     #else
-        bool isConnectedRaw = true; 
+        bool isDevMode = true;
     #endif
 
+    // 2. Dev Mode Bypass
+    // If no hardware switch is defined, we validate immediately.
+    // This prevents the "Stabilizing..." delay on boot which conflicts 
+    // with restored Critical States (LOCKED/ABORTED) causing false alarms.
+    if (isDevMode) {
+        _isSafetyValid = true;
+        _lastSafetyRaw = true;
+        return; 
+    }
+
+    // 3. Hardware Logic (Active Switch)
+    // NC Switch: LOW = Connected/Safe, HIGH = Disconnected/Unsafe
+    // We only reach here if EXT_BUTTON_PIN is defined and valid.
+    bool isConnectedRaw = (digitalRead(EXT_BUTTON_PIN) == LOW);
     unsigned long now = millis();
 
     if (isConnectedRaw) {

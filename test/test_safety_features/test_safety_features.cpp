@@ -384,8 +384,12 @@ void test_network_failure_while_locked_aborts_session(void) {
 }
 
 void test_network_provisioning_blocked_until_penalty_complete(void) {
-    MockSessionHAL hal; StandardRules rules;
+    MockSessionHAL hal;
+    StandardRules rules;
     SessionEngine engine(hal, rules, defaults, presets, deterrents);
+    
+    // Engage Safety so the penalty timer is allowed to decrement
+    hal.setSafetyInterlock(true);
     
     engine.loadState(ABORTED);
     SessionTimers t = {0};
@@ -393,12 +397,12 @@ void test_network_provisioning_blocked_until_penalty_complete(void) {
     engine.loadTimers(t);
     
     hal.setNetworkProvisioningRequest(true);
-    engine.tick(); 
+    engine.tick(); // Process decrement -> 0 -> Complete
     
     TEST_ASSERT_EQUAL(COMPLETED, engine.getState());
     TEST_ASSERT_FALSE(hal._enteredProvisioningMode); 
     
-    engine.tick();
+    engine.tick(); // Process Completion -> Handover to Network
     TEST_ASSERT_TRUE(hal._enteredProvisioningMode);
 }
 
@@ -412,6 +416,86 @@ void test_start_session_fails_if_network_unstable(void) {
     int result = engine.startSession(cfg);
     TEST_ASSERT_EQUAL(503, result);
     TEST_ASSERT_EQUAL(READY, engine.getState());
+}
+
+/**
+ * Scenario: Hardware disconnects while inside the Penalty Box.
+ * Expected: The penalty timer stops counting down until hardware is reconnected.
+ */
+void test_penalty_timer_pauses_when_hardware_invalid(void) {
+    MockSessionHAL hal;
+    StandardRules rules;
+    SessionEngine engine(hal, rules, defaults, presets, deterrents);
+    engageSafetyInterlock(hal, engine);
+
+    // 1. Enter ABORTED state (Penalty)
+    SessionConfig cfg = { DUR_FIXED, 600 };
+    engine.startSession(cfg);
+    engine.tick(); // Locked
+    engine.abort("Test Pause"); // Aborted -> Penalty 300s
+    
+    TEST_ASSERT_EQUAL(ABORTED, engine.getState());
+    uint32_t initialPenalty = engine.getTimers().penaltyRemaining;
+    TEST_ASSERT_GREATER_THAN(0, initialPenalty);
+
+    // 2. ACT: Disconnect Safety
+    hal.setSafetyInterlock(false);
+    
+    // 3. Tick 10 seconds
+    for(int i=0; i<10; i++) {
+        engine.tick();
+    }
+
+    // 4. ASSERT: Time stood still (Paused)
+    TEST_ASSERT_EQUAL_UINT32(initialPenalty, engine.getTimers().penaltyRemaining);
+
+    // 5. ACT: Reconnect Safety
+    hal.setSafetyInterlock(true);
+
+    // 6. Tick 10 seconds
+    for(int i=0; i<10; i++) {
+        engine.tick();
+    }
+
+    // 7. ASSERT: Time resumed
+    TEST_ASSERT_EQUAL_UINT32(initialPenalty - 10, engine.getTimers().penaltyRemaining);
+}
+
+/**
+ * Scenario: Device reboots into a penalty state, but the pedal is missing.
+ * Expected: The timer does not decrement even once until the hardware is validated.
+ */
+void test_reboot_with_invalid_hardware_pauses_timer(void) {
+    MockSessionHAL hal;
+    StandardRules rules;
+    SessionEngine engine(hal, rules, defaults, presets, deterrents);
+
+    // 1. Simulate Memory Load: Reboot into ABORTED state
+    engine.loadState(ABORTED);
+    SessionTimers t = {0};
+    t.penaltyDuration = 300;
+    t.penaltyRemaining = 150; 
+    engine.loadTimers(t);
+
+    // 2. Hardware is INVALID on boot (e.g. Disconnected or Stabilizing)
+    hal.setSafetyInterlock(false);
+
+    engine.handleReboot(); 
+
+    // 3. Tick 5 seconds while invalid
+    for(int i=0; i<5; i++) engine.tick();
+
+    // 4. ASSERT: Timer paused at 150
+    TEST_ASSERT_EQUAL_UINT32(150, engine.getTimers().penaltyRemaining);
+
+    // 5. ACT: Validate Hardware (Plugged in / Stabilized)
+    hal.setSafetyInterlock(true);
+    
+    // 6. Tick 5 seconds
+    for(int i=0; i<5; i++) engine.tick();
+
+    // 7. ASSERT: Timer resumed
+    TEST_ASSERT_EQUAL_UINT32(145, engine.getTimers().penaltyRemaining);
 }
 
 int main(void) {
@@ -447,6 +531,10 @@ int main(void) {
     RUN_TEST(test_network_failure_while_locked_aborts_session);
     RUN_TEST(test_network_provisioning_blocked_until_penalty_complete);
     RUN_TEST(test_start_session_fails_if_network_unstable);
+
+    // 5. Timer Pause Logic
+    RUN_TEST(test_penalty_timer_pauses_when_hardware_invalid);
+    RUN_TEST(test_reboot_with_invalid_hardware_pauses_timer);
 
     return UNITY_END();
 }

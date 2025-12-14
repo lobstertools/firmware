@@ -505,7 +505,7 @@ uint32_t SessionEngine::calculateFailsafeDuration(uint32_t baseSeconds) const {
  */
 void SessionEngine::tick() {
   // 1. Priority Checks: Safety & Connectivity
-  updateSafetyInterlock();
+  updateSafetyInterlock(); // This will change state to ABORTED if safety is lost
   checkNetworkHealth();
 
   if (_hal.checkAbortAction()) {
@@ -513,53 +513,60 @@ void SessionEngine::tick() {
       abort("Manual Long-Press");
   }
 
-  // 2. Process Logic based on State
-  switch (_state) {
-  case ARMED:
-    if (_activeConfig.triggerStrategy == STRAT_AUTO_COUNTDOWN) {
-      processAutoCountdown();
-    } else {
-      processButtonTriggerWait();
-    }
-    break;
-
-  case LOCKED:
-    if (checkKeepAliveWatchdog()) return;
-    if (_timers.lockRemaining > 0) {
+  // 2. Process Logic based on State (ONLY IF HARDWARE IS VALID)
+  // If hardware is not permitted (disconnected/stabilizing), 
+  // we pause all timer decrements.
+  if (_hal.isSafetyInterlockValid()) {
       
-      // DELEGATE: Rules track time stats
-      _rules.onTickLocked(_stats);
+      switch (_state) {
+      case ARMED:
+        if (_activeConfig.triggerStrategy == STRAT_AUTO_COUNTDOWN) {
+          processAutoCountdown();
+        } else {
+          processButtonTriggerWait();
+        }
+        break;
 
-      if (--_timers.lockRemaining == 0) completeSession();
-    }
-    break;
+      case LOCKED:
+        if (checkKeepAliveWatchdog()) return;
+        if (_timers.lockRemaining > 0) {
+          
+          // DELEGATE: Rules track time stats
+          _rules.onTickLocked(_stats);
 
-  case ABORTED:
-    if (_timers.penaltyRemaining > 0 && --_timers.penaltyRemaining == 0) completeSession();
-    break;
+          if (--_timers.lockRemaining == 0) completeSession();
+        }
+        break;
 
-  case TESTING:
-    if (checkKeepAliveWatchdog()) return;
-    if (_timers.testRemaining > 0 && --_timers.testRemaining == 0) {
-      logKeyValue("Session", "Test session done.");
-      stopTest();
-    }
-    break;
+      case ABORTED:
+        // Penalty only counts down if hardware is connected!
+        if (_timers.penaltyRemaining > 0 && --_timers.penaltyRemaining == 0) completeSession();
+        break;
 
-  case READY:
-  case COMPLETED:
-  default:
-    break;
-  }
+      case TESTING:
+        if (checkKeepAliveWatchdog()) return;
+        if (_timers.testRemaining > 0 && --_timers.testRemaining == 0) {
+          logKeyValue("Session", "Test session done.");
+          stopTest();
+        }
+        break;
+
+      case READY:
+      case COMPLETED:
+      default:
+        break;
+      }
+  } 
 
   // 3. ENFORCE HARDWARE SAFETY (The "Continuous Enforcement")
   // Calculate what the pins *should* be right now based on logic
+  // If safety is invalid, calculateSafetyMask might return pins HIGH (if LOCKED), 
+  // but ISessionHAL implementations should logically gate this. 
+  // However, specifically setting it here ensures the logical intent is sent.
   uint8_t targetMask = calculateSafetyMask();
   _hal.setHardwareSafetyMask(targetMask);
 
   // 4. LED CONTROL
-  // The disable switch should ONLY affect the LOCKED state.
-  // In all other states (ARMED, READY, ABORTED, COMPLETED), the LED remains ON.
   bool shouldLedBeEnabled = true;
   if (_activeConfig.disableLED && _state == LOCKED) {
       shouldLedBeEnabled = false;
