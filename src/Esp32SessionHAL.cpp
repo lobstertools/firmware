@@ -556,7 +556,7 @@ void Esp32SessionHAL::updateLedPattern(DeviceState state) {
   // 2. If LED is enabled and state changed, verify and apply pattern
   if (stateChanged) {
     char logBuf[50];
-    snprintf(logBuf, sizeof(logBuf), "LED Pattern: State %d", (int)state);
+    snprintf(logBuf, sizeof(logBuf), "LED Pattern: State %s", stateToString(state));
     logKeyValue("System", logBuf);
 
     switch (state) {

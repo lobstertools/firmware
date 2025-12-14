@@ -165,40 +165,6 @@ void WebManager::handleAbort(AsyncWebServerRequest *request) {
 // SECTION: STATUS & INFO
 // =================================================================================
 
-const char *stateToString(DeviceState s) {
-  switch (s) {
-  case READY:
-    return "READY";
-  case ARMED:
-    return "ARMED";
-  case LOCKED:
-    return "LOCKED";
-  case ABORTED:
-    return "ABORTED";
-  case COMPLETED:
-    return "COMPLETED";
-  case TESTING:
-    return "TESTING";
-  default:
-    return "READY";
-  }
-}
-
-const char *durTypeToString(DurationType d) {
-  switch (d) {
-  case DUR_RANDOM:
-    return "DUR_RANDOM";
-  case DUR_RANGE_SHORT:
-    return "DUR_RANGE_SHORT";
-  case DUR_RANGE_MEDIUM:
-    return "DUR_RANGE_MEDIUM";
-  case DUR_RANGE_LONG:
-    return "DUR_RANGE_LONG";
-  default:
-    return "DUR_FIXED";
-  }
-}
-
 void WebManager::handleStatus(AsyncWebServerRequest *request) {
   if (!Esp32SessionHAL::getInstance().lockState()) {
     request->send(503, "text/plain", "Busy");
@@ -501,7 +467,7 @@ void WebManager::handleFactoryReset(AsyncWebServerRequest *request) {
       sendJsonError(request, 409, "Cannot reset while active.");
       return;
     }
-    
+
     log("WebAPI", "Factory Reset initiated.");
     SettingsManager::wipeAll();
     request->send(200, "application/json", "{\"status\":\"resetting\"}");

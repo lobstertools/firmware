@@ -101,3 +101,6 @@ struct Reward {
   char code[REWARD_CODE_LENGTH + 1];
   char checksum[REWARD_CHECKSUM_LENGTH + 1];
 };
+
+extern const char *stateToString(DeviceState s);
+extern const char *durTypeToString(DurationType d);
