@@ -397,25 +397,14 @@ void SessionEngine::checkNetworkHealth() {
  */
 void SessionEngine::processAutoCountdown() {
   bool allDelaysZero = true;
-  char debugDelayStr[64];
   
-  // Initialize log string
-  snprintf(debugDelayStr, sizeof(debugDelayStr), "Delays: ");
-
   for (size_t i = 0; i < MAX_CHANNELS; i++) {
-    // 1. Format Status for Log
-    char tmp[16];
-    snprintf(tmp, sizeof(tmp), "[%d]%u ", (int)i + 1, _timers.channelDelays[i]);
-    strncat(debugDelayStr, tmp, sizeof(debugDelayStr) - strlen(debugDelayStr) - 1);
-
-    // 2. Decrement Logic
+    // Decrement Logic
     if (_timers.channelDelays[i] > 0) {
       allDelaysZero = false;
       _timers.channelDelays[i]--;
     }
   }
-
-  logKeyValue("Session", debugDelayStr);
 
   if (allDelaysZero) {
     enterLockedState("Auto Sequence");
@@ -647,6 +636,19 @@ int SessionEngine::startSession(const SessionConfig &config) {
     logKeyValue("Session", "Waiting for Trigger...");
   } else {
     logKeyValue("Session", "Auto Sequence Started.");
+    
+    // Log initial delays once for enabled channels
+    char debugDelayStr[64];
+    snprintf(debugDelayStr, sizeof(debugDelayStr), "Delays: ");
+    
+    for (int i = 0; i < MAX_CHANNELS; i++) {
+        if (_hal.isChannelEnabled(i)) {
+            char tmp[16];
+            snprintf(tmp, sizeof(tmp), "[%d]%u ", i + 1, _timers.channelDelays[i]);
+            strncat(debugDelayStr, tmp, sizeof(debugDelayStr) - strlen(debugDelayStr) - 1);
+        }
+    }
+    logKeyValue("Session", debugDelayStr);
   }
 
   // 7. Transition
