@@ -190,7 +190,7 @@ public:
      */
     uint32_t getRandom(uint32_t min, uint32_t max) override {
         // Specific case for Reward Code Generation
-        if (min == 0 && max == 3) {
+        if (min == 0 && max == 4) {
             _rngSeed = _rngSeed * 1103515245 + 12345;
             return (_rngSeed / 65536) % 4;
         }
