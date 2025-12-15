@@ -37,6 +37,10 @@ Represents the current operational state of the device.
 
 **Values:** `READY` | `ARMED` | `LOCKED` | `ABORTED` | `COMPLETED` | `TESTING`
 
+### SessionOutcome
+
+**Values:** `SUCCESS` | `ABORTED` | `UNKNOWN`
+
 ### TriggerStrategy
 
 **Values:**
@@ -114,11 +118,11 @@ Configuration for a session.
 ```typescript
 {
   durationType: DurationType;
-  durationFixed: number;           // (Seconds)
-  durationMin: number;             // (Seconds)
-  durationMax: number;             // (Seconds)
+  durationFixed: number;           // seconds
+  durationMin: number;             // seconds
+  durationMax: number;             // seconds
   triggerStrategy: TriggerStrategy;
-  channelDelays: [number, number, number, number];  // (Seconds) for each channel
+  channelDelays: [number, number, number, number];  // seconds for each channel
   hideTimer: boolean;              // Hide remaining time
   disableLED: boolean;             // Disable status LED
 }
@@ -130,14 +134,14 @@ Current timing information.
 
 ```typescript
 {
-  lockDuration: number;            // Total lock duration
-  debtServed: number;              // The amount of debt paid off when completing
-  penaltyDuration: number;         // Total penalty duration
-  lockRemaining: number;           // Lock time remaining
-  penaltyRemaining: number;        // Penalty time remaining
-  testRemaining: number;           // Test mode time remaining
-  triggerTimeout: number;          // Time until trigger timeout
-  channelDelays: [number, number, number, number];
+  lockDuration: number;            // seconds - Total lock duration
+  potentialDebtServed: number;     // seconds - Potential debt reduction if completed now
+  penaltyDuration: number;         // seconds - Total penalty duration
+  lockRemaining: number;           // seconds - Lock time remaining
+  penaltyRemaining: number;        // seconds - Penalty time remaining
+  testRemaining: number;           // seconds - Test mode time remaining
+  triggerTimeout: number;          // seconds - Time until trigger timeout
+  channelDelays: [number, number, number, number];  // seconds
 }
 ```
 
@@ -150,8 +154,8 @@ Session statistics.
   streaks: number;                 // Current streak count
   completed: number;               // Completed sessions
   aborted: number;                 // Aborted sessions
-  paybackAccumulated: number;      // Accumulated payback time
-  totalLockedTime: number;         // Total time locked
+  paybackAccumulated: number;      // seconds - Accumulated payback time
+  totalLockedTime: number;         // seconds - Total time locked
 }
 ```
 
@@ -162,11 +166,11 @@ Real-time hardware telemetry.
 ```typescript
 {
   buttonPressed: boolean;
-  currentPressDurationMs: number;
-  rssi: number;                    // WiFi signal strength (dBm)
-  freeHeap: number;                // Free memory (bytes)
-  uptime: number;                  // Uptime in (Seconds)
-  internalTempC: number | "N/A";   // Internal temperature
+  currentPressDurationMs: number;  // milliseconds - Current button press duration
+  rssi: number;                    // dBm - WiFi signal strength
+  freeHeap: number;                // bytes - Free memory
+  uptime: number;                  // seconds - Uptime
+  internalTempC: number | "N/A";   // °C - Internal temperature
 }
 ```
 
@@ -176,14 +180,14 @@ Duration range presets.
 
 ```typescript
 {
-  shortMin: number;                // (Seconds)
-  shortMax: number;
-  mediumMin: number;
-  mediumMax: number;
-  longMin: number;
-  longMax: number;
-  minSessionDuration: number;      // Absolute minimum
-  maxSessionDuration: number;      // Absolute maximum
+  shortMin: number;                // seconds
+  shortMax: number;                // seconds
+  mediumMin: number;               // seconds
+  mediumMax: number;               // seconds
+  longMin: number;                 // seconds
+  longMax: number;                 // seconds
+  minSessionDuration: number;      // seconds - Absolute minimum
+  maxSessionDuration: number;      // seconds - Absolute maximum
 }
 ```
 
@@ -196,14 +200,16 @@ Deterrent and penalty configuration.
   enableStreaks: boolean;
   enableRewardCode: boolean;
   rewardPenaltyStrategy: DeterrentStrategy;
-  rewardPenaltyMin: number;        // (Seconds)
-  rewardPenaltyMax: number;
-  rewardPenalty: number;
+  rewardPenaltyMin: number;        // seconds
+  rewardPenaltyMax: number;        // seconds
+  rewardPenalty: number;           // seconds
   enablePaybackTime: boolean;
   paybackTimeStrategy: DeterrentStrategy;
-  paybackTimeMin: number;
-  paybackTimeMax: number;
-  paybackTime: number;
+  paybackTimeMin: number;          // seconds
+  paybackTimeMax: number;          // seconds
+  paybackTime: number;             // seconds
+  enableTimeModification: boolean; // Allow time add/remove during session
+  timeModificationStep: number;    // seconds - Amount to add/remove per request
 }
 ```
 
@@ -213,15 +219,15 @@ System-level default values.
 
 ```typescript
 {
-  longPressDuration: number;       // (Seconds)
-  extButtonSignalDuration: number;
-  testModeDuration: number;
-  keepAliveInterval: number;
-  keepAliveMaxStrikes: number;
-  bootLoopThreshold: number;
-  stableBootTime: number;
-  wifiMaxRetries: number;
-  armedTimeout: number;
+  longPressDuration: number;       // seconds
+  extButtonSignalDuration: number; // seconds
+  testModeDuration: number;        // seconds
+  keepAliveInterval: number;       // seconds
+  keepAliveMaxStrikes: number;     // count
+  bootLoopThreshold: number;       // count
+  stableBootTime: number;          // seconds
+  wifiMaxRetries: number;          // count
+  armedTimeout: number;            // seconds
 }
 ```
 
@@ -320,7 +326,7 @@ Arms the device with a new session configuration.
 ```json
 {
   "durationType": "DUR_FIXED",
-  "durationFixed": 300000,
+  "durationFixed": 300,
   "durationMin": 0,
   "durationMax": 0,
   "triggerStrategy": "STRAT_AUTO_COUNTDOWN",
@@ -342,7 +348,7 @@ Arms the device with a new session configuration.
 - `503` - System busy
 
 **Notes:**
-- Duration values are in (Seconds)
+- All duration values are in seconds
 - `channelDelays` must be an array of 4 numbers
 - Device must be in `READY` state to arm
 
@@ -383,6 +389,50 @@ Aborts the current session or test.
 
 ---
 
+#### POST /time/add
+
+Adds time to the current session. Only available when `enableTimeModification` is true in deterrent config.
+
+**Response:**
+```json
+{
+  "status": "ok"
+}
+```
+
+**Error Responses:**
+- `400` - Modification rejected (feature disabled or limits reached)
+- `503` - System busy
+
+**Notes:**
+- Amount added is determined by `timeModificationStep` in deterrent config
+- Subject to `maxSessionDuration` limit
+- Only available during `LOCKED` state
+
+---
+
+#### POST /time/remove
+
+Removes time from the current session. Only available when `enableTimeModification` is true in deterrent config.
+
+**Response:**
+```json
+{
+  "status": "ok"
+}
+```
+
+**Error Responses:**
+- `400` - Modification rejected (feature disabled or limits reached)
+- `503` - System busy
+
+**Notes:**
+- Amount removed is determined by `timeModificationStep` in deterrent config
+- Subject to `minSessionDuration` limit
+- Only available during `LOCKED` state
+
+---
+
 ### Status & Information
 
 #### GET /status
@@ -398,7 +448,7 @@ Returns complete session status including configuration, timers, stats, and tele
   "verified": true,
   "config": {
     "durationType": "DUR_FIXED",
-    "durationFixed": 300000,
+    "durationFixed": 300,
     "durationMin": 0,
     "durationMax": 0,
     "triggerStrategy": "STRAT_AUTO_COUNTDOWN",
@@ -407,9 +457,10 @@ Returns complete session status including configuration, timers, stats, and tele
     "channelDelays": [0, 0, 0, 0]
   },
   "timers": {
-    "lockDuration": 300000,
+    "lockDuration": 300,
+    "potentialDebtServed": 150,
     "penaltyDuration": 0,
-    "lockRemaining": 250000,
+    "lockRemaining": 250,
     "penaltyRemaining": 0,
     "testRemaining": 0,
     "triggerTimeout": 0,
@@ -420,14 +471,14 @@ Returns complete session status including configuration, timers, stats, and tele
     "completed": 5,
     "aborted": 1,
     "paybackAccumulated": 0,
-    "totalLockedTime": 1500000
+    "totalLockedTime": 1500
   },
   "telemetry": {
     "buttonPressed": false,
     "currentPressDurationMs": 0,
     "rssi": -45,
     "freeHeap": 123456,
-    "uptime": 3600000,
+    "uptime": 3600,
     "internalTempC": 45.2
   }
 }
@@ -435,6 +486,12 @@ Returns complete session status including configuration, timers, stats, and tele
 
 **Error Responses:**
 - `503` - System busy
+
+**Field Details:**
+- All time values are in **seconds** except `currentPressDurationMs` which is in **milliseconds**
+- `verified`: Indicates if hardware is functioning correctly
+- `outcome`: Only meaningful when state is `COMPLETED` or `ABORTED`
+- `potentialDebtServed`: Shows how much payback time would be reduced if session completes now
 
 ---
 
@@ -473,41 +530,50 @@ Returns comprehensive device details including identity, network, features, chan
     "ch4": false
   },
   "presets": {
-    "shortMin": 60000,
-    "shortMax": 300000,
-    "mediumMin": 300000,
-    "mediumMax": 900000,
-    "longMin": 900000,
-    "longMax": 3600000,
-    "minSessionDuration": 30000,
-    "maxSessionDuration": 7200000
+    "shortMin": 60,
+    "shortMax": 300,
+    "mediumMin": 300,
+    "mediumMax": 900,
+    "longMin": 900,
+    "longMax": 3600,
+    "minSessionDuration": 30,
+    "maxSessionDuration": 7200
   },
   "deterrentConfig": {
     "enableStreaks": true,
     "enableRewardCode": true,
     "rewardPenaltyStrategy": "DETERRENT_RANDOM",
-    "rewardPenaltyMin": 60000,
-    "rewardPenaltyMax": 300000,
-    "rewardPenalty": 120000,
+    "rewardPenaltyMin": 60,
+    "rewardPenaltyMax": 300,
+    "rewardPenalty": 120,
     "enablePaybackTime": false,
     "paybackTimeStrategy": "DETERRENT_FIXED",
     "paybackTimeMin": 0,
     "paybackTimeMax": 0,
-    "paybackTime": 0
+    "paybackTime": 0,
+    "enableTimeModification": true,
+    "timeModificationStep": 60
   },
   "defaults": {
-    "longPressDuration": 3000,
-    "extButtonSignalDuration": 500,
-    "testModeDuration": 10000,
-    "keepAliveInterval": 30000,
+    "longPressDuration": 3,
+    "extButtonSignalDuration": 0.5,
+    "testModeDuration": 10,
+    "keepAliveInterval": 30,
     "wifiMaxRetries": 3,
-    "armedTimeout": 60000
+    "armedTimeout": 60
   }
 }
 ```
 
 **Error Responses:**
 - `503` - System busy
+
+**Field Details:**
+- All time values are in **seconds**
+- `id`: Generated from device MAC address
+- `cppStandard`: Numeric value representing C++ standard version used
+- `enableTimeModification`: When true, allows `/time/add` and `/time/remove` endpoints
+- `timeModificationStep`: Amount of time (in seconds) added or removed per request
 
 ---
 
@@ -517,7 +583,7 @@ Returns the device's internal log buffer as plain text.
 
 **Response:** `text/plain`
 
-Each log entry is on a separate line.
+Each log entry is on a separate line. Returns up to 150 log entries.
 
 ---
 
@@ -543,6 +609,11 @@ Returns the reward code history. Only available when device is not in an active 
 **Error Responses:**
 - `403` - Rewards are hidden during active session or penalty
 - `503` - System busy
+
+**Notes:**
+- Returns up to 10 reward codes
+- Only completed sessions generate reward codes (when enabled)
+- Reward codes are hidden during `ARMED`, `LOCKED`, `TESTING`, and when penalty time is active
 
 ---
 
@@ -573,6 +644,10 @@ Updates WiFi credentials. Only allowed when device is in `READY` state. Requires
 - `400` - Invalid JSON or credentials
 - `403` - Update denied, device is active
 - `503` - System busy
+
+**Notes:**
+- Changes are saved to persistent storage but require a reboot to take effect
+- SSID and password validation is performed before saving
 
 ---
 
@@ -618,12 +693,22 @@ Session is configured and waiting for trigger.
 - Abort (`/abort`)
 - Keep alive (`/keepalive`)
 
+**Transitions:**
+- → `LOCKED` when trigger condition is met
+- → `ABORTED` on abort or timeout
+
 ### LOCKED
 Session is active, device is locked.
 
 **Allowed Operations:**
 - Abort (`/abort`)
 - Keep alive (`/keepalive`)
+- Add time (`/time/add`) - if enabled
+- Remove time (`/time/remove`) - if enabled
+
+**Transitions:**
+- → `COMPLETED` when session duration expires (successful completion)
+- → `ABORTED` on abort or keepalive timeout
 
 ### TESTING
 Test mode is active.
@@ -631,24 +716,36 @@ Test mode is active.
 **Allowed Operations:**
 - Abort (`/abort`)
 
+**Transitions:**
+- → `READY` when test completes or is aborted
+
 ### ABORTED
 Session was aborted before completion.
 
-**Transitions to:** `READY` (after penalty duration if applicable)
+**Allowed Operations:**
+- Get status (`/status`)
+- Get details (`/details`)
+
+**Transitions:**
+- → `READY` after penalty duration expires (if applicable)
 
 ### COMPLETED
 Session completed successfully.
 
 **Allowed Operations:**
 - Reboot (`/reboot`)
+- Get status (`/status`)
+- Get details (`/details`)
+- Get reward (`/reward`)
 
-**Transitions to:** `READY` (automatically or after penalty)
+**Transitions:**
+- → `READY` after penalty duration expires (if applicable)
 
 ---
 
 ## Usage Examples
 
-### Starting a Session
+### Starting a Fixed Duration Session
 
 ```bash
 # 1. Arm the device with a 5-minute fixed session
@@ -656,7 +753,7 @@ curl -X POST http://192.168.1.100/arm \
   -H "Content-Type: application/json" \
   -d '{
     "durationType": "DUR_FIXED",
-    "durationFixed": 300000,
+    "durationFixed": 300,
     "durationMin": 0,
     "durationMax": 0,
     "triggerStrategy": "STRAT_AUTO_COUNTDOWN",
@@ -668,8 +765,57 @@ curl -X POST http://192.168.1.100/arm \
 # 2. Monitor status
 curl http://192.168.1.100/status
 
-# 3. Send keep-alive during session
+# 3. Send keep-alive during session (every 30 seconds)
 curl -X POST http://192.168.1.100/keepalive
+```
+
+### Starting a Random Duration Session
+
+```bash
+# Arm with random duration between 5 and 15 minutes
+curl -X POST http://192.168.1.100/arm \
+  -H "Content-Type: application/json" \
+  -d '{
+    "durationType": "DUR_RANDOM",
+    "durationFixed": 0,
+    "durationMin": 300,
+    "durationMax": 900,
+    "triggerStrategy": "STRAT_AUTO_COUNTDOWN",
+    "channelDelays": [0, 0, 0, 0],
+    "hideTimer": true,
+    "disableLED": false
+  }'
+```
+
+### Using Preset Ranges
+
+```bash
+# Use medium preset range
+curl -X POST http://192.168.1.100/arm \
+  -H "Content-Type: application/json" \
+  -d '{
+    "durationType": "DUR_RANGE_MEDIUM",
+    "durationFixed": 0,
+    "durationMin": 0,
+    "durationMax": 0,
+    "triggerStrategy": "STRAT_AUTO_COUNTDOWN",
+    "channelDelays": [0, 0, 0, 0],
+    "hideTimer": false,
+    "disableLED": false
+  }'
+```
+
+### Modifying Session Time
+
+```bash
+# Add time during an active session (if enabled)
+curl -X POST http://192.168.1.100/time/add
+
+# Remove time during an active session (if enabled)
+curl -X POST http://192.168.1.100/time/remove
+
+# Check updated remaining time
+curl http://192.168.1.100/status | jq '.timers.lockRemaining'
 ```
 
 ### Getting Device Information
@@ -683,6 +829,9 @@ curl http://192.168.1.100/health
 
 # View logs
 curl http://192.168.1.100/log
+
+# Get reward codes (only when not in active session)
+curl http://192.168.1.100/reward
 ```
 
 ### Emergency Abort
@@ -691,12 +840,27 @@ curl http://192.168.1.100/log
 curl -X POST http://192.168.1.100/abort
 ```
 
+### Testing Hardware
+
+```bash
+# Start a 10-second test of all channels
+curl -X POST http://192.168.1.100/start-test
+
+# Monitor test progress
+curl http://192.168.1.100/status
+```
+
 ---
 
 ## Notes
 
-- All duration values are in seconds, unless specified otherwise
-- The device uses a mutex lock system for thread safety - operations may return `503` if another operation is in progress
-- Keep-alive must be sent at regular intervals during active sessions to prevent automatic abort
-- Reward codes are only accessible when no session is active
-- WiFi changes require a reboot to take effect
+- **Time Units**: All duration values are in **seconds**, except `currentPressDurationMs` in telemetry which is in **milliseconds**
+- **Thread Safety**: The device uses a mutex lock system for thread safety - operations may return `503` if another operation is in progress
+- **Keep-Alive**: Must be sent at regular intervals (default: every 30 seconds) during active sessions to prevent automatic abort
+- **Reward Codes**: Only accessible when no session is active and no penalty time remaining
+- **WiFi Changes**: Require a reboot to take effect
+- **Channel Delays**: Allow staggered activation of outputs, useful for timed releases
+- **Hidden Timer**: When enabled, prevents the frontend from displaying remaining time
+- **Hardware Verification**: The `verified` field in status indicates if all enabled channels are functioning correctly
+- **Time Modification**: The `/time/add` and `/time/remove` endpoints allow dynamic session adjustment when enabled, subject to min/max duration limits
+- **Potential Debt Served**: Tracks how much accumulated payback time would be reduced if the current session is completed successfully
