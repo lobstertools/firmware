@@ -115,22 +115,39 @@ void test_reward_visible_and_correct_on_completion(void) {
 }
 
 void test_reward_preserved_after_penalty_and_reboot(void) {
-    MockSessionHAL hal; StandardRules rules;
+    MockSessionHAL hal; 
+    StandardRules rules;
     SessionEngine* engine = createEngine(hal, rules);
 
+    // Engage Safety Interlock (Required to arm/start)
+    hal.setSafetyInterlock(true);
+    engine->tick(); // Process safety state
+
     // 1. Capture Code A
+    // At startup, the engine generates the first code at [0].
     char codeA[REWARD_CODE_LENGTH + 1];
-    strcpy(codeA, engine->getRewardHistory()[0].code);
+    const Reward* initialHistory = engine->getRewardHistory();
+    TEST_ASSERT_NOT_NULL(initialHistory);
+    strcpy(codeA, initialHistory[0].code);
 
     // 2. Lock and Abort
-    SessionConfig cfg = { DUR_FIXED, 600 };
-    engine->startSession(cfg);
-    engine->tick();
-    engine->abort("Penalty Test"); // Enters Penalty Box (300s)
+    // Use zero-init to ensure channelDelays are clean
+    SessionConfig cfg = {}; 
+    cfg.durationType = DUR_FIXED;
+    cfg.durationFixed = 600;
+
+    int res = engine->startSession(cfg);
+    TEST_ASSERT_EQUAL(200, res); // Ensure start succeeded
+    
+    engine->tick(); // Tick to process transition ARMED -> LOCKED (assuming 0 delay)
+    TEST_ASSERT_EQUAL(LOCKED, engine->getState());
+
+    engine->abort("Penalty Test"); // Enters Penalty Box (ABORTED state)
+    TEST_ASSERT_EQUAL(ABORTED, engine->getState());
 
     // 3. Serve Penalty
-    // Advance 300s
-    for(int i=0; i<300; i++) engine->tick();
+    // Advance enough ticks to clear penalty (assuming 300s default in deterrents)
+    for(int i=0; i<305; i++) engine->tick();
     
     // 4. Verify Completion
     TEST_ASSERT_EQUAL(COMPLETED, engine->getState());
