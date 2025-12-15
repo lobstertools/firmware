@@ -44,10 +44,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-platformio-
 
-      # --- 3. Verify Code Formatting ---
+      # --- 3. Verification & Testing ---
       
       - name: "Verify Code Formatting"
         run: pio run -e esp32_diymore_release -t verify
+
+      - name: "Run Native Logic Tests"
+        run: pio test -e native
 
       # --- 4. Set Version & Build Firmware ---
       
