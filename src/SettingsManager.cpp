@@ -320,7 +320,8 @@ void SettingsManager::setChannelEnabled(int channelIndex, bool enabled) {
  * Updated SettingsManager.cpp implementation
  */
 
-void SettingsManager::saveSessionState(const DeviceState &state, const SessionTimers &timers, const SessionStats &stats, const SessionConfig &config) {
+void SettingsManager::saveSessionState(const DeviceState &state, const SessionTimers &timers, const SessionStats &stats,
+                                       const SessionConfig &config) {
   sessionPrefs.begin("session", false);
 
   // 1. Save Device State
@@ -333,12 +334,12 @@ void SettingsManager::saveSessionState(const DeviceState &state, const SessionTi
   sessionPrefs.putULong("t_penRem", timers.penaltyRemaining);
   sessionPrefs.putULong("t_testRem", timers.testRemaining);
   sessionPrefs.putULong("t_trigOut", timers.triggerTimeout);
-  
+
   // Timer Channel Delays
   char keyBuf[16];
-  for(int i = 0; i < MAX_CHANNELS; i++) {
-      snprintf(keyBuf, sizeof(keyBuf), "t_delay%d", i);
-      sessionPrefs.putULong(keyBuf, timers.channelDelays[i]);
+  for (int i = 0; i < MAX_CHANNELS; i++) {
+    snprintf(keyBuf, sizeof(keyBuf), "t_delay%d", i);
+    sessionPrefs.putULong(keyBuf, timers.channelDelays[i]);
   }
 
   // 3. Save SessionStats
@@ -358,9 +359,9 @@ void SettingsManager::saveSessionState(const DeviceState &state, const SessionTi
   sessionPrefs.putBool("c_disLED", config.disableLED);
 
   // Config Channel Delays (distinct from timer delays)
-  for(int i = 0; i < MAX_CHANNELS; i++) {
-      snprintf(keyBuf, sizeof(keyBuf), "c_delay%d", i);
-      sessionPrefs.putULong(keyBuf, config.channelDelays[i]);
+  for (int i = 0; i < MAX_CHANNELS; i++) {
+    snprintf(keyBuf, sizeof(keyBuf), "c_delay%d", i);
+    sessionPrefs.putULong(keyBuf, config.channelDelays[i]);
   }
 
   sessionPrefs.end();
@@ -371,7 +372,7 @@ bool SettingsManager::loadSessionState(DeviceState &state, SessionTimers &timers
 
   if (!sessionPrefs.isKey("state")) {
     sessionPrefs.end();
-    return false; 
+    return false;
   }
 
   // 1. Load Device State
@@ -386,9 +387,9 @@ bool SettingsManager::loadSessionState(DeviceState &state, SessionTimers &timers
   timers.triggerTimeout = sessionPrefs.getULong("t_trigOut", 0);
 
   char keyBuf[16];
-  for(int i = 0; i < MAX_CHANNELS; i++) {
-      snprintf(keyBuf, sizeof(keyBuf), "t_delay%d", i);
-      timers.channelDelays[i] = sessionPrefs.getULong(keyBuf, 0);
+  for (int i = 0; i < MAX_CHANNELS; i++) {
+    snprintf(keyBuf, sizeof(keyBuf), "t_delay%d", i);
+    timers.channelDelays[i] = sessionPrefs.getULong(keyBuf, 0);
   }
 
   // 3. Load SessionStats
@@ -407,9 +408,9 @@ bool SettingsManager::loadSessionState(DeviceState &state, SessionTimers &timers
   config.hideTimer = sessionPrefs.getBool("c_hideTmr", false);
   config.disableLED = sessionPrefs.getBool("c_disLED", false);
 
-  for(int i = 0; i < MAX_CHANNELS; i++) {
-      snprintf(keyBuf, sizeof(keyBuf), "c_delay%d", i);
-      config.channelDelays[i] = sessionPrefs.getULong(keyBuf, 0);
+  for (int i = 0; i < MAX_CHANNELS; i++) {
+    snprintf(keyBuf, sizeof(keyBuf), "c_delay%d", i);
+    config.channelDelays[i] = sessionPrefs.getULong(keyBuf, 0);
   }
 
   sessionPrefs.end();

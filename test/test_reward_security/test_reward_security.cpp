@@ -155,11 +155,11 @@ void test_reward_preserved_after_penalty_and_reboot(void) {
     // Check Visibility: Should be visible now
     const Reward* compHistory = engine->getRewardHistory();
     TEST_ASSERT_NOT_NULL(compHistory);
-    // Code A should still be at index 0 (The reward for the session just finished)
+    // Code A should still be at index 0 (The user just paid for this session)
     TEST_ASSERT_EQUAL_STRING(codeA, compHistory[0].code);
 
     // 5. Simulate Reboot / Reset to READY
-    // This triggers rotateAndGenerateReward()
+    // This triggers rotateAndGenerateReward(): [0]->[1], New->[0]
     engine->handleReboot();
     TEST_ASSERT_EQUAL(READY, engine->getState());
 

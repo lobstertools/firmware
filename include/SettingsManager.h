@@ -50,7 +50,8 @@ public:
   static void setChannelEnabled(int channelIndex, bool enabled);
 
   // --- Dynamic Session State (Save/Load) ---
-  static void saveSessionState(const DeviceState &state, const SessionTimers &timers, const SessionStats &stats, const SessionConfig &config);
+  static void saveSessionState(const DeviceState &state, const SessionTimers &timers, const SessionStats &stats,
+                               const SessionConfig &config);
   static bool loadSessionState(DeviceState &state, SessionTimers &timers, SessionStats &stats, SessionConfig &config);
 
   // --- Boot & Crash Diagnostics ---

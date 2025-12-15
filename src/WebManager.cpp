@@ -185,7 +185,7 @@ void WebManager::handleStatus(AsyncWebServerRequest *request) {
   uint32_t heap = ESP.getFreeHeap();
   float temp = temperatureRead();
   int64_t uptime = esp_timer_get_time() / 1000; // micro to milli
-  
+
   uint32_t currentPressDurationMs = Esp32SessionHAL::getInstance().getCurrentPressDurationMs();
 
   Esp32SessionHAL::getInstance().unlockState();
@@ -383,9 +383,9 @@ void WebManager::handleReward(AsyncWebServerRequest *request) {
 
     // 1. Check for Null Pointer (Safety Feature: Rewards are hidden in active states)
     if (history == nullptr) {
-        Esp32SessionHAL::getInstance().unlockState();
-        sendJsonError(request, 403, "Rewards are hidden during active session or penalty.");
-        return;
+      Esp32SessionHAL::getInstance().unlockState();
+      sendJsonError(request, 403, "Rewards are hidden during active session or penalty.");
+      return;
     }
 
     // 2. Serialize Data
@@ -402,7 +402,7 @@ void WebManager::handleReward(AsyncWebServerRequest *request) {
 
     String rJson;
     serializeJson(doc, rJson);
-    
+
     Esp32SessionHAL::getInstance().unlockState();
     request->send(200, "application/json", rJson);
   } else {
@@ -463,7 +463,7 @@ void WebManager::handleReboot(AsyncWebServerRequest *request) {
 
 void WebManager::handleFactoryReset(AsyncWebServerRequest *request) {
   if (Esp32SessionHAL::getInstance().lockState()) {
-    
+
     DeviceState s = _engine->getState();
     if (s != READY) {
       Esp32SessionHAL::getInstance().unlockState();
@@ -518,5 +518,5 @@ void WebManager::handleUpdateWifi(AsyncWebServerRequest *request, uint8_t *data,
     request->send(200, "application/json", "{\"status\":\"saved\", \"message\":\"Reboot to apply.\"}");
   } else {
     sendJsonError(request, 503, "System Busy");
-  }    
+  }
 }

@@ -69,7 +69,7 @@ private:
   void checkBootLoop();
   void markBootStability();
   void processLogQueue();
-  void checkPressState(); // Helper to manage start time logic
+  void checkPressState();   // Helper to manage start time logic
   void updateSafetyLogic(); // Internal Debounce & Grace Period Logic
 
   // --- Static Interrupt/Callback Handlers ---
@@ -130,7 +130,7 @@ public:
   bool checkTriggerAction() override;
   bool checkAbortAction() override;
   bool checkShortPressAction() override;
-  
+
   void setLedEnabled(bool enabled) override;
 
   bool isSafetyInterlockValid() override;

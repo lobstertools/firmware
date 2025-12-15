@@ -139,11 +139,10 @@ void NetworkManager::startMDNS() {
 
   uint8_t mac[6];
   esp_efuse_mac_get_default(mac);
-  
+
   // Format MAC string (e.g., "A1:B2:C3:D4:E5:F6")
   char macStr[18];
-  snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X", 
-           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
   // 2. Define Unique Hostname (for http://lobster-lock-XXXXXX.local)
   char uniqueHostname[30];
@@ -155,7 +154,7 @@ void NetworkManager::startMDNS() {
   }
 
   MDNS.addService("lobster-lock", "tcp", 80);
-  MDNS.addServiceTxt("lobster-lock", "tcp", "mac", (const char*)macStr);
+  MDNS.addServiceTxt("lobster-lock", "tcp", "mac", (const char *)macStr);
   MDNS.addServiceTxt("lobster-lock", "tcp", "deviceName", "Lobster Lock (diymore)");
 
   char logBuf[64];

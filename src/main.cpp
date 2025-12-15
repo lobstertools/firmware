@@ -123,13 +123,13 @@ void setup() {
 
   if (hasState) {
     hal.logKeyValue("System", "Restoring state to Session Engine...");
-    
+
     // Load ALL data into engine memory first
     sessionEngine->loadState(savedState);
     sessionEngine->loadTimers(savedTimers);
     sessionEngine->loadStats(savedStats);
-    sessionEngine->loadConfig(savedConfig); 
-    
+    sessionEngine->loadConfig(savedConfig);
+
     // Now perform the logic checks (which might trigger a re-save)
     sessionEngine->handleReboot();
   } else {

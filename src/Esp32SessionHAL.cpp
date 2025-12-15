@@ -52,15 +52,11 @@ Esp32SessionHAL::Esp32SessionHAL()
     : _triggerActionPending(false), _abortActionPending(false), _shortPressPending(false), _pcbPressed(false), _extPressed(false),
       _pressStartTime(0), _cachedState((DeviceState)-1), _logBufferIndex(0), _queueHead(0), _queueTail(0), _statusLed(JLed(STATUS_LED_PIN)),
       _lastHealthCheck(0), _bootStartTime(0), _bootMarkedStable(false), _enabledChannelsMask(0x0F),
-      
+
       // Safety Logic Init
-      _safetyStableStart(0), 
-      _safetyLostStart(0), 
-      _isSafetyValid(false), 
-      _lastSafetyRaw(false),
+      _safetyStableStart(0), _safetyLostStart(0), _isSafetyValid(false), _lastSafetyRaw(false),
       // LED Control Init
-      _isLedEnabled(true)
-{
+      _isLedEnabled(true) {
   // OneButton Setup (Pin, ActiveLow, Pullup)
   _pcbButton = OneButton(PCB_BUTTON_PIN, true, true);
 
@@ -139,7 +135,7 @@ void Esp32SessionHAL::initialize() {
 
   // 7. Boot Checks
   checkBootLoop();
-  
+
   // 8. Force Initial LED State
   // Initialize to READY pattern (Breathe) so device is not dark on boot
   _statusLed.Breathe(4000).Forever();
@@ -152,7 +148,7 @@ void Esp32SessionHAL::tick() {
   if (!lockState()) {
     return;
   }
-  
+
   // 1. Process Safety Logic (Before peripherals to ensure graceful aborts)
   updateSafetyLogic();
 
@@ -184,86 +180,82 @@ void Esp32SessionHAL::tick() {
 // =================================================================================
 
 void Esp32SessionHAL::updateSafetyLogic() {
-    // 1. Identify Mode
-    #ifdef EXT_BUTTON_PIN
-        bool isDevMode = (EXT_BUTTON_PIN == -1);
-    #else
-        bool isDevMode = true;
-    #endif
+// 1. Identify Mode
+#ifdef EXT_BUTTON_PIN
+  bool isDevMode = (EXT_BUTTON_PIN == -1);
+#else
+  bool isDevMode = true;
+#endif
 
-    // 2. Dev Mode Bypass
-    // If no hardware switch is defined, we validate immediately.
-    // This prevents the "Stabilizing..." delay on boot which conflicts 
-    // with restored Critical States (LOCKED/ABORTED) causing false alarms.
-    if (isDevMode) {
+  // 2. Dev Mode Bypass
+  // If no hardware switch is defined, we validate immediately.
+  // This prevents the "Stabilizing..." delay on boot which conflicts
+  // with restored Critical States (LOCKED/ABORTED) causing false alarms.
+  if (isDevMode) {
+    _isSafetyValid = true;
+    _lastSafetyRaw = true;
+    return;
+  }
+
+  // 3. Hardware Logic (Active Switch)
+  // NC Switch: LOW = Connected/Safe, HIGH = Disconnected/Unsafe
+  // We only reach here if EXT_BUTTON_PIN is defined and valid.
+
+#ifdef EXT_BUTTON_PIN
+  bool isConnectedRaw = (digitalRead(EXT_BUTTON_PIN) == LOW);
+  unsigned long now = millis();
+
+  if (isConnectedRaw) {
+    // --- CASE: PHYSICALLY CONNECTED ---
+    _safetyLostStart = 0; // Clear loss timer
+
+    if (!_lastSafetyRaw) {
+      // Rising Edge: Just plugged in
+      _safetyStableStart = now;
+      logKeyValue("Safety", "Signal Detected. Stabilizing...");
+    }
+
+    // On-Delay: Wait for signal to be stable before granting permission
+    if (!_isSafetyValid) {
+      unsigned long stableTime = g_systemDefaults.extButtonSignalDuration * 1000;
+      if (now - _safetyStableStart >= stableTime) {
         _isSafetyValid = true;
-        _lastSafetyRaw = true;
-        return; 
+        logKeyValue("Safety", "Interlock Verified. Hardware Permitted.");
+      }
     }
+  } else {
+    // --- CASE: PHYSICALLY DISCONNECTED ---
+    // (Could be a cable cut OR a button press)
 
-    // 3. Hardware Logic (Active Switch)
-    // NC Switch: LOW = Connected/Safe, HIGH = Disconnected/Unsafe
-    // We only reach here if EXT_BUTTON_PIN is defined and valid.
-    
-    #ifdef EXT_BUTTON_PIN 
-    bool isConnectedRaw = (digitalRead(EXT_BUTTON_PIN) == LOW);
-    unsigned long now = millis();
+    if (_isSafetyValid) {
+      // It WAS valid, now it's gone. Start Grace Period Timer.
+      if (_safetyLostStart == 0) {
+        _safetyLostStart = now;
+      }
 
-    if (isConnectedRaw) {
-        // --- CASE: PHYSICALLY CONNECTED ---
-        _safetyLostStart = 0; // Clear loss timer
+      // Off-Delay: Wait for LongPress duration + Buffer (e.g., 500ms)
+      // This ensures OneButton has time to detect the LongPress event
+      // before we declare the safety invalid.
+      unsigned long gracePeriod = (g_systemDefaults.longPressDuration * 1000) + 500;
 
-        if (!_lastSafetyRaw) {
-            // Rising Edge: Just plugged in
-            _safetyStableStart = now;
-            logKeyValue("Safety", "Signal Detected. Stabilizing...");
-        }
-
-        // On-Delay: Wait for signal to be stable before granting permission
-        if (!_isSafetyValid) {
-            unsigned long stableTime = g_systemDefaults.extButtonSignalDuration * 1000;
-            if (now - _safetyStableStart >= stableTime) {
-                _isSafetyValid = true;
-                logKeyValue("Safety", "Interlock Verified. Hardware Permitted.");
-            }
-        }
-    } 
-    else {
-        // --- CASE: PHYSICALLY DISCONNECTED ---
-        // (Could be a cable cut OR a button press)
-
-        if (_isSafetyValid) {
-            // It WAS valid, now it's gone. Start Grace Period Timer.
-            if (_safetyLostStart == 0) {
-                _safetyLostStart = now;
-            }
-
-            // Off-Delay: Wait for LongPress duration + Buffer (e.g., 500ms)
-            // This ensures OneButton has time to detect the LongPress event
-            // before we declare the safety invalid.
-            unsigned long gracePeriod = (g_systemDefaults.longPressDuration * 1000) + 500;
-
-            if (now - _safetyLostStart > gracePeriod) {
-                // Time's up. It wasn't a button press. It's a disconnect.
-                _isSafetyValid = false;
-                _safetyStableStart = 0;
-                logKeyValue("Safety", "Interlock Signal Lost (Timeout).");
-            }
-            // Else: We are in the grace period. Keep _isSafetyValid = TRUE.
-        } 
-        else {
-            // It wasn't valid to begin with. Reset.
-            _safetyStableStart = 0;
-        }
+      if (now - _safetyLostStart > gracePeriod) {
+        // Time's up. It wasn't a button press. It's a disconnect.
+        _isSafetyValid = false;
+        _safetyStableStart = 0;
+        logKeyValue("Safety", "Interlock Signal Lost (Timeout).");
+      }
+      // Else: We are in the grace period. Keep _isSafetyValid = TRUE.
+    } else {
+      // It wasn't valid to begin with. Reset.
+      _safetyStableStart = 0;
     }
+  }
 
-    _lastSafetyRaw = isConnectedRaw;
-    #endif
+  _lastSafetyRaw = isConnectedRaw;
+#endif
 }
 
-bool Esp32SessionHAL::isSafetyInterlockValid() {
-    return _isSafetyValid;
-}
+bool Esp32SessionHAL::isSafetyInterlockValid() { return _isSafetyValid; }
 
 // =================================================================================
 // SECTION: CHANNEL CONFIGURATION
@@ -293,18 +285,19 @@ uint32_t Esp32SessionHAL::getCurrentPressDurationMs() const {
 // =================================================================================
 
 void Esp32SessionHAL::setLedEnabled(bool enabled) {
-    if (_isLedEnabled == enabled) return;
-    _isLedEnabled = enabled;
+  if (_isLedEnabled == enabled)
+    return;
+  _isLedEnabled = enabled;
 
-    if (enabled) {
-        // If enabling, force a pattern refresh for the current cached state
-        DeviceState current = _cachedState;
-        _cachedState = (DeviceState)-1; // Invalidate cache to force updateLedPattern logic to run
-        updateLedPattern(current);
-    } else {
-        // If disabling, turn off immediately
-        _statusLed.Off().Forever();
-    }
+  if (enabled) {
+    // If enabling, force a pattern refresh for the current cached state
+    DeviceState current = _cachedState;
+    _cachedState = (DeviceState)-1; // Invalidate cache to force updateLedPattern logic to run
+    updateLedPattern(current);
+  } else {
+    // If disabling, turn off immediately
+    _statusLed.Off().Forever();
+  }
 }
 
 // =================================================================================
@@ -483,7 +476,8 @@ bool Esp32SessionHAL::isSafetyInterlockEngaged() {
   // Production: Normally Closed (NC) switch.
   // CLOSED (GND/LOW) = Safe/Connected.
   // OPEN (VCC/HIGH) = Unsafe/Disconnected.
-  if (EXT_BUTTON_PIN != -1) return (digitalRead(EXT_BUTTON_PIN) == LOW);
+  if (EXT_BUTTON_PIN != -1)
+    return (digitalRead(EXT_BUTTON_PIN) == LOW);
   return true;
 #else
   return true; // Dev mode always safe
@@ -511,10 +505,11 @@ void Esp32SessionHAL::armFailsafeTimer(uint32_t seconds) {
   }
 
   // Verify 0 wasn't passed by mistake (which would fire immediately or fail)
-  if (seconds == 0) return;
+  if (seconds == 0)
+    return;
 
   uint64_t timeout_us = (uint64_t)seconds * 1000000ULL;
-  
+
   // Stop existing before starting new (standard ESP timer practice)
   esp_timer_stop(s_failsafeTimer);
   esp_timer_start_once(s_failsafeTimer, timeout_us);
@@ -533,7 +528,8 @@ void Esp32SessionHAL::disarmFailsafeTimer() {
 
 // --- Storage ---
 
-void Esp32SessionHAL::saveState(const DeviceState &state, const SessionTimers &timers, const SessionStats &stats, const SessionConfig &config) {
+void Esp32SessionHAL::saveState(const DeviceState &state, const SessionTimers &timers, const SessionStats &stats,
+                                const SessionConfig &config) {
   updateLedPattern(state);
 
   // Delegate to SettingsManager
@@ -556,9 +552,9 @@ void Esp32SessionHAL::updateLedPattern(DeviceState state) {
 
   // 1. If LED is disabled, ensure it remains OFF and exit
   if (!_isLedEnabled) {
-      // Force OFF if we just changed state or if we are here due to a toggle
-      _statusLed.Off().Forever();
-      return;
+    // Force OFF if we just changed state or if we are here due to a toggle
+    _statusLed.Off().Forever();
+    return;
   }
 
   // 2. If LED is enabled and state changed, verify and apply pattern
@@ -569,26 +565,26 @@ void Esp32SessionHAL::updateLedPattern(DeviceState state) {
 
     switch (state) {
     case READY:
-        _statusLed.Breathe(4000).Forever();
-        break;
+      _statusLed.Breathe(4000).Forever();
+      break;
     case ARMED:
-        _statusLed.Blink(250, 250).Forever();
-        break;
+      _statusLed.Blink(250, 250).Forever();
+      break;
     case LOCKED:
-        _statusLed.On().Forever();
-        break;
+      _statusLed.On().Forever();
+      break;
     case ABORTED:
-        _statusLed.Blink(500, 500).Forever();
-        break;
+      _statusLed.Blink(500, 500).Forever();
+      break;
     case COMPLETED:
-        _statusLed.Blink(200, 200).Repeat(2).DelayAfter(3000).Forever();
-        break;
+      _statusLed.Blink(200, 200).Repeat(2).DelayAfter(3000).Forever();
+      break;
     case TESTING:
-        _statusLed.FadeOn(750).FadeOff(750).Forever();
-        break;
+      _statusLed.FadeOn(750).FadeOff(750).Forever();
+      break;
     default:
-        _statusLed.Off().Forever();
-        break;
+      _statusLed.Off().Forever();
+      break;
     }
   }
 }

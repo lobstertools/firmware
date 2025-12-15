@@ -5,7 +5,7 @@
  * =================================================================================
  */
 
- #include "Types.h"
+#include "Types.h"
 
 const char *stateToString(DeviceState s) {
   switch (s) {
@@ -43,8 +43,11 @@ const char *durTypeToString(DurationType d) {
 
 const char *outcomeToString(SessionOutcome o) {
   switch (o) {
-    case OUTCOME_SUCCESS: return "SUCCESS";
-    case OUTCOME_ABORTED: return "ABORTED";
-    default: return "UNKNOWN";
+  case OUTCOME_SUCCESS:
+    return "SUCCESS";
+  case OUTCOME_ABORTED:
+    return "ABORTED";
+  default:
+    return "UNKNOWN";
   }
 }
