@@ -68,7 +68,7 @@
 #define PROV_PAYBACK_MAX_DURATION_UUID "5a160014-8334-469b-a316-c340cf29188f"
 
 #define PROV_ENABLE_TIME_MOD_UUID "5a160030-8334-469b-a316-c340cf29188f"
-#define PROV_TIME_MOD_STEP_UUID   "5a160031-8334-469b-a316-c340cf29188f"
+#define PROV_TIME_MOD_STEP_UUID "5a160031-8334-469b-a316-c340cf29188f"
 
 // =================================================================================
 // SECTION: CLASS IMPLEMENTATION
@@ -216,11 +216,11 @@ public:
     else if (uuid == PROV_PAYBACK_TIME_CHAR_UUID)
       SettingsManager::setPaybackDuration(bytesToUint32(data));
     else if (uuid == PROV_REWARD_PENALTY_CHAR_UUID)
-      SettingsManager::setRewardPenaltyDuration(bytesToUint32(data));    
+      SettingsManager::setRewardPenaltyDuration(bytesToUint32(data));
     else if (uuid == PROV_ENABLE_TIME_MOD_UUID)
       SettingsManager::setTimeModificationEnabled((bool)data[0]);
     else if (uuid == PROV_TIME_MOD_STEP_UUID)
-      SettingsManager::setTimeModificationStep(bytesToUint32(data));    
+      SettingsManager::setTimeModificationStep(bytesToUint32(data));
 
     // --- Hardware ---
     else if (uuid == PROV_CH1_ENABLE_UUID)
@@ -237,8 +237,6 @@ public:
       SettingsManager::setPaybackStrategy((DeterrentStrategy)data[0]);
     else if (uuid == PROV_REWARD_STRATEGY_UUID)
       SettingsManager::setRewardStrategy((DeterrentStrategy)data[0]);
-
-    
 
     // --- Ranges (Read-Modify-Write) ---
     // Since we receive Min/Max individually but save them as pairs, we must:
@@ -293,7 +291,6 @@ public:
       } else if (uuid == PROV_LONG_MAX_UUID) {
         SettingsManager::setDurationPreset(DUR_RANGE_LONG, presets.longMin, val);
       }
-      
     }
   }
 };
