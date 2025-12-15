@@ -105,6 +105,8 @@ void setup() {
   uint8_t loadedChannelMask = 0x0F;
   SettingsManager::loadProvisioningConfig(loadedDeterrents, sessionPresets, loadedChannelMask);
 
+  hal.setChannelMask(loadedChannelMask);
+
   // 3. Initialize Engine
   sessionEngine = new SessionEngine(hal, rules, g_systemDefaults, sessionPresets, loadedDeterrents);
 
