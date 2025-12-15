@@ -45,6 +45,7 @@ private:
   void handleArm(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total);
   void handleStartTest(AsyncWebServerRequest *request);
   void handleAbort(AsyncWebServerRequest *request);
+  void handleTimeMod(AsyncWebServerRequest *request, bool increase);
 
   // Information
   void handleStatus(AsyncWebServerRequest *request);

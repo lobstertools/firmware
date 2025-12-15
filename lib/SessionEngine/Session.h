@@ -41,6 +41,7 @@ public:
     void trigger(const char* source);
     void handleReboot(); 
     void petWatchdog();
+    int modifyTime(bool increase);
 
     // --- State Accessors (Read-Only) ---
     DeviceState getState() const { return _state; }
@@ -60,7 +61,6 @@ public:
     const DeterrentConfig& getDeterrents() const { return _deterrents; }
 
     // --- Safety Accessor ---
-    // Returns true if the HAL reports the safety interlock is valid (physically safe or within grace period).
     bool isHardwarePermitted() const { return _hal.isSafetyInterlockValid(); }
 
     // --- State Setters (for Loading from NVS) ---

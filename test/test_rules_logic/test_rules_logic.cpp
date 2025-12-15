@@ -133,7 +133,7 @@ void test_completion_clamps_debt_at_zero(void) {
     // Setup: Simulate a session where 200s was attributed to debt payment
     // User served MORE debt than they owed (e.g. via clamping or rounding)
     SessionTimers timers = {0};
-    timers.debtServed = 200; 
+    timers.potentialDebtServed = 200; 
 
     DeterrentConfig ignored = {0}; 
     ignored.enableStreaks = true; 
@@ -152,7 +152,7 @@ void test_completion_reduces_debt_fairly(void) {
 
     // Simulate a timer where 3h (10800s) was attributed to debt
     SessionTimers timers = {0};
-    timers.debtServed = 10800; 
+    timers.potentialDebtServed = 10800; 
 
     DeterrentConfig deterrents = {0}; 
     deterrents.enableStreaks = true; 

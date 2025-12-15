@@ -63,10 +63,12 @@ void WebManager::registerEndpoints() {
   _server.on("/keepalive", HTTP_POST, [this](AsyncWebServerRequest *r) { handleKeepAlive(r); });
   _server.on("/reboot", HTTP_POST, [this](AsyncWebServerRequest *r) { handleReboot(r); });
   _server.on("/factory-reset", HTTP_POST, [this](AsyncWebServerRequest *r) { handleFactoryReset(r); });
-
+  
   // 2. Session Commands
   _server.on("/start-test", HTTP_POST, [this](AsyncWebServerRequest *r) { handleStartTest(r); });
   _server.on("/abort", HTTP_POST, [this](AsyncWebServerRequest *r) { handleAbort(r); });
+  _server.on("/time/add", HTTP_POST, [this](AsyncWebServerRequest *r) { handleTimeMod(r, true); });
+  _server.on("/time/remove", HTTP_POST, [this](AsyncWebServerRequest *r) { handleTimeMod(r, false); });
 
   // 3. Status & Info
   _server.on("/status", HTTP_GET, [this](AsyncWebServerRequest *r) { handleStatus(r); });
@@ -161,6 +163,21 @@ void WebManager::handleAbort(AsyncWebServerRequest *request) {
   }
 }
 
+void WebManager::handleTimeMod(AsyncWebServerRequest *request, bool increase) {
+    if (Esp32SessionHAL::getInstance().lockState()) {
+        int code = _engine->modifyTime(increase);
+        Esp32SessionHAL::getInstance().unlockState();
+        
+        if (code == 200) {
+            request->send(200, "application/json", "{\"status\":\"ok\"}");
+        } else {
+            sendJsonError(request, code, "Modification rejected (Disabled or Limits reached).");
+        }
+    } else {
+        sendJsonError(request, 503, "System Busy");
+    }
+}
+
 // =================================================================================
 // SECTION: STATUS & INFO
 // =================================================================================
@@ -215,7 +232,7 @@ void WebManager::handleStatus(AsyncWebServerRequest *request) {
   // 3. Timers (Matching SessionTimers Interface)
   JsonObject tObj = doc["timers"].to<JsonObject>();
   tObj["lockDuration"] = t.lockDuration;
-  tObj["debtServed"] = t.debtServed;
+  tObj["potentialDebtServed"] = t.potentialDebtServed;
   tObj["penaltyDuration"] = t.penaltyDuration;
   tObj["lockRemaining"] = t.lockRemaining;
   tObj["penaltyRemaining"] = t.penaltyRemaining;
@@ -332,6 +349,8 @@ void WebManager::handleDetails(AsyncWebServerRequest *request) {
     d["paybackTimeMin"] = det.paybackTimeMin;
     d["paybackTimeMax"] = det.paybackTimeMax;
     d["paybackTime"] = det.paybackTime;
+    d["enableTimeModification"] = det.enableTimeModification;
+    d["timeModificationStep"] = det.timeModificationStep;
 
     Esp32SessionHAL::getInstance().unlockState();
   } else {

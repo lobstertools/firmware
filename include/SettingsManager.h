@@ -38,6 +38,9 @@ public:
   static void setRewardStrategy(DeterrentStrategy strategy);
   static void setRewardRange(uint32_t min, uint32_t max);
 
+  static void setTimeModificationEnabled(bool enabled);
+  static void setTimeModificationStep(uint32_t seconds);
+
   // Loads all provisioning features into the updated structs
   static void loadProvisioningConfig(DeterrentConfig &config, SessionPresets &presets, uint8_t &channelMask);
 

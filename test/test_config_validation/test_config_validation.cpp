@@ -231,7 +231,7 @@ void test_payback_random_max_exceeds_preset_max_fails(void) {
 }
 
 // ============================================================================
-// TEST GROUP: SESSION REQUEST VALIDATION (New)
+// TEST GROUP: SESSION REQUEST VALIDATION
 // ============================================================================
 
 void test_request_fixed_zero_fails(void) {
@@ -299,6 +299,41 @@ void test_request_valid_combo_succeeds(void) {
     delete engine;
 }
 
+// ============================================================================
+// TEST GROUP: TIME MODIFICATION VALIDATION
+// ============================================================================
+
+void test_timemod_step_exceeds_limit_fails(void) {
+    MockSessionHAL hal; StandardRules rules;
+    DeterrentConfig d = validDeterrents;
+    
+    d.enableTimeModification = true;
+    d.timeModificationStep = 3601; // Invalid: 1 hour + 1 second
+
+    SessionEngine* engine = createEngine(hal, rules, validPresets, d);
+    SessionConfig req = { DUR_FIXED, 600 }; 
+
+    // Should return 400 Bad Request due to invalid config
+    TEST_ASSERT_EQUAL(400, engine->startSession(req));
+    delete engine;
+}
+
+void test_timemod_valid_step_succeeds(void) {
+    MockSessionHAL hal; StandardRules rules;
+    DeterrentConfig d = validDeterrents;
+    
+    d.enableTimeModification = true;
+    d.timeModificationStep = 3600; // Valid: Exactly 1 hour
+
+    SessionEngine* engine = createEngine(hal, rules, validPresets, d);
+    SessionConfig req = { DUR_FIXED, 600 }; 
+
+    // Should succeed
+    TEST_ASSERT_EQUAL(200, engine->startSession(req));
+    TEST_ASSERT_EQUAL(ARMED, engine->getState());
+    delete engine;
+}
+
 int main(void) {
     UNITY_BEGIN();
     
@@ -326,6 +361,10 @@ int main(void) {
     RUN_TEST(test_request_random_equal_range_fails);
     RUN_TEST(test_request_delay_exceeds_limit_fails);
     RUN_TEST(test_request_valid_combo_succeeds);
+
+    // Time Modification Validation
+    RUN_TEST(test_timemod_step_exceeds_limit_fails);
+    RUN_TEST(test_timemod_valid_step_succeeds);
 
     return UNITY_END();
 }

@@ -155,6 +155,13 @@ bool SessionEngine::validateConfig(const DeterrentConfig& deterrents, const Sess
         }
     }
 
+    // Time Modification
+    if (deterrents.enableTimeModification) {
+        // Step must be <= 1 Hour (3600 seconds).
+        // Note: uint32_t is always >= 0. modifyTime() handles 0 as a default (60s).
+        if (deterrents.timeModificationStep > 3600) return false;
+    }
+
     return true;
 }
 
@@ -267,6 +274,13 @@ void SessionEngine::printStartupDiagnostics() {
             _hal.log(logBuf);
         }
     }
+
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Time Mod", boolStr[_deterrents.enableTimeModification]);
+    _hal.log(logBuf);
+    if (_deterrents.enableTimeModification) {
+        snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Time Mod Step", _deterrents.timeModificationStep);
+        _hal.log(logBuf);
+    }    
 
     // -------------------------------------------------------------------------
     // SECTION: STATISTICS
@@ -510,6 +524,89 @@ uint32_t SessionEngine::calculateFailsafeDuration(uint32_t baseSeconds) const {
   return armedSeconds;
 }
 
+int SessionEngine::modifyTime(bool increase) {
+ 
+  // 1. Feature Flag & State Check
+    if (!_deterrents.enableTimeModification) return 403; // Disabled
+    if (_state != ARMED && _state != LOCKED && _state != TESTING) return 409; // Invalid State
+
+    // 2. Determine Step Size
+    uint32_t step = _deterrents.timeModificationStep;
+    if (step == 0) step = 60; // Failsafe default
+
+    // 3. Pointer setup (Target the correct timer)
+    uint32_t* targetRemaining = (_state == TESTING) ? &_timers.testRemaining : &_timers.lockRemaining;
+    
+    // 4. Calculate Constraints
+    if (increase) {
+        // --- INCREASE LOGIC ---
+        
+        // A. Clamp to Global Max
+        if (*targetRemaining + step > _presets.maxSessionDuration) {
+            // Option: Clamp to max or Reject. Rejecting is safer/clearer.
+            return 400; // Limit Reached
+        }
+
+        // B. Apply
+        *targetRemaining += step;
+        
+        // C. Update Debt Logic (Only in LOCKED state, not ARMED/TESTING)
+        if (_state == LOCKED) {
+            _timers.lockDuration += step; // Track total duration increase
+            
+            // Calculate original base (committed time without debt)
+            // Current Total - Current Debt portion = Base
+            // We assume Base is constant.
+            uint32_t baseDuration = (_timers.lockDuration - step) - _timers.potentialDebtServed;
+            
+            // Calculate theoretical new debt portion
+            uint32_t potentialDebtServed = _timers.lockDuration - baseDuration;
+            
+            // Cap at total accumulated debt (can't pay off more than you owe)
+            if (potentialDebtServed > _stats.paybackAccumulated) {
+                potentialDebtServed = _stats.paybackAccumulated;
+            }
+            _timers.potentialDebtServed = potentialDebtServed;
+        }
+
+    } else {
+        // --- DECREASE LOGIC ---
+
+        // A. Clamp to Step Floor (User Requirement)
+        // Prevent reducing if result would be less than the step itself.
+        // This ensures the session never drops to 0 and always leaves a "Step" worth of time.
+        if (*targetRemaining <= step) {
+            return 409; // Conflict: Cannot reduce below minimum step floor
+        }
+
+        // B. Apply
+        *targetRemaining -= step;
+
+        // C. Update Debt Logic (Only in LOCKED state)
+        if (_state == LOCKED) {
+            // Reduce total duration record
+            if (_timers.lockDuration > step) _timers.lockDuration -= step;
+            else _timers.lockDuration = *targetRemaining; // Sanity sync
+
+            // Recalculate Debt: Debt takes the hit first.
+            // If we have debt served, reduce it by the step.
+            if (_timers.potentialDebtServed >= step) {
+                _timers.potentialDebtServed -= step;
+            } else {
+                _timers.potentialDebtServed = 0;
+            }
+        }
+    }
+
+    // 5. Persist Changes
+    char logBuf[64];
+    snprintf(logBuf, sizeof(logBuf), "Time Mod: %s %u s. Rem: %u", increase ? "+" : "-", step, *targetRemaining);
+    logKeyValue("Session", logBuf);
+    
+    _hal.saveState(_state, _timers, _stats, _activeConfig);
+    return 200;
+}
+
 // =================================================================================
 // SECTION: MAIN TICK
 // =================================================================================
@@ -698,9 +795,9 @@ int SessionEngine::startSession(const SessionConfig &config) {
 
   // Calculate the portion that is strictly extra penalty
   if (finalLockDuration > baseDuration) {
-    _timers.debtServed = finalLockDuration - baseDuration;
+    _timers.potentialDebtServed = finalLockDuration - baseDuration;
   } else {
-    _timers.debtServed = 0;
+    _timers.potentialDebtServed = 0;
   }
 
   // 6. Commit State

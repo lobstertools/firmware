@@ -42,8 +42,8 @@ public:
 
     // --- 3. Completion Logic ---
     void onCompletion(SessionStats& stats, const SessionTimers& timers, const DeterrentConfig& deterrents) override {
-        if (stats.paybackAccumulated >= timers.debtServed) {
-            stats.paybackAccumulated -= timers.debtServed;
+        if (stats.paybackAccumulated >= timers.potentialDebtServed) {
+            stats.paybackAccumulated -= timers.potentialDebtServed;
         } else {
             stats.paybackAccumulated = 0; // Safety clamp
         }

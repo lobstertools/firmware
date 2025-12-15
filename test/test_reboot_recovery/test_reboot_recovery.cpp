@@ -119,7 +119,7 @@ void test_reboot_results_in_zero_debt_paid(void) {
     engine->tick(); // ARMED -> LOCKED. This transition AUTOMATICALLY saves state to HAL.
 
     // Verify Debt Portion is calculated correctly (internal state)
-    TEST_ASSERT_EQUAL_UINT32(10800, engine->getTimers().debtServed);
+    TEST_ASSERT_EQUAL_UINT32(10800, engine->getTimers().potentialDebtServed);
 
     // 2. Simulate Reboot (Persistence of STATE, but Failure of SESSION)
     // The mock HAL already has the latest state from the tick() call above.

@@ -198,6 +198,18 @@ void SettingsManager::setRewardRange(uint32_t min, uint32_t max) {
   log("Settings", logBuf);
 }
 
+void SettingsManager::setTimeModificationEnabled(bool enabled) {
+  provPrefs.begin("provisioning", false);
+  provPrefs.putBool("enTimeMod", enabled);
+  provPrefs.end();
+  log("Settings", enabled ? "Time Mod: ENABLED" : "Time Mod: DISABLED");
+}
+
+void SettingsManager::setTimeModificationStep(uint32_t seconds) {
+  // Enforce a sanity limit (e.g., min 1 minute, max 1 hour)
+  uint32_t final = validateAndSave("timeModStep", seconds, 60, 3600, "Time Mod Step");
+}
+
 // =================================================================================
 // SECTION: LOADER
 // =================================================================================
@@ -223,6 +235,9 @@ void SettingsManager::loadProvisioningConfig(DeterrentConfig &config, SessionPre
   config.rewardPenalty = provPrefs.getUInt("rwdPenaltySec", config.rewardPenalty);
   config.rewardPenaltyMin = provPrefs.getUInt("penMin", 300);
   config.rewardPenaltyMax = provPrefs.getUInt("penMax", 1800);
+
+  config.enableTimeModification = provPrefs.getBool("enTimeMod", false);
+  config.timeModificationStep = provPrefs.getUInt("timeModStep", 300);
 
   // 4. Session Presets - Generators
   // Default values are provided if NVS is empty
