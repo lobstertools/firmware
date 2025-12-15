@@ -14,6 +14,7 @@
 static Preferences wifiPrefs;
 static Preferences provPrefs;
 static Preferences sessionPrefs;
+static Preferences sessionConfig;
 static Preferences bootPrefs;
 
 // --- Safety Limits ---
@@ -331,104 +332,100 @@ void SettingsManager::setChannelEnabled(int channelIndex, bool enabled) {
 // SECTION: DYNAMIC SESSION STATE
 // =================================================================================
 
-/*
- * Updated SettingsManager.cpp implementation
- */
-
 void SettingsManager::saveSessionState(const DeviceState &state, const SessionTimers &timers, const SessionStats &stats,
                                        const SessionConfig &config) {
-  sessionPrefs.begin("session", false);
+  sessionConfig.begin("session", false);
 
   // 1. Save Device State
-  sessionPrefs.putUChar("state", (uint8_t)state);
+  sessionConfig.putUChar("state", (uint8_t)state);
 
   // 2. Save SessionTimers
-  sessionPrefs.putULong("t_lockDur", timers.lockDuration);
-  sessionPrefs.putULong("t_penDur", timers.penaltyDuration);
-  sessionPrefs.putULong("t_lockRem", timers.lockRemaining);
-  sessionPrefs.putULong("t_penRem", timers.penaltyRemaining);
-  sessionPrefs.putULong("t_testRem", timers.testRemaining);
-  sessionPrefs.putULong("t_trigOut", timers.triggerTimeout);
+  sessionConfig.putULong("t_lockDur", timers.lockDuration);
+  sessionConfig.putULong("t_penDur", timers.penaltyDuration);
+  sessionConfig.putULong("t_lockRem", timers.lockRemaining);
+  sessionConfig.putULong("t_penRem", timers.penaltyRemaining);
+  sessionConfig.putULong("t_testRem", timers.testRemaining);
+  sessionConfig.putULong("t_trigOut", timers.triggerTimeout);
 
   // Timer Channel Delays
   char keyBuf[16];
   for (int i = 0; i < MAX_CHANNELS; i++) {
     snprintf(keyBuf, sizeof(keyBuf), "t_delay%d", i);
-    sessionPrefs.putULong(keyBuf, timers.channelDelays[i]);
+    sessionConfig.putULong(keyBuf, timers.channelDelays[i]);
   }
 
   // 3. Save SessionStats
-  sessionPrefs.putULong("s_streaks", stats.streaks);
-  sessionPrefs.putULong("s_compl", stats.completed);
-  sessionPrefs.putULong("s_abort", stats.aborted);
-  sessionPrefs.putULong("s_payback", stats.paybackAccumulated);
-  sessionPrefs.putULong("s_total", stats.totalLockedTime);
+  sessionConfig.putULong("s_streaks", stats.streaks);
+  sessionConfig.putULong("s_compl", stats.completed);
+  sessionConfig.putULong("s_abort", stats.aborted);
+  sessionConfig.putULong("s_payback", stats.paybackAccumulated);
+  sessionConfig.putULong("s_total", stats.totalLockedTime);
 
   // 4. Save SessionConfig
-  sessionPrefs.putUChar("c_durType", (uint8_t)config.durationType);
-  sessionPrefs.putULong("c_durFix", config.durationFixed);
-  sessionPrefs.putULong("c_durMin", config.durationMin);
-  sessionPrefs.putULong("c_durMax", config.durationMax);
-  sessionPrefs.putUChar("c_trigStrat", (uint8_t)config.triggerStrategy);
-  sessionPrefs.putBool("c_hideTmr", config.hideTimer);
-  sessionPrefs.putBool("c_disLED", config.disableLED);
+  sessionConfig.putUChar("c_durType", (uint8_t)config.durationType);
+  sessionConfig.putULong("c_durFix", config.durationFixed);
+  sessionConfig.putULong("c_durMin", config.durationMin);
+  sessionConfig.putULong("c_durMax", config.durationMax);
+  sessionConfig.putUChar("c_trigStrat", (uint8_t)config.triggerStrategy);
+  sessionConfig.putBool("c_hideTmr", config.hideTimer);
+  sessionConfig.putBool("c_disLED", config.disableLED);
 
-  // Config Channel Delays (distinct from timer delays)
+  // Config Channel Delays
   for (int i = 0; i < MAX_CHANNELS; i++) {
     snprintf(keyBuf, sizeof(keyBuf), "c_delay%d", i);
-    sessionPrefs.putULong(keyBuf, config.channelDelays[i]);
+    sessionConfig.putULong(keyBuf, config.channelDelays[i]);
   }
 
-  sessionPrefs.end();
+  sessionConfig.end();
 }
 
 bool SettingsManager::loadSessionState(DeviceState &state, SessionTimers &timers, SessionStats &stats, SessionConfig &config) {
-  sessionPrefs.begin("session", true);
+  sessionConfig.begin("session", true);
 
-  if (!sessionPrefs.isKey("state")) {
-    sessionPrefs.end();
+  if (!sessionConfig.isKey("state")) {
+    sessionConfig.end();
     return false;
   }
 
   // 1. Load Device State
-  state = (DeviceState)sessionPrefs.getUChar("state", (uint8_t)READY);
+  state = (DeviceState)sessionConfig.getUChar("state", (uint8_t)READY);
 
   // 2. Load SessionTimers
-  timers.lockDuration = sessionPrefs.getULong("t_lockDur", 0);
-  timers.penaltyDuration = sessionPrefs.getULong("t_penDur", 0);
-  timers.lockRemaining = sessionPrefs.getULong("t_lockRem", 0);
-  timers.penaltyRemaining = sessionPrefs.getULong("t_penRem", 0);
-  timers.testRemaining = sessionPrefs.getULong("t_testRem", 0);
-  timers.triggerTimeout = sessionPrefs.getULong("t_trigOut", 0);
+  timers.lockDuration = sessionConfig.getULong("t_lockDur", 0);
+  timers.penaltyDuration = sessionConfig.getULong("t_penDur", 0);
+  timers.lockRemaining = sessionConfig.getULong("t_lockRem", 0);
+  timers.penaltyRemaining = sessionConfig.getULong("t_penRem", 0);
+  timers.testRemaining = sessionConfig.getULong("t_testRem", 0);
+  timers.triggerTimeout = sessionConfig.getULong("t_trigOut", 0);
 
   char keyBuf[16];
   for (int i = 0; i < MAX_CHANNELS; i++) {
     snprintf(keyBuf, sizeof(keyBuf), "t_delay%d", i);
-    timers.channelDelays[i] = sessionPrefs.getULong(keyBuf, 0);
+    timers.channelDelays[i] = sessionConfig.getULong(keyBuf, 0);
   }
 
   // 3. Load SessionStats
-  stats.streaks = sessionPrefs.getULong("s_streaks", 0);
-  stats.completed = sessionPrefs.getULong("s_compl", 0);
-  stats.aborted = sessionPrefs.getULong("s_abort", 0);
-  stats.paybackAccumulated = sessionPrefs.getULong("s_payback", 0);
-  stats.totalLockedTime = sessionPrefs.getULong("s_total", 0);
+  stats.streaks = sessionConfig.getULong("s_streaks", 0);
+  stats.completed = sessionConfig.getULong("s_compl", 0);
+  stats.aborted = sessionConfig.getULong("s_abort", 0);
+  stats.paybackAccumulated = sessionConfig.getULong("s_payback", 0);
+  stats.totalLockedTime = sessionConfig.getULong("s_total", 0);
 
   // 4. Load SessionConfig
-  config.durationType = (DurationType)sessionPrefs.getUChar("c_durType", (uint8_t)DUR_FIXED);
-  config.durationFixed = sessionPrefs.getULong("c_durFix", 0);
-  config.durationMin = sessionPrefs.getULong("c_durMin", 0);
-  config.durationMax = sessionPrefs.getULong("c_durMax", 0);
-  config.triggerStrategy = (TriggerStrategy)sessionPrefs.getUChar("c_trigStrat", (uint8_t)STRAT_AUTO_COUNTDOWN);
-  config.hideTimer = sessionPrefs.getBool("c_hideTmr", false);
-  config.disableLED = sessionPrefs.getBool("c_disLED", false);
+  config.durationType = (DurationType)sessionConfig.getUChar("c_durType", (uint8_t)DUR_FIXED);
+  config.durationFixed = sessionConfig.getULong("c_durFix", 0);
+  config.durationMin = sessionConfig.getULong("c_durMin", 0);
+  config.durationMax = sessionConfig.getULong("c_durMax", 0);
+  config.triggerStrategy = (TriggerStrategy)sessionConfig.getUChar("c_trigStrat", (uint8_t)STRAT_AUTO_COUNTDOWN);
+  config.hideTimer = sessionConfig.getBool("c_hideTmr", false);
+  config.disableLED = sessionConfig.getBool("c_disLED", false);
 
   for (int i = 0; i < MAX_CHANNELS; i++) {
     snprintf(keyBuf, sizeof(keyBuf), "c_delay%d", i);
-    config.channelDelays[i] = sessionPrefs.getULong(keyBuf, 0);
+    config.channelDelays[i] = sessionConfig.getULong(keyBuf, 0);
   }
 
-  sessionPrefs.end();
+  sessionConfig.end();
   return true;
 }
 
