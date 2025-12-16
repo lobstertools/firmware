@@ -509,12 +509,15 @@ uint32_t SessionEngine::calculateFailsafeDuration(uint32_t baseSeconds) const {
       12 * ONE_HOUR, 
       24 * ONE_HOUR, 
       48 * ONE_HOUR, 
-      168 * ONE_HOUR  // Max safe tier (1 week)
+      168 * ONE_HOUR, // 1 week
+      336 * ONE_HOUR  // Max safe tier (2 weeks)
   };
   const int NUM_TIERS = sizeof(SAFETY_TIERS) / sizeof(SAFETY_TIERS[0]);
 
   // Select Tier (Smallest tier >= requested seconds)
+  // Default to the largest tier if input exceeds all tiers
   uint32_t armedSeconds = SAFETY_TIERS[NUM_TIERS - 1];
+  
   for (int i = 0; i < NUM_TIERS; i++) {
     if (SAFETY_TIERS[i] >= baseSeconds) {
       armedSeconds = SAFETY_TIERS[i];

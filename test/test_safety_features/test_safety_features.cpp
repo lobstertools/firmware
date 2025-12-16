@@ -291,6 +291,25 @@ void test_failsafe_tier_exact_match(void) {
     TEST_ASSERT_EQUAL_UINT32(43200, hal.lastFailsafeArmedSeconds);
 }
 
+// Verifies the 2-week logic
+void test_failsafe_tier_extends_to_two_weeks(void) {
+    MockSessionHAL hal; StandardRules rules;
+    SessionEngine engine(hal, rules, defaults, permissivePresets, deterrents);
+    engageSafetyInterlock(hal, engine);
+
+    // 1. Start a session of 8 days (192 hours = 691200s)
+    // Previous Max was 1 week (168h). New logic should catch this and round up to 2 weeks.
+    // 2 Weeks = 336 hours = 1209600s
+    SessionConfig cfg = { DUR_FIXED, 691200, 0, 0, STRAT_AUTO_COUNTDOWN };
+    
+    engine.startSession(cfg);
+    engine.tick(); 
+
+    // Verify
+    TEST_ASSERT_TRUE(hal.failsafeArmed);
+    TEST_ASSERT_EQUAL_UINT32(1209600, hal.lastFailsafeArmedSeconds);
+}
+
 void test_failsafe_disarms_on_completion(void) {
     MockSessionHAL hal; StandardRules rules;
     SessionEngine engine(hal, rules, defaults, permissivePresets, deterrents);
@@ -522,6 +541,7 @@ int main(void) {
     RUN_TEST(test_failsafe_tier_minimum_floor);
     RUN_TEST(test_failsafe_tier_rounding_up);
     RUN_TEST(test_failsafe_tier_exact_match);
+    RUN_TEST(test_failsafe_tier_extends_to_two_weeks);
     RUN_TEST(test_failsafe_disarms_on_completion);
 
     // 4. Hardware & Network
