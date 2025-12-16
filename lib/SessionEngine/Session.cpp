@@ -424,6 +424,13 @@ void SessionEngine::checkNetworkHealth() {
         
         // 2. If we are in a critical session, we MUST abort first
         if (isCriticalState(_state)) {
+
+            // If we are already serving a penalty (ABORTED), we simply wait.
+            // We do NOT call abort() again (avoiding recursion/log spam).
+            if (_state == ABORTED) {
+                 return; 
+            }
+
             logKeyValue("Session", "Critical: Network Failure! Aborting Session.");
             abort("Network Failure");
             
