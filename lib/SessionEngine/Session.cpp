@@ -241,6 +241,9 @@ void SessionEngine::printStartupDiagnostics() {
     _hal.log(""); 
     _hal.log("[ DETERRENTS & RULES ]");
 
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Streaks", boolStr[_deterrents.enableStreaks]);
+    _hal.log(logBuf);
+
     snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Reward Codes", boolStr[_deterrents.enableRewardCode]);
     _hal.log(logBuf);
 
@@ -258,7 +261,7 @@ void SessionEngine::printStartupDiagnostics() {
         }
     }
 
-    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Payback (Debt)", boolStr[_deterrents.enablePaybackTime]);
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Payback Debt", boolStr[_deterrents.enablePaybackTime]);
     _hal.log(logBuf);
 
     if (_deterrents.enablePaybackTime) {
