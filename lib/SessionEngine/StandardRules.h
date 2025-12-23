@@ -66,6 +66,7 @@ public:
             stats.aborted++;
         }
 
+        // 4A. Payback Time (Debt)
         if (deterrents.enablePaybackTime) {
             uint32_t paybackToAdd = 0;
             if (deterrents.paybackTimeStrategy == DETERRENT_FIXED) {
@@ -76,9 +77,17 @@ public:
                 if (minP > maxP) { uint32_t t = minP; minP = maxP; maxP = t; }
                 paybackToAdd = hal.getRandom(minP, maxP);
             }
+    
+            // Round up to nearest minute
+            paybackToAdd = ((paybackToAdd + 59) / 60) * 60;
+            
+            // Respect Max
+            if (paybackToAdd > presets.maxSessionDuration) paybackToAdd = presets.maxSessionDuration;
+
             stats.paybackAccumulated += paybackToAdd;
         }
 
+        // 4B. Reward Code Penalty (Penalty Box)
         if (deterrents.enableRewardCode) {
             result.enterPenaltyBox = true;
             if (deterrents.rewardPenaltyStrategy == DETERRENT_FIXED) {
@@ -88,6 +97,14 @@ public:
                 uint32_t maxP = deterrents.rewardPenaltyMax;
                 if (minP > maxP) { uint32_t t = minP; minP = maxP; maxP = t; }
                 result.penaltyDuration = hal.getRandom(minP, maxP);
+            }
+
+            // Round up to nearest minute
+            result.penaltyDuration = ((result.penaltyDuration + 59) / 60) * 60;
+
+            // Respect Max
+            if (result.penaltyDuration > presets.maxSessionDuration) {
+                result.penaltyDuration = presets.maxSessionDuration;
             }
         }
         return result;

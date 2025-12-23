@@ -330,7 +330,7 @@ void test_penalty_box_auto_completion(void) {
     TEST_ASSERT_EQUAL(ABORTED, engine.getState());
     TEST_ASSERT_EQUAL(OUTCOME_ABORTED, engine.getOutcome()); 
 
-    for(int i=0; i<10; i++) engine.tick(); 
+    for(int i=0; i<65; i++) engine.tick(); 
     
     // Verify Outcome AFTER Penalty is Served
     TEST_ASSERT_EQUAL(COMPLETED, engine.getState());

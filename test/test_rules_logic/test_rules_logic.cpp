@@ -23,12 +23,12 @@ const DeterrentConfig configFixed = {
     true,               // enableStreaks
     
     true,               // enableRewardCode
-    DETERRENT_FIXED,    // rewardPenaltyStrategy (Renamed)
+    DETERRENT_FIXED,    // rewardPenaltyStrategy
     300, 900,           // rewardPenaltyMin, rewardPenaltyMax
     500,                // rewardPenalty (Fixed Value)
     
     true,               // enablePaybackTime
-    DETERRENT_FIXED,    // paybackTimeStrategy (Renamed)
+    DETERRENT_FIXED,    // paybackTimeStrategy
     60, 120,            // paybackTimeMin, paybackTimeMax
     60                  // paybackTime
 };
@@ -45,6 +45,8 @@ void test_start_request_applies_debt(void) {
     stats.paybackAccumulated = 100;
 
     // Request 600s + 100s Debt = 700s
+    // Note: processStartRequest does not force rounding on the sum sum itself;
+    // it relies on inputs being valid or downstream handling.
     uint32_t duration = rules.processStartRequest(600, presets, configFixed, stats);
     
     TEST_ASSERT_EQUAL_UINT32(700, duration);
@@ -72,20 +74,23 @@ void test_start_request_rejects_below_minimum(void) {
     TEST_ASSERT_EQUAL_UINT32(0, duration); // Should be rejected
 }
 
-void test_abort_strategy_fixed(void) {
+void test_abort_strategy_fixed_rounds_up(void) {
     MockSessionHAL hal; // Spy
     StandardRules rules;
     SessionStats stats = {0};
 
     // Act
+    // Config has 500s fixed penalty.
+    // 500 / 60 = 8.33 minutes.
+    // Logic should round UP to 9 minutes (540s).
     AbortConsequences result = rules.onAbort(stats, configFixed, presets, hal);
 
     // Assert
     TEST_ASSERT_TRUE(result.enterPenaltyBox);
-    TEST_ASSERT_EQUAL_UINT32(500, result.penaltyDuration); // Should match configFixed.rewardPenalty
+    TEST_ASSERT_EQUAL_UINT32(540, result.penaltyDuration); 
 }
 
-void test_abort_strategy_random(void) {
+void test_abort_strategy_random_rounds_up(void) {
     MockSessionHAL hal;
     StandardRules rules;
     SessionStats stats = {0};
@@ -94,35 +99,55 @@ void test_abort_strategy_random(void) {
     DeterrentConfig configRandom = configFixed;
     configRandom.rewardPenaltyStrategy = DETERRENT_RANDOM;
 
-    // Penalty Range in config: 300 - 900
-    // MockSessionHAL.getRandom returns (min+max)/2 => (300+900)/2 = 600
+    // Set range to 300-400. 
+    // MockHAL returns average: (300+400)/2 = 350.
+    // 350 / 60 = 5.833 -> Rounds up to 6 mins (360s).
+    configRandom.rewardPenaltyMin = 300;
+    configRandom.rewardPenaltyMax = 400;
     
     // Act
     AbortConsequences result = rules.onAbort(stats, configRandom, presets, hal);
 
     // Assert
     TEST_ASSERT_TRUE(result.enterPenaltyBox);
-    TEST_ASSERT_EQUAL_UINT32(600, result.penaltyDuration); // Verified against Mock behavior
+    TEST_ASSERT_EQUAL_UINT32(360, result.penaltyDuration); 
 }
 
-void test_abort_applies_random_payback(void) {
+void test_abort_applies_random_payback_rounds_up(void) {
     MockSessionHAL hal;
     StandardRules rules;
     SessionStats stats = {0};
 
     // Setup: Enable Random Payback Strategy
-    DeterrentConfig configRandomPayback = configFixed; // Copy base
+    DeterrentConfig configRandomPayback = configFixed; 
     configRandomPayback.enablePaybackTime = true;
     configRandomPayback.paybackTimeStrategy = DETERRENT_RANDOM;
 
     // Payback Range in config: 60 (min), 120 (max)
     // MockHAL calculates random as (min+max)/2 => (60+120)/2 = 90.
+    // 90s -> Rounds up to 120s (2 mins).
     
     // Act: Abort
     rules.onAbort(stats, configRandomPayback, presets, hal);
 
-    // Assert: 90 seconds added to debt
-    TEST_ASSERT_EQUAL_UINT32(90, stats.paybackAccumulated);
+    // Assert: 120 seconds added to debt (Rounded up from 90)
+    TEST_ASSERT_EQUAL_UINT32(120, stats.paybackAccumulated);
+}
+
+void test_abort_clamps_penalty_to_max(void) {
+    MockSessionHAL hal;
+    StandardRules rules;
+    SessionStats stats = {0};
+
+    // Setup: Huge penalty config
+    DeterrentConfig configHuge = configFixed;
+    configHuge.rewardPenalty = 20000; // > 14400 Max
+
+    // Act
+    AbortConsequences result = rules.onAbort(stats, configHuge, presets, hal);
+
+    // Assert
+    TEST_ASSERT_EQUAL_UINT32(14400, result.penaltyDuration);
 }
 
 void test_completion_clamps_debt_at_zero(void) {
@@ -131,7 +156,6 @@ void test_completion_clamps_debt_at_zero(void) {
     stats.paybackAccumulated = 100; // Small debt
 
     // Setup: Simulate a session where 200s was attributed to debt payment
-    // User served MORE debt than they owed (e.g. via clamping or rounding)
     SessionTimers timers = {0};
     timers.potentialDebtServed = 200; 
 
@@ -161,7 +185,6 @@ void test_completion_reduces_debt_fairly(void) {
     rules.onCompletion(stats, timers, deterrents);
 
     // Assert: Debt is 36000 - 10800 = 25200 (7h)
-    // (Previously this would have wiped to 0)
     TEST_ASSERT_EQUAL_UINT32(25200, stats.paybackAccumulated);
 }
 
@@ -172,9 +195,10 @@ int main(void) {
     RUN_TEST(test_start_request_clamps_to_profile_max);
     RUN_TEST(test_start_request_rejects_below_minimum);
     
-    RUN_TEST(test_abort_strategy_fixed);
-    RUN_TEST(test_abort_strategy_random);
-    RUN_TEST(test_abort_applies_random_payback);
+    RUN_TEST(test_abort_strategy_fixed_rounds_up);
+    RUN_TEST(test_abort_strategy_random_rounds_up);
+    RUN_TEST(test_abort_applies_random_payback_rounds_up);
+    RUN_TEST(test_abort_clamps_penalty_to_max);
     
     RUN_TEST(test_completion_clamps_debt_at_zero);
     RUN_TEST(test_completion_reduces_debt_fairly);
