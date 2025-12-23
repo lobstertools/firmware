@@ -56,8 +56,7 @@ SessionEngine::SessionEngine(ISessionHAL& hal,
 void SessionEngine::formatSecondsInternal(unsigned long totalSeconds, char *buffer, size_t size) {
     unsigned long hours = totalSeconds / 3600;
     unsigned long minutes = (totalSeconds % 3600) / 60;
-    unsigned long seconds = totalSeconds % 60;
-    snprintf(buffer, size, "%lu h, %lu min, %lu s", hours, minutes, seconds);
+    snprintf(buffer, size, "%lu h, %lu min", hours, minutes);
 }
 
 void SessionEngine::logKeyValue(const char *key, const char *value) {
