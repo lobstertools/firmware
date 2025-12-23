@@ -154,18 +154,18 @@ void test_mod_add_clamps_to_global_max(void) {
     engageSafetyInterlock(hal, *engine);
     
     // Max is 14400 (4h). 
-    // Start at 14200. Step is 300.
-    // 14200 + 300 = 14500 > 14400.
+    // Start at 14200. Rounds up to 14220 (237 mins).
     SessionConfig cfg = { DUR_FIXED, 14200 };
     engine->startSession(cfg);
     engine->tick();
 
+    // 14220 + 300 = 14520 > 14400.
     // Logic Choice: Does it clamp or reject? 
     // Implementation: Rejects (returns 400) to be safe/clear.
     int res = engine->modifyTime(true); 
     
     TEST_ASSERT_EQUAL(400, res);
-    TEST_ASSERT_EQUAL_UINT32(14200, engine->getTimers().lockRemaining);
+    TEST_ASSERT_EQUAL_UINT32(14220, engine->getTimers().lockRemaining);
 
     delete engine;
 }
@@ -221,7 +221,7 @@ void test_mod_remove_rejected_if_below_step_floor(void) {
     engageSafetyInterlock(hal, *engine);
     
     // Config Step is 300s.
-    // Start Session: 100s.
+    // Start Session: 100s. Rounds up to 120s (2 mins).
     SessionConfig cfg = { DUR_FIXED, 100 };
     engine->startSession(cfg);
     engine->tick();
@@ -230,7 +230,7 @@ void test_mod_remove_rejected_if_below_step_floor(void) {
     int res = engine->modifyTime(false);
     
     TEST_ASSERT_EQUAL(409, res); 
-    TEST_ASSERT_EQUAL_UINT32(100, engine->getTimers().lockRemaining);
+    TEST_ASSERT_EQUAL_UINT32(120, engine->getTimers().lockRemaining);
 
     delete engine;
 }

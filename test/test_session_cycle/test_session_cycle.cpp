@@ -74,7 +74,7 @@ void test_full_cycle_auto_countdown(void) {
     
     // Verify Outcome Logic
     TEST_ASSERT_EQUAL(COMPLETED, engine.getState());
-    TEST_ASSERT_EQUAL(OUTCOME_SUCCESS, engine.getOutcome()); //
+    TEST_ASSERT_EQUAL(OUTCOME_SUCCESS, engine.getOutcome()); 
 }
 
 void test_full_cycle_button_trigger(void) {
@@ -120,6 +120,31 @@ void test_armed_state_timeout(void) {
 // DURATION RESOLUTION TESTS
 // ============================================================================
 
+void test_resolve_duration_rounds_up_to_minute(void) {
+    MockSessionHAL hal;
+    StandardRules rules;
+    SessionEngine engine(hal, rules, defaults, presets, deterrents);
+    engageSafetyInterlock(hal, engine);
+
+    SessionConfig cfg = {};
+    cfg.durationType = DUR_FIXED;
+    cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
+
+    // Case 1: 61 seconds -> Should round up to 120
+    cfg.durationFixed = 61;
+    engine.startSession(cfg);
+    TEST_ASSERT_EQUAL_UINT32(120, engine.getTimers().lockDuration);
+
+    // Reset for next case
+    engine.abort("Test Reset"); 
+    engine.tick();
+
+    // Case 2: 59 seconds -> Should round up to 60
+    cfg.durationFixed = 59;
+    engine.startSession(cfg);
+    TEST_ASSERT_EQUAL_UINT32(60, engine.getTimers().lockDuration);
+}
+
 void test_resolve_duration_short_range(void) {
     MockSessionHAL hal;
     StandardRules rules;
@@ -127,11 +152,13 @@ void test_resolve_duration_short_range(void) {
     engageSafetyInterlock(hal, engine);
 
     SessionConfig cfg = {};
-    cfg.durationType = DUR_RANGE_SHORT; 
+    cfg.durationType = DUR_RANGE_SHORT; // 300 - 600
     cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
 
     engine.startSession(cfg);
-    TEST_ASSERT_EQUAL_UINT32(450, engine.getTimers().lockDuration);
+    // Mock HAL usually picks avg (450). 
+    // 450 rounds up to nearest minute -> 480.
+    TEST_ASSERT_EQUAL_UINT32(480, engine.getTimers().lockDuration);
 }
 
 void test_resolve_duration_medium_range(void) {
@@ -141,11 +168,13 @@ void test_resolve_duration_medium_range(void) {
     engageSafetyInterlock(hal, engine);
 
     SessionConfig cfg = {};
-    cfg.durationType = DUR_RANGE_MEDIUM; 
+    cfg.durationType = DUR_RANGE_MEDIUM; // 900 - 1800
     cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
 
     engine.startSession(cfg);
-    TEST_ASSERT_EQUAL_UINT32(1350, engine.getTimers().lockDuration);
+    // Mock HAL avg: 1350. 
+    // 1350 / 60 = 22.5. Rounds up to 23 mins -> 1380.
+    TEST_ASSERT_EQUAL_UINT32(1380, engine.getTimers().lockDuration);
 }
 
 void test_resolve_duration_long_range(void) {
@@ -155,10 +184,12 @@ void test_resolve_duration_long_range(void) {
     engageSafetyInterlock(hal, engine);
 
     SessionConfig cfg = {};
-    cfg.durationType = DUR_RANGE_LONG; 
+    cfg.durationType = DUR_RANGE_LONG; // 3600 - 7200
     cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
 
     engine.startSession(cfg);
+    // Mock HAL avg: 5400. 
+    // 5400 / 60 = 90.0. Exact minute, stays 5400.
     TEST_ASSERT_EQUAL_UINT32(5400, engine.getTimers().lockDuration);
 }
 
@@ -175,7 +206,9 @@ void test_resolve_duration_random_custom(void) {
     cfg.triggerStrategy = STRAT_AUTO_COUNTDOWN;
 
     engine.startSession(cfg);
-    TEST_ASSERT_EQUAL_UINT32(150, engine.getTimers().lockDuration);
+    // Mock HAL avg: 150.
+    // 150 / 60 = 2.5. Rounds up to 3 mins -> 180.
+    TEST_ASSERT_EQUAL_UINT32(180, engine.getTimers().lockDuration);
 }
 
 // ============================================================================
@@ -295,13 +328,13 @@ void test_penalty_box_auto_completion(void) {
 
     // Verify Immediate Outcome in Penalty State
     TEST_ASSERT_EQUAL(ABORTED, engine.getState());
-    TEST_ASSERT_EQUAL(OUTCOME_ABORTED, engine.getOutcome()); //
+    TEST_ASSERT_EQUAL(OUTCOME_ABORTED, engine.getOutcome()); 
 
     for(int i=0; i<10; i++) engine.tick(); 
     
     // Verify Outcome AFTER Penalty is Served
     TEST_ASSERT_EQUAL(COMPLETED, engine.getState());
-    TEST_ASSERT_EQUAL(OUTCOME_ABORTED, engine.getOutcome()); //
+    TEST_ASSERT_EQUAL(OUTCOME_ABORTED, engine.getOutcome()); 
 }
 
 void test_start_rejected_by_rules_logic(void) {
@@ -312,7 +345,7 @@ void test_start_rejected_by_rules_logic(void) {
 
     SessionConfig cfg = {};
     cfg.durationType = DUR_FIXED;
-    cfg.durationFixed = 5;
+    cfg.durationFixed = 0; 
 
     int res = engine.startSession(cfg);
     TEST_ASSERT_EQUAL(400, res); 
@@ -388,7 +421,7 @@ void test_outcome_immediate_abort(void) {
     engine.abort("Immediate");
 
     TEST_ASSERT_EQUAL(ABORTED, engine.getState());
-    TEST_ASSERT_EQUAL(OUTCOME_ABORTED, engine.getOutcome()); //
+    TEST_ASSERT_EQUAL(OUTCOME_ABORTED, engine.getOutcome()); 
 }
 
 // ============================================================================
@@ -403,6 +436,7 @@ int main(void) {
     RUN_TEST(test_armed_state_timeout);
     
     // Duration
+    RUN_TEST(test_resolve_duration_rounds_up_to_minute);
     RUN_TEST(test_resolve_duration_short_range);
     RUN_TEST(test_resolve_duration_medium_range);
     RUN_TEST(test_resolve_duration_long_range);

@@ -20,6 +20,9 @@ const DeterrentConfig deterrents = {
 SessionEngine* createEngine(MockSessionHAL& hal, StandardRules& rules) {
     auto* engine = new SessionEngine(hal, rules, defaults, presets, deterrents);
     hal.setSafetyInterlock(true);
+    // Advance time slightly to ensure stable "boot"
+    hal.advanceTime(11000); 
+    engine->tick();
     return engine;
 }
 
@@ -98,9 +101,11 @@ void test_reward_visible_and_correct_on_completion(void) {
     strcpy(expectedCode, initialHistory[0].code);
 
     // Run Session
-    SessionConfig cfg = { DUR_FIXED, 10 }; // Short duration
+    SessionConfig cfg = { DUR_FIXED, 10 }; 
     engine->startSession(cfg);
-    for(int i=0; i<15; i++) engine->tick(); // Complete it
+    
+    // Complete it
+    for(int i=0; i<65; i++) engine->tick(); 
 
     TEST_ASSERT_EQUAL(COMPLETED, engine->getState());
 
@@ -118,10 +123,6 @@ void test_reward_preserved_after_penalty_and_reboot(void) {
     MockSessionHAL hal; 
     StandardRules rules;
     SessionEngine* engine = createEngine(hal, rules);
-
-    // Engage Safety Interlock (Required to arm/start)
-    hal.setSafetyInterlock(true);
-    engine->tick(); // Process safety state
 
     // 1. Capture Code A
     // At startup, the engine generates the first code at [0].

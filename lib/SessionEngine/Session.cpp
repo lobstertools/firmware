@@ -705,13 +705,18 @@ void SessionEngine::tick() {
 
 /**
  * Resolves the "Intent" (Random/Fixed) into a concrete base duration.
- * This remains here because it involves RNG (Mechanism).
  */
 uint32_t SessionEngine::resolveBaseDuration(const SessionConfig &config) {
   uint32_t baseDuration = 0;
 
   if (config.durationType == DUR_FIXED) {
     baseDuration = config.durationFixed;
+
+    // Round up to nearest minute
+    baseDuration = ((baseDuration + 59) / 60) * 60;
+    // Respect session max
+    if (baseDuration > _presets.maxSessionDuration) baseDuration = _presets.maxSessionDuration;
+
   } else {
     uint32_t minVal = config.durationMin;
     uint32_t maxVal = config.durationMax;
@@ -740,6 +745,11 @@ uint32_t SessionEngine::resolveBaseDuration(const SessionConfig &config) {
     if (maxVal == 0) maxVal = minVal + 60;
 
     baseDuration = _hal.getRandom(minVal, maxVal);
+
+    // Round up to nearest minute
+    baseDuration = ((baseDuration + 59) / 60) * 60;
+    // Respect session max
+    if (baseDuration > _presets.maxSessionDuration) baseDuration = _presets.maxSessionDuration;
     
     // Logging intent
     const char* typeLabel = "Range";
