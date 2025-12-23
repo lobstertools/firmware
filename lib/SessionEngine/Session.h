@@ -134,7 +134,5 @@ private:
     void rotateAndGenerateReward();
     uint8_t calculateSafetyMask();
 
-    // --- Formatting Utils ---
-    void formatSecondsInternal(unsigned long totalSeconds, char *buffer, size_t size);
     void logKeyValue(const char *key, const char *value);
 };

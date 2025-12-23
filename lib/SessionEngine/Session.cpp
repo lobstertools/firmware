@@ -17,6 +17,7 @@
 
 #include "Session.h"
 #include "LogicUtils.h"
+#include "TimeUtils.h"
 
 // =================================================================================
 // SECTION: CONSTRUCTOR & INIT
@@ -52,12 +53,6 @@ SessionEngine::SessionEngine(ISessionHAL& hal,
 // =================================================================================
 // SECTION: INTERNAL HELPERS (Logging & Utils)
 // =================================================================================
-
-void SessionEngine::formatSecondsInternal(unsigned long totalSeconds, char *buffer, size_t size) {
-    unsigned long hours = totalSeconds / 3600;
-    unsigned long minutes = (totalSeconds % 3600) / 60;
-    snprintf(buffer, size, "%lu h, %lu min", hours, minutes);
-}
 
 void SessionEngine::logKeyValue(const char *key, const char *value) {
     char tempBuf[128];
@@ -221,17 +216,36 @@ void SessionEngine::printStartupDiagnostics() {
     _hal.log(""); 
     _hal.log("[ CONFIGURATION LIMITS ]");
 
-    snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Absolute Min Lock", _presets.minSessionDuration);
+    char t1[64], t2[64];
+
+    // Absolute Limits
+    TimeUtils::formatSeconds(_presets.minSessionDuration, t1, sizeof(t1));
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %s (%u s)", "Absolute Min Lock", t1, _presets.minSessionDuration);
     _hal.log(logBuf);
-    snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Absolute Max Lock", _presets.maxSessionDuration);
+
+    TimeUtils::formatSeconds(_presets.maxSessionDuration, t1, sizeof(t1));
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %s (%u s)", "Absolute Max Lock", t1, _presets.maxSessionDuration);
     _hal.log(logBuf);
 
     // Ranges
-    snprintf(logBuf, sizeof(logBuf), " %-25s : %u - %u s", "Short Range", _presets.shortMin, _presets.shortMax);
+    // Format: "X h, Y min - A h, B min (Start - End s)"
+    
+    // Short
+    TimeUtils::formatSeconds(_presets.shortMin, t1, sizeof(t1));
+    TimeUtils::formatSeconds(_presets.shortMax, t2, sizeof(t2));
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %s - %s (%u - %u s)", "Short Range", t1, t2, _presets.shortMin, _presets.shortMax);
     _hal.log(logBuf);
-    snprintf(logBuf, sizeof(logBuf), " %-25s : %u - %u s", "Medium Range", _presets.mediumMin, _presets.mediumMax);
+
+    // Medium
+    TimeUtils::formatSeconds(_presets.mediumMin, t1, sizeof(t1));
+    TimeUtils::formatSeconds(_presets.mediumMax, t2, sizeof(t2));
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %s - %s (%u - %u s)", "Medium Range", t1, t2, _presets.mediumMin, _presets.mediumMax);
     _hal.log(logBuf);
-    snprintf(logBuf, sizeof(logBuf), " %-25s : %u - %u s", "Long Range", _presets.longMin, _presets.longMax);
+
+    // Long
+    TimeUtils::formatSeconds(_presets.longMin, t1, sizeof(t1));
+    TimeUtils::formatSeconds(_presets.longMax, t2, sizeof(t2));
+    snprintf(logBuf, sizeof(logBuf), " %-25s : %s - %s (%u - %u s)", "Long Range", t1, t2, _presets.longMin, _presets.longMax);
     _hal.log(logBuf);
 
     // -------------------------------------------------------------------------
@@ -252,10 +266,13 @@ void SessionEngine::printStartupDiagnostics() {
         _hal.log(logBuf);
 
         if (_deterrents.rewardPenaltyStrategy == DETERRENT_FIXED) {
-            snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Base Penalty", _deterrents.rewardPenalty);
+            TimeUtils::formatSeconds(_deterrents.rewardPenalty, t1, sizeof(t1));
+            snprintf(logBuf, sizeof(logBuf), " %-25s : %s (%u s)", "Base Penalty", t1, _deterrents.rewardPenalty);
             _hal.log(logBuf);
         } else {
-            snprintf(logBuf, sizeof(logBuf), " %-25s : %u - %u s", "Penalty Range", _deterrents.rewardPenaltyMin, _deterrents.rewardPenaltyMax);
+            TimeUtils::formatSeconds(_deterrents.rewardPenaltyMin, t1, sizeof(t1));
+            TimeUtils::formatSeconds(_deterrents.rewardPenaltyMax, t2, sizeof(t2));
+            snprintf(logBuf, sizeof(logBuf), " %-25s : %s - %s (%u - %u s)", "Penalty Range", t1, t2, _deterrents.rewardPenaltyMin, _deterrents.rewardPenaltyMax);
             _hal.log(logBuf);
         }
     }
@@ -269,20 +286,25 @@ void SessionEngine::printStartupDiagnostics() {
         _hal.log(logBuf);
 
         if (_deterrents.paybackTimeStrategy == DETERRENT_FIXED) {
-            snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Base Payback", _deterrents.paybackTime);
+            TimeUtils::formatSeconds(_deterrents.paybackTime, t1, sizeof(t1));
+            snprintf(logBuf, sizeof(logBuf), " %-25s : %s (%u s)", "Base Payback", t1, _deterrents.paybackTime);
             _hal.log(logBuf);
         } else {
-            snprintf(logBuf, sizeof(logBuf), " %-25s : %u - %u s", "Payback Range", _deterrents.paybackTimeMin, _deterrents.paybackTimeMax);
+            TimeUtils::formatSeconds(_deterrents.paybackTimeMin, t1, sizeof(t1));
+            TimeUtils::formatSeconds(_deterrents.paybackTimeMax, t2, sizeof(t2));
+            snprintf(logBuf, sizeof(logBuf), " %-25s : %s - %s (%u - %u s)", "Payback Range", t1, t2, _deterrents.paybackTimeMin, _deterrents.paybackTimeMax);
             _hal.log(logBuf);
         }
     }
 
     snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Time Mod", boolStr[_deterrents.enableTimeModification]);
     _hal.log(logBuf);
+    
     if (_deterrents.enableTimeModification) {
-        snprintf(logBuf, sizeof(logBuf), " %-25s : %u s", "Time Mod Step", _deterrents.timeModificationStep);
+        TimeUtils::formatSeconds(_deterrents.timeModificationStep, t1, sizeof(t1));
+        snprintf(logBuf, sizeof(logBuf), " %-25s : %s (%u s)", "Time Mod Step", t1, _deterrents.timeModificationStep);
         _hal.log(logBuf);
-    }    
+    }
 
     // -------------------------------------------------------------------------
     // SECTION: STATISTICS
@@ -301,12 +323,12 @@ void SessionEngine::printStartupDiagnostics() {
     }
     
     char timeStr[64];
-    formatSecondsInternal(_stats.totalLockedTime, timeStr, sizeof(timeStr));
+    TimeUtils::formatSeconds(_stats.totalLockedTime, timeStr, sizeof(timeStr));
     snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Total Time Locked", timeStr);
     _hal.log(logBuf);
 
     if (_deterrents.enablePaybackTime) {
-        formatSecondsInternal(_stats.paybackAccumulated, timeStr, sizeof(timeStr));
+        TimeUtils::formatSeconds(_stats.paybackAccumulated, timeStr, sizeof(timeStr));
         snprintf(logBuf, sizeof(logBuf), " %-25s : %s", "Accumulated Debt", timeStr);
         _hal.log(logBuf);
     }
@@ -847,7 +869,7 @@ int SessionEngine::startSession(const SessionConfig &config) {
 
   char logBuf[256];
   char timeStr[64];
-  formatSecondsInternal(finalLockDuration, timeStr, sizeof(timeStr));
+  TimeUtils::formatSeconds(finalLockDuration, timeStr, sizeof(timeStr));
   snprintf(logBuf, sizeof(logBuf), "Total Lock Time: %s (Base: %u + Rules)", timeStr, baseDuration);
   logKeyValue("Session", logBuf);
 
@@ -938,7 +960,7 @@ void SessionEngine::abort(const char *source) {
     // Log Consequences
     if (_deterrents.enablePaybackTime) {
          char timeStr[64];
-         formatSecondsInternal(_stats.paybackAccumulated, timeStr, sizeof(timeStr));
+         TimeUtils::formatSeconds(_stats.paybackAccumulated, timeStr, sizeof(timeStr));
          snprintf(logBuf, sizeof(logBuf), "Payback Added. Total Debt: %s", timeStr);
          logKeyValue("Rules", logBuf);
     }
